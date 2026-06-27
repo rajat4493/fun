@@ -47,7 +47,8 @@ function detectCountry(): { name: string; code: string } {
     const locale = Intl.DateTimeFormat().resolvedOptions().timeZone;
     if (locale.includes("Warsaw") || locale.includes("Europe/Warsaw")) return { name: "Poland", code: "PL" };
     if (locale.includes("London")) return { name: "United Kingdom", code: "GB" };
-    if (locale.includes("Berlin") || locale.includes("Vienna")) return { name: "Germany", code: "DE" };
+    if (locale.includes("Vienna")) return { name: "Austria", code: "AT" };
+    if (locale.includes("Berlin")) return { name: "Germany", code: "DE" };
     if (locale.includes("Paris") || locale.includes("Brussels")) return { name: "France", code: "FR" };
     if (locale.includes("New_York") || locale.includes("Chicago") || locale.includes("Los_Angeles")) return { name: "United States", code: "US" };
   } catch {

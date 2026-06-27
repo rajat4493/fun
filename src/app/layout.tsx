@@ -12,9 +12,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         {children}
         <div className="border-t border-white/[0.06] bg-[#030303] px-6 py-4 text-center text-xs text-white/28">
-          Streaming availability data provided by JustWatch via{" "}
-          <a href="https://www.themoviedb.org" className="underline underline-offset-2 hover:text-white/50" target="_blank" rel="noreferrer">
-            TMDB
+          Streaming availability data provided by{" "}
+          <a href="https://www.justwatch.com" className="underline underline-offset-2 hover:text-white/50" target="_blank" rel="noreferrer">
+            JustWatch
+          </a>
+          {" · "}Poster images provided by{" "}
+          <a href="https://www.omdbapi.com" className="underline underline-offset-2 hover:text-white/50" target="_blank" rel="noreferrer">
+            OMDB/IMDB
           </a>
           {" · "}F.U.N does not host or stream any content
           {" · "}

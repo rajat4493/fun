@@ -1,11 +1,82 @@
 import { RecommendRequest, Recommendation, WatchProvider } from "@/lib/types";
 
 export const recommendationStorageKey = "fun:last-recommendation";
+export const seenTitlesKey = "fun:seen-titles";
+export const feedbackStorageKey = "fun:recommendation-feedback";
+
+export type FeedbackReason = "perfect" | "wrong-vibe" | "not-on-service" | "already-seen";
+
+export type RecommendationFeedback = {
+  id: string;
+  reason: FeedbackReason;
+  title: string;
+  year: string;
+  format: Recommendation["format"];
+  confidence: number;
+  request: RecommendRequest;
+  whereToWatch: Recommendation["whereToWatch"];
+  batchIndex: number;
+  batchSize: number;
+  createdAt: string;
+};
+
+export function loadSeenTitles(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(seenTitlesKey);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function addSeenTitle(title: string): string[] {
+  const seen = loadSeenTitles();
+  if (!seen.includes(title)) seen.push(title);
+  localStorage.setItem(seenTitlesKey, JSON.stringify(seen));
+  return seen;
+}
+
+export function loadRecommendationFeedback(): RecommendationFeedback[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(feedbackStorageKey);
+    return raw ? (JSON.parse(raw) as RecommendationFeedback[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveRecommendationFeedback(
+  reason: FeedbackReason,
+  session: RecommendationSession,
+): RecommendationFeedback[] {
+  const existing = loadRecommendationFeedback();
+  const recommendation = session.recommendation;
+  const feedback: RecommendationFeedback = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    reason,
+    title: recommendation.title,
+    year: recommendation.year,
+    format: recommendation.format,
+    confidence: recommendation.confidence,
+    request: session.request,
+    whereToWatch: recommendation.whereToWatch,
+    batchIndex: session.batchIndex ?? 0,
+    batchSize: session.batch?.length ?? 1,
+    createdAt: new Date().toISOString(),
+  };
+  const next = [feedback, ...existing].slice(0, 200);
+  localStorage.setItem(feedbackStorageKey, JSON.stringify(next));
+  return next;
+}
 
 export type RecommendationSession = {
   recommendation: Recommendation;
   request: RecommendRequest;
   generatedAt: string;
+  batch?: Recommendation[]; // Full batch of 3 recommendations
+  batchIndex?: number; // Current index in batch (0-2)
 };
 
 export const defaultRecommendation: Recommendation = {
@@ -37,11 +108,14 @@ export const defaultRecommendation: Recommendation = {
 export function createRecommendationSession(
   recommendation: Recommendation,
   request: RecommendRequest,
+  batch?: Recommendation[],
 ): RecommendationSession {
   return {
     recommendation,
     request,
     generatedAt: new Date().toISOString(),
+    batch: batch ?? [recommendation],
+    batchIndex: 0,
   };
 }
 
@@ -85,15 +159,4 @@ export function watchProvidersFor(recommendation: Recommendation): WatchProvider
       note: recommendation.whereToWatch.status === "verified" ? recommendation.whereToWatch.note : "Not verified yet",
     },
   ];
-}
-
-export function artworkPositionFor(title: string, year?: string) {
-  const seed = `${title}-${year || ""}`.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  const slot = seed % 8;
-  const col = slot % 4;
-  const row = Math.floor(slot / 4);
-  const x = col === 0 ? 0 : col === 3 ? 100 : col * 33.333;
-  const y = row === 0 ? 0 : 100;
-
-  return `${x}% ${y}%`;
 }

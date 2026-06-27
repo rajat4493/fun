@@ -8,6 +8,9 @@ export type RecommendRequest = {
   platforms?: string[];
   selfText?: string;
   reference?: string;
+  seenTitles?: string[];
+  platformFilter?: "mine" | "any";
+  contextHint?: string; // time-of-day, day, season — influences pick tone
 };
 
 export type WatchProvider = {
@@ -41,6 +44,7 @@ export type Recommendation = {
     providers?: WatchProvider[];
     country?: string;
     verifiedAt?: string;
+    notOnUserPlatforms?: boolean;
   };
   hiddenLayer: {
     headline: string;
@@ -49,7 +53,12 @@ export type Recommendation = {
     titles?: HiddenLayerTitle[];
   };
   alternatives: string[];
-  posterUrl?: string;
+  omdbPosterUrl?: string; // OMDB/IMDB poster image URL
   alternativePosterUrls?: string[];
-  tmdbAttribution?: string;
+  omdbAttribution?: string;
+};
+
+export type RecommendationBatch = {
+  batch: Recommendation[]; // Array of 3 recommendations
+  country?: string;
 };

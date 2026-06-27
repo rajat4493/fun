@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import OnboardingFlow, { loadOnboarding, OnboardingData } from "@/components/OnboardingFlow";
-import { createRecommendationSession, recommendationStorageKey } from "@/lib/recommendation-session";
+import { createRecommendationSession, loadSeenTitles, recommendationStorageKey } from "@/lib/recommendation-session";
 import { RecommendRequest, Recommendation, WatchProvider } from "@/lib/types";
 
 type IconType = typeof User;
@@ -137,22 +137,8 @@ function MovieImage({
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={posterUrl} alt={title} className={`object-cover ${className}`} style={{ objectPosition }} />;
   }
-  const seed = `${title}-${year || ""}`.split("").reduce((s, c) => s + c.charCodeAt(0), 0);
-  const slot = seed % 8;
-  const col = slot % 4;
-  const row = Math.floor(slot / 4);
-  const x = col === 0 ? 0 : col === 3 ? 100 : col * 33.333;
-  const y = row === 0 ? 0 : 100;
-  return (
-    <div
-      className={`bg-cover bg-no-repeat ${className}`}
-      style={{
-        backgroundImage: "url('/fun/story-stills-sheet.png')",
-        backgroundPosition: `${x}% ${y}%`,
-        backgroundSize: "400% 200%",
-      }}
-    />
-  );
+  void year;
+  return <div className={`bg-gradient-to-br from-[#1a1625] via-[#12141c] to-[#0a0b10] ${className}`} />;
 }
 
 function OptionButton({ option, active, onClick }: { option: PickerOption; active: boolean; onClick: () => void }) {
@@ -296,6 +282,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [hasGenerated, setHasGenerated] = useState(false);
   const [showWhy, setShowWhy] = useState(false);
+  const [platformFilter, setPlatformFilter] = useState<"mine" | "any">("any");
 
   useEffect(() => {
     const saved = loadOnboarding();
@@ -341,37 +328,56 @@ export default function Home() {
     setLoading(true);
     setError(null);
 
+    const now = new Date();
+    const hour = now.getHours();
+    const dayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][now.getDay()];
+    const timeOfDay = hour < 6 ? "late night / early hours" : hour < 12 ? "morning" : hour < 17 ? "afternoon" : hour < 21 ? "evening" : "late night";
+    const month = now.getMonth();
+    const season = month < 3 || month === 11 ? "winter" : month < 6 ? "spring" : month < 9 ? "summer" : "autumn";
+    const isWeekend = now.getDay() === 0 || now.getDay() === 6;
+    const contextHint = `${isWeekend ? "Weekend" : "Weekday"} ${timeOfDay} (${dayName}), ${season}`;
+
+    const requestInput: RecommendRequest = {
+      mode,
+      mood: moods,
+      wants,
+      avoids,
+      time: time[0] && time[0] !== "no preference" ? time[0] : undefined,
+      country: onboarding?.country || "Poland",
+      platforms: onboarding?.platforms || ["Netflix", "Prime Video"],
+      selfText,
+      reference: reference.trim() || undefined,
+      seenTitles: loadSeenTitles(),
+      platformFilter,
+      contextHint,
+    };
+
+    // Navigate immediately — recommendation page shows cinematic loading state
+    localStorage.setItem("fun:loading", "true");
+    localStorage.removeItem("fun:recommendation-error");
+    router.push("/recommendation");
+
     try {
-      const requestInput: RecommendRequest = {
-        mode,
-        mood: moods,
-        wants,
-        avoids,
-        time: time[0] && time[0] !== "no preference" ? time[0] : undefined,
-        country: onboarding?.country || "Poland",
-        platforms: onboarding?.platforms || ["Netflix", "Prime Video"],
-        selfText,
-        reference: reference.trim() || undefined,
-      };
       const response = await fetch("/api/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestInput),
       });
-
       if (!response.ok) throw new Error("Could not generate a pick.");
-      const nextPick = (await response.json()) as Recommendation;
-      setPick(nextPick);
-      setHasGenerated(true);
-      setShowWhy(true);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await response.json() as any;
+      const batch: Recommendation[] = data._batch ?? [data];
       localStorage.setItem(
         recommendationStorageKey,
-        JSON.stringify(createRecommendationSession(nextPick, requestInput)),
+        JSON.stringify(createRecommendationSession(batch[0], requestInput, batch)),
       );
-      router.push("/recommendation");
     } catch (unknownError) {
-      setError(unknownError instanceof Error ? unknownError.message : "Something went wrong.");
+      localStorage.setItem(
+        "fun:recommendation-error",
+        unknownError instanceof Error ? unknownError.message : "Something went wrong.",
+      );
     } finally {
+      localStorage.removeItem("fun:loading");
       setLoading(false);
     }
   }
@@ -402,9 +408,6 @@ export default function Home() {
               Home
               <span className="absolute -bottom-4 left-1/2 h-0.5 w-6 -translate-x-1/2 rounded-full bg-red-500" />
             </span>
-            <span>Discover</span>
-            <span>My List</span>
-            <span>Trending</span>
           </nav>
 
           <div className="flex items-center gap-5">
@@ -522,6 +525,39 @@ export default function Home() {
             </div>
           )}
 
+          <div className="mt-4 px-2">
+            <p className="mb-2 text-xs uppercase tracking-widest text-white/28">Search within</p>
+            <div className="flex w-fit rounded-xl border border-white/[0.1] bg-black/30 p-1">
+              <button
+                type="button"
+                onClick={() => setPlatformFilter("any")}
+                className={`rounded-lg px-5 py-2 text-sm font-medium transition ${
+                  platformFilter === "any"
+                    ? "bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+                    : "text-white/38 hover:text-white/60"
+                }`}
+              >
+                All cinema
+              </button>
+              <button
+                type="button"
+                onClick={() => setPlatformFilter("mine")}
+                className={`rounded-lg px-5 py-2 text-sm font-medium transition ${
+                  platformFilter === "mine"
+                    ? "bg-emerald-500/18 text-emerald-100 shadow-[inset_0_1px_0_rgba(52,211,153,0.1)]"
+                    : "text-white/38 hover:text-white/60"
+                }`}
+              >
+                My subscriptions
+              </button>
+            </div>
+            <p className="mt-1.5 text-xs text-white/28">
+              {platformFilter === "mine"
+                ? `Picks from: ${(onboarding?.platforms ?? []).slice(0, 3).join(" · ")}`
+                : "Includes films outside your current apps"}
+            </p>
+          </div>
+
           <div className="mt-3 grid gap-3 px-2 sm:grid-cols-[1fr_220px]">
             {mode === "choose" && (
               <div className="relative">
@@ -539,7 +575,7 @@ export default function Home() {
               disabled={loading}
               className={`flex h-12 items-center justify-center gap-3 rounded-lg bg-gradient-to-b from-red-500 to-red-900 px-6 font-semibold text-white shadow-[0_12px_30px_rgba(127,29,29,0.45)] transition hover:brightness-110 disabled:cursor-wait disabled:opacity-70 ${mode === "self" ? "col-span-full sm:col-span-1 sm:col-start-2" : ""}`}
             >
-              {loading ? "Finding..." : "Find my one pick"}
+              {loading ? "Finding..." : "Find my pick"}
               <ArrowRight size={20} />
             </button>
           </div>
@@ -571,7 +607,7 @@ export default function Home() {
               }`}
             >
               <MovieImage
-                posterUrl={pick.posterUrl}
+                posterUrl={pick.omdbPosterUrl}
                 title={pick.title}
                 year={pick.year}
                 className="absolute inset-y-0 left-0 h-full w-[48%] opacity-92"
@@ -692,7 +728,7 @@ export default function Home() {
                   const year = yearMatch?.[1] ?? "";
                   return (
                     <AlternativeCard
-                      key={alt}
+                      key={`${alt}-${i}`}
                       title={titlePart}
                       posterUrl={pick.alternativePosterUrls?.[i]}
                       meta={year}

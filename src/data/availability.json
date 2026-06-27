@@ -1,0 +1,156 @@
+[
+  {
+    "title": "Delhi Crime",
+    "year": "2019",
+    "countries": ["PL", "IN", "US", "GB"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "verifiedAt": "2026-06-27"
+  },
+  {
+    "title": "Soni",
+    "year": "2018",
+    "countries": ["PL", "IN", "US", "GB"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "verifiedAt": "2026-06-27"
+  },
+  {
+    "title": "Sacred Games",
+    "year": "2018",
+    "countries": ["PL", "IN", "US", "GB"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "verifiedAt": "2026-06-27"
+  },
+  {
+    "title": "Kohrra",
+    "year": "2023",
+    "countries": ["PL", "IN", "US", "GB"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "verifiedAt": "2026-06-27"
+  },
+  {
+    "title": "Qala",
+    "year": "2022",
+    "countries": ["PL", "IN", "US", "GB"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "verifiedAt": "2026-06-27"
+  },
+  {
+    "title": "Monica, O My Darling",
+    "year": "2022",
+    "countries": ["PL", "IN", "US", "GB"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "verifiedAt": "2026-06-27"
+  },
+  {
+    "title": "Trial by Fire",
+    "year": "2023",
+    "countries": ["PL", "IN", "US", "GB"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "verifiedAt": "2026-06-27"
+  },
+  {
+    "title": "Ginny & Georgia",
+    "year": "2021",
+    "countries": ["PL", "IN", "US", "GB"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "verifiedAt": "2026-06-27"
+  },
+  {
+    "title": "Orange Is the New Black",
+    "year": "2013",
+    "countries": ["PL", "IN", "US", "GB"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "verifiedAt": "2026-06-27"
+  },
+  {
+    "title": "Good Girls",
+    "year": "2018",
+    "countries": ["PL", "IN", "US", "GB"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "verifiedAt": "2026-06-27"
+  },
+  {
+    "title": "Maid",
+    "year": "2021",
+    "countries": ["PL", "IN", "US", "GB"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "verifiedAt": "2026-06-27"
+  }
+]
