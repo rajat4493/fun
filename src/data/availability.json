@@ -152,5 +152,117 @@
     ],
     "source": "Local sample catalogue",
     "verifiedAt": "2026-06-27"
+  },
+  {
+    "title": "Evil Dead Rise",
+    "year": "2023",
+    "countries": ["PL"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "sourceUrl": "https://www.netflix.com/pl-en/title/81644122",
+    "verifiedAt": "2026-06-29"
+  },
+  {
+    "title": "Apostle",
+    "year": "2018",
+    "countries": ["PL"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "sourceUrl": "https://www.netflix.com/pl-en/title/80158148",
+    "verifiedAt": "2026-06-29"
+  },
+  {
+    "title": "Fear Street Part 2: 1978",
+    "year": "2021",
+    "countries": ["PL"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "sourceUrl": "https://www.netflix.com/title/81334749",
+    "verifiedAt": "2026-06-29"
+  },
+  {
+    "title": "Nobody Sleeps in the Woods Tonight",
+    "year": "2020",
+    "countries": ["PL"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "sourceUrl": "https://www.netflix.com/title/81149049",
+    "verifiedAt": "2026-06-29"
+  },
+  {
+    "title": "Demons",
+    "year": "1985",
+    "countries": ["PL"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "sourceUrl": "https://www.netflix.com/pl-en/title/18817570",
+    "verifiedAt": "2026-06-29"
+  },
+  {
+    "title": "The Sadness",
+    "year": "2021",
+    "countries": ["PL"],
+    "providers": [
+      {
+        "name": "CDA Premium",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "sourceUrl": "https://www.justwatch.com/pl/search?q=The%20Sadness",
+    "verifiedAt": "2026-06-29"
+  },
+  {
+    "title": "The End of the F***ing World",
+    "year": "2017",
+    "years": ["2019"],
+    "aliases": [
+      "The End of the F...ing World",
+      "The End of the Fucking World",
+      "End of the F***ing World",
+      "TEOTFW"
+    ],
+    "countries": ["PL"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Local sample catalogue",
+    "sourceUrl": "https://www.netflix.com/pl-en/title/80175722",
+    "verifiedAt": "2026-06-29"
   }
 ]

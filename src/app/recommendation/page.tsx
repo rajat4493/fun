@@ -32,15 +32,15 @@ import {
 import { Recommendation, WatchProvider } from "@/lib/types";
 
 const LOADING_KEY = "fun:loading";
+const LOADING_STARTED_KEY = "fun:loading-started-at";
 const ERROR_KEY = "fun:recommendation-error";
+const LOADING_TIMEOUT_MS = 85000;
 
 const SEARCH_TITLES = [
   "The Godfather", "Moonlight", "Her", "Past Lives", "Drive My Car",
   "Portrait of a Lady on Fire", "Parasite", "Lost in Translation",
   "Aftersun", "Carol", "All About Eve", "Mulholland Drive",
 ];
-
-const UTM = "?utm_source=fun_app&utm_medium=affiliate&utm_campaign=watch_now";
 
 const FEEDBACK_OPTIONS: Array<{ reason: FeedbackReason; label: string }> = [
   { reason: "perfect", label: "Perfect" },
@@ -163,6 +163,17 @@ export default function RecommendationPage() {
     if (isLoading) {
       setFetchLoading(true);
       const interval = setInterval(() => {
+        const startedAt = Number(localStorage.getItem(LOADING_STARTED_KEY) ?? Date.now());
+        if (Date.now() - startedAt > LOADING_TIMEOUT_MS) {
+          clearInterval(interval);
+          localStorage.removeItem(LOADING_KEY);
+          localStorage.removeItem(LOADING_STARTED_KEY);
+          setFetchError("The recommendation took too long. Please try again.");
+          setFetchLoading(false);
+          setReady(true);
+          return;
+        }
+
         if (localStorage.getItem(LOADING_KEY) !== "true") {
           clearInterval(interval);
           const err = localStorage.getItem(ERROR_KEY);
@@ -230,7 +241,7 @@ export default function RecommendationPage() {
       }
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch {
-      // silently fall through
+      setFetchError("Could not find another pick. Please try a new mood.");
     } finally {
       setRerolling(false);
     }
@@ -271,7 +282,7 @@ export default function RecommendationPage() {
 
   const pick: Recommendation = session?.recommendation ?? defaultRecommendation;
   const batch = session?.batch ?? [pick];
-  const mainJustWatchUrl = `${justWatchUrl(pick.title, session?.request?.country)}${UTM.replace("?", "&")}`;
+  const availabilitySearchUrl = justWatchUrl(pick.title, session?.request?.country);
   const primaryVibe = toTitleCase(pick.vibe.split(",")[0] || pick.format);
   const hiddenTitles = pick.hiddenLayer.titles ?? [];
   const notOnUserPlatforms = pick.whereToWatch.notOnUserPlatforms ?? false;
@@ -443,7 +454,7 @@ export default function RecommendationPage() {
 
             <div className="mt-8 flex flex-wrap gap-3">
               <a
-                href={mainJustWatchUrl}
+                href={availabilitySearchUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex h-12 items-center gap-3 rounded-lg bg-gradient-to-b from-red-500 to-red-900 px-6 font-semibold text-white shadow-[0_14px_40px_rgba(127,29,29,0.45)] transition hover:brightness-110"
@@ -494,7 +505,7 @@ export default function RecommendationPage() {
                 })}
               </div>
               <p className="mt-2 text-xs text-white/30">
-                {feedbackReason ? "Saved. This helps tune your taste profile and spot app-wide misses." : "Your feedback stays local for now and can later sync into product analytics."}
+                {feedbackReason ? "Saved. This helps tune your taste profile and spot app-wide misses." : "Your feedback stays local for this MVP."}
               </p>
             </div>
           </div>
@@ -512,7 +523,7 @@ export default function RecommendationPage() {
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black via-black/12 to-transparent" />
               <div className="absolute left-5 top-5 rounded-full border border-white/14 bg-black/42 px-3 py-1.5 text-xs uppercase tracking-[0.18em] text-white/72">
-                {pick.omdbPosterUrl ? "Poster via TMDB" : "Mood artwork"}
+                {pick.omdbPosterUrl ? "Poster" : "Mood artwork"}
               </div>
               <Bookmark size={24} className="absolute right-5 top-5 text-white/70" />
               <div className="absolute inset-x-0 bottom-0 p-6">
@@ -588,27 +599,24 @@ export default function RecommendationPage() {
                   </p>
                 </div>
                 <a
-                  href={mainJustWatchUrl}
+                  href={availabilitySearchUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="mt-4 inline-flex items-center gap-2 rounded-lg border border-white/12 px-3 py-2 text-sm text-white/62 transition hover:border-white/24 hover:text-white"
                 >
-                  Check JustWatch <ExternalLink size={14} />
+                  Check availability <ExternalLink size={14} />
                 </a>
               </div>
             )}
 
             <a
-              href={mainJustWatchUrl}
+              href={availabilitySearchUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="mt-4 inline-flex items-center gap-2 text-xs text-white/36 hover:text-white/60"
             >
-              <ExternalLink size={12} /> All options on JustWatch
+              <ExternalLink size={12} /> More availability options
             </a>
-            {pick.omdbAttribution && (
-              <p className="mt-2 text-xs text-white/24">{pick.omdbAttribution}</p>
-            )}
           </article>
 
           {/* Hidden Layer */}

@@ -327,6 +327,8 @@ export default function Home() {
   async function findPick() {
     setLoading(true);
     setError(null);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 80000);
 
     const now = new Date();
     const hour = now.getHours();
@@ -339,13 +341,13 @@ export default function Home() {
 
     const requestInput: RecommendRequest = {
       mode,
-      mood: moods,
-      wants,
-      avoids,
-      time: time[0] && time[0] !== "no preference" ? time[0] : undefined,
+      mood: mode === "choose" ? moods : undefined,
+      wants: mode === "choose" ? wants : undefined,
+      avoids: mode === "choose" ? avoids : undefined,
+      time: mode === "choose" && time[0] && time[0] !== "no preference" ? time[0] : undefined,
       country: onboarding?.country || "Poland",
       platforms: onboarding?.platforms || ["Netflix", "Prime Video"],
-      selfText,
+      selfText: mode === "self" ? selfText : undefined,
       reference: reference.trim() || undefined,
       seenTitles: loadSeenTitles(),
       platformFilter,
@@ -354,6 +356,7 @@ export default function Home() {
 
     // Navigate immediately — recommendation page shows cinematic loading state
     localStorage.setItem("fun:loading", "true");
+    localStorage.setItem("fun:loading-started-at", String(Date.now()));
     localStorage.removeItem("fun:recommendation-error");
     router.push("/recommendation");
 
@@ -362,6 +365,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestInput),
+        signal: controller.signal,
       });
       if (!response.ok) throw new Error("Could not generate a pick.");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -374,15 +378,30 @@ export default function Home() {
     } catch (unknownError) {
       localStorage.setItem(
         "fun:recommendation-error",
-        unknownError instanceof Error ? unknownError.message : "Something went wrong.",
+        unknownError instanceof Error && unknownError.name === "AbortError"
+          ? "The recommendation took too long. Please try again."
+          : unknownError instanceof Error ? unknownError.message : "Something went wrong.",
       );
     } finally {
+      window.clearTimeout(timeout);
       localStorage.removeItem("fun:loading");
+      localStorage.removeItem("fun:loading-started-at");
       setLoading(false);
     }
   }
 
-  if (!onboardingReady) return null;
+  if (!onboardingReady) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-[#030303] text-white">
+        <div className="text-center">
+          <div className="text-3xl font-medium tracking-[0.34em]">
+            F<span className="text-red-500">.</span>U<span className="text-red-500">.</span>N
+          </div>
+          <p className="mt-4 text-sm text-white/45">Preparing your one pick.</p>
+        </div>
+      </main>
+    );
+  }
   if (!onboarding) return <OnboardingFlow onComplete={(data) => setOnboarding(data)} />;
 
   const hiddenTitles = pick.hiddenLayer.titles ?? [];

@@ -4,9 +4,12 @@ import { WatchProvider } from "@/lib/types";
 type AvailabilityRecord = {
   title: string;
   year: string;
+  years?: string[];
+  aliases?: string[];
   countries: string[];
   providers: WatchProvider[];
   source: string;
+  sourceUrl?: string;
   verifiedAt: string;
 };
 
@@ -45,7 +48,20 @@ function normalizeCountry(country: string): string {
 }
 
 function normalizeTitle(title: string): string {
-  return title.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
+  return title
+    .toLowerCase()
+    .replace(/\bf\*+\w*/g, "fucking")
+    .replace(/\bf\.+\w*/g, "fucking")
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function titleKeys(record: AvailabilityRecord): string[] {
+  return [record.title, ...(record.aliases ?? [])].map(normalizeTitle);
+}
+
+function yearKeys(record: AvailabilityRecord): string[] {
+  return [record.year, ...(record.years ?? [])].filter(Boolean);
 }
 
 export function checkAvailability(title: string, year: string, country: string): AvailabilityResult {
@@ -54,8 +70,8 @@ export function checkAvailability(title: string, year: string, country: string):
   const yearValue = String(year || "").trim();
 
   const match = (availabilityData as AvailabilityRecord[]).find((record) => {
-    const sameTitle = normalizeTitle(record.title) === titleKey;
-    const sameYear = !yearValue || !record.year || record.year === yearValue;
+    const sameTitle = titleKeys(record).includes(titleKey);
+    const sameYear = !yearValue || yearKeys(record).length === 0 || yearKeys(record).includes(yearValue);
     const inCountry = record.countries.map((c) => c.toUpperCase()).includes(countryCode);
     return sameTitle && sameYear && inCountry;
   });

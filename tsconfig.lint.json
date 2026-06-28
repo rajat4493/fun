@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": [],
+    "tsBuildInfoFile": "/tmp/fun-mvp-tsconfig-lint.tsbuildinfo"
+  },
+  "include": [
+    "next-env.d.ts",
+    "tailwind.config.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next"
+  ]
+}

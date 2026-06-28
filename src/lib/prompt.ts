@@ -43,6 +43,11 @@ export function buildRecommendationPrompt(input: RecommendRequest) {
   const hiddenGemClause = /hidden\s+gem|underrated|overlooked|buried|less\s+obvious/i.test(userContext)
     ? "\n- Hidden-gem intent: Prefer a quieter, less obvious high-quality title over the most famous prestige answer. It can still be acclaimed, but it should feel like a discovery."
     : "";
+  const explicitGoreWant = /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(userContext) &&
+    !/\b(no|not|avoid|without|don't want|do not want|less)\s+(gore|gory|blood|bloody|violence|violent)\b/i.test(userContext);
+  const intensityClause = explicitGoreWant
+    ? "\n- Explicit intensity intent: The user is asking FOR gore/gory horror. Recommend intense horror, body horror, splatter, creature horror, or brutal survival horror with visible blood/body threat. Do not soften this into quiet drama, romance, gentle arthouse, or merely sad prestige cinema."
+    : "";
   const tasteFingerprint = buildTasteFingerprint(userContext);
 
   const scopeClause = mineMode
@@ -63,7 +68,7 @@ User context:
 - Country: ${country}
 - Current streaming subscriptions: ${platforms}
 - Time context: ${input.contextHint ?? "not provided"}
-- Mood/request: ${userContext}${seenClause}${hiddenGemClause}${tasteFingerprint}${scopeClause}
+- Mood/request: ${userContext}${seenClause}${hiddenGemClause}${intensityClause}${tasteFingerprint}${scopeClause}
 
 Return an array of exactly THREE JSON objects (not a wrapper object) with this schema, no markdown:
 [
@@ -108,7 +113,7 @@ The 3 recommendations should offer variety: if pick 1 is a film, pick 2 could be
 Constraints:
 - Use the time context to calibrate the pick's energy: late night → introspective, slow, hypnotic; morning → lighter, focused; weekend evening → immersive, cinematic; weekday evening → something that earns its length or is concise. Do not state the time in your output — just let it influence the pick.
 - Prefer high-quality, not too obvious picks. Lean arthouse, international, or prestige — unless mineMode.
-- Strictly obey avoidance preferences (violence, gore, horror, heavy drama).
+- Strictly obey avoidance preferences only when they are in "I do not want" / avoids or phrased as no/avoid/without. If the user simply asks for "gore", "gory", "bloody", "splatter", or "body horror", treat that as a positive request for intense horror.
 - Strictly obey explicit language/culture requests. If the user asks for Hindi, the main pick and nearby alternatives should be Hindi or strongly Hindi-market Indian titles unless the user asks otherwise.
 - If the user wants romantic/sexy, recommend sensual mainstream adult-themed content, never pornographic.
 - If a reference film is provided, extract its tone, pacing, aesthetic, and emotional register — use those as calibration signals. Never recommend the reference film itself or an obvious sequel/prequel to it.

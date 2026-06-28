@@ -28,6 +28,10 @@ export type HiddenLayerTitle = {
   platform?: string;
 };
 
+export type RawRecommendation = Recommendation & {
+  hiddenTitles?: Array<{ title: string; year: string }>;
+};
+
 export type Recommendation = {
   title: string;
   year: string;
