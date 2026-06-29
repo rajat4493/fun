@@ -1,5 +1,23 @@
 import { RecommendRequest } from "@/lib/types";
 
+export const countryCodeMap: Record<string, string> = {
+  poland: "PL", pl: "PL",
+  "united kingdom": "GB", gb: "GB", uk: "GB",
+  germany: "DE", de: "DE",
+  france: "FR", fr: "FR",
+  spain: "ES", es: "ES",
+  italy: "IT", it: "IT",
+  netherlands: "NL", nl: "NL",
+  "united states": "US", usa: "US", us: "US",
+  india: "IN", in: "IN",
+  portugal: "PT", pt: "PT",
+  sweden: "SE", se: "SE",
+  denmark: "DK", dk: "DK",
+  belgium: "BE", be: "BE",
+  austria: "AT", at: "AT",
+  ireland: "IE", ie: "IE",
+};
+
 export function uniqueValues(values: Array<string | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }

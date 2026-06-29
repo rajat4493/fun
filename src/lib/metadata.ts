@@ -1,5 +1,5 @@
 import { checkAvailability } from "@/lib/availability";
-import { isOnUserPlatforms, parseAltTitle } from "@/lib/recommendation-utils";
+import { countryCodeMap, isOnUserPlatforms, parseAltTitle } from "@/lib/recommendation-utils";
 import { HiddenLayerTitle, RawRecommendation, Recommendation } from "@/lib/types";
 
 const TMDB_TIMEOUT_MS = 3500;
@@ -28,24 +28,6 @@ type TmdbProviderSet = {
   ads?: TmdbProvider[];
   rent?: TmdbProvider[];
   buy?: TmdbProvider[];
-};
-
-const countryCodeMap: Record<string, string> = {
-  poland: "PL", pl: "PL",
-  "united kingdom": "GB", gb: "GB", uk: "GB",
-  germany: "DE", de: "DE",
-  france: "FR", fr: "FR",
-  spain: "ES", es: "ES",
-  italy: "IT", it: "IT",
-  netherlands: "NL", nl: "NL",
-  "united states": "US", usa: "US", us: "US",
-  india: "IN", in: "IN",
-  portugal: "PT", pt: "PT",
-  sweden: "SE", se: "SE",
-  denmark: "DK", dk: "DK",
-  belgium: "BE", be: "BE",
-  austria: "AT", at: "AT",
-  ireland: "IE", ie: "IE",
 };
 
 function toCountryCode(country: string): string {
@@ -150,7 +132,9 @@ export async function enrichRecommendation(
   const localAvailability = checkAvailability(raw.title, raw.year, country);
   const altTitles = raw.alternatives.map(parseAltTitle);
   const hiddenRaw = raw.hiddenTitles ?? [];
+  const countryCode = toCountryCode(country);
 
+  // Wave 1 — all TMDB title searches in parallel
   const [mainMovie, ...restMovies] = await Promise.all([
     tmdbSearch(raw.title, raw.year),
     ...altTitles.map((alt) => tmdbSearch(alt.title, alt.year)),
@@ -159,15 +143,18 @@ export async function enrichRecommendation(
 
   const altMovies = restMovies.slice(0, altTitles.length);
   const hiddenMovies = restMovies.slice(altTitles.length);
-  const countryCode = toCountryCode(country);
-  const [providerSet, omdbMain] = await Promise.all([
+
+  // Wave 2 — providers for main + hidden titles + OMDB poster fallback
+  const [providerSet, omdbMain, ...hiddenProviderSets] = await Promise.all([
     mainMovie ? tmdbProviders(mainMovie.id, mainMovie.media_type, countryCode) : Promise.resolve(null),
     !mainMovie?.poster_path ? omdbFetch(raw.title, raw.year) : Promise.resolve(null),
+    ...hiddenMovies.map((m) => (m ? tmdbProviders(m.id, m.media_type, countryCode) : Promise.resolve(null))),
   ]);
 
-  const metadataProviders = providerSet ? mapProviders(providerSet) ?? [] : [];
-  const providers = localAvailability.status === "verified" ? localAvailability.providers : metadataProviders;
-  const notOnUserPlatforms = providers.length > 0 && platforms.length > 0 && !isOnUserPlatforms(providers, platforms);
+  const providers: NonNullable<Recommendation["whereToWatch"]["providers"]> = providerSet ? (mapProviders(providerSet) ?? []) : [];
+  const verifiedProviders = localAvailability.status === "verified" ? localAvailability.providers : providers;
+  const notOnUserPlatforms = verifiedProviders.length > 0 && platforms.length > 0 && !isOnUserPlatforms(verifiedProviders, platforms);
+
   const whereToWatch: Recommendation["whereToWatch"] = localAvailability.status === "verified"
     ? {
         status: "verified",
@@ -179,21 +166,21 @@ export async function enrichRecommendation(
         notOnUserPlatforms,
       }
     : providers.length > 0
-      ? {
-          status: "verified",
-          primary: providers.filter((provider) => provider.access === "subscription")[0]?.name ?? providers[0]?.name ?? "Available",
-          note: providers.some((provider) => provider.access === "subscription")
-            ? `Available on ${providers.filter((provider) => provider.access === "subscription").slice(0, 2).map((provider) => provider.name).join(" · ")}`
-            : "Available to rent or buy",
-          providers,
-          country,
-          verifiedAt: new Date().toISOString(),
-          notOnUserPlatforms,
-        }
+    ? {
+        status: "verified",
+        primary: providers.filter((p) => p.access === "subscription")[0]?.name ?? providers[0]?.name ?? "Available",
+        note: providers.some((p) => p.access === "subscription")
+          ? `Available on ${providers.filter((p) => p.access === "subscription").slice(0, 2).map((p) => p.name).join(" · ")}`
+          : "Available to rent or buy",
+        providers,
+        country,
+        verifiedAt: new Date().toISOString(),
+        notOnUserPlatforms,
+      }
     : {
         status: "unverified",
         primary: "Availability not verified yet",
-        note: "Availability not verified yet for your region.",
+        note: "Check your apps — not yet verified for your region.",
         providers: [],
         country,
         notOnUserPlatforms: false,
@@ -201,23 +188,29 @@ export async function enrichRecommendation(
 
   const tmdbPoster = mainMovie?.poster_path ? `https://image.tmdb.org/t/p/w500${mainMovie.poster_path}` : undefined;
   const omdbPoster = omdbMain?.Response === "True" && omdbMain.Poster && omdbMain.Poster !== "N/A" ? omdbMain.Poster : undefined;
-  const alternativePosterUrls = altMovies.map((movie) =>
-    movie?.poster_path ? `https://image.tmdb.org/t/p/w342${movie.poster_path}` : "",
+
+  const alternativePosterUrls = altMovies.map((m) =>
+    m?.poster_path ? `https://image.tmdb.org/t/p/w342${m.poster_path}` : "",
   );
-  const hiddenLayerTitles: HiddenLayerTitle[] = hiddenRaw.map((hidden, index) => {
-    const movie = hiddenMovies[index];
+
+  // Restore platform info on hidden layer cards
+  const hiddenLayerTitles: HiddenLayerTitle[] = hiddenRaw.map((hidden, i) => {
+    const m = hiddenMovies[i];
+    const set = hiddenProviderSets[i];
+    const platform = set ? (mapProviders(set) ?? []).filter((p) => p.access === "subscription")[0]?.name : undefined;
     return {
       title: hidden.title,
       year: hidden.year,
-      posterUrl: movie?.poster_path ? `https://image.tmdb.org/t/p/w342${movie.poster_path}` : undefined,
+      posterUrl: m?.poster_path ? `https://image.tmdb.org/t/p/w342${m.poster_path}` : undefined,
+      platform,
     };
   });
 
-  const { hiddenTitles: _hiddenTitles, ...recommendation } = raw;
-  void _hiddenTitles;
+  const { hiddenTitles: _dropped, ...rest } = raw;
+  void _dropped;
 
   return {
-    ...recommendation,
+    ...rest,
     omdbPosterUrl: tmdbPoster ?? omdbPoster,
     whereToWatch,
     alternativePosterUrls,

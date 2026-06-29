@@ -1,4 +1,5 @@
 import availabilityData from "@/data/availability.json";
+import { countryCodeMap } from "@/lib/recommendation-utils";
 import { WatchProvider } from "@/lib/types";
 
 type AvailabilityRecord = {
@@ -23,24 +24,6 @@ export type AvailabilityResult = {
   note: string;
   verifiedAt?: string;
   source?: string;
-};
-
-const countryCodeMap: Record<string, string> = {
-  poland: "PL", pl: "PL",
-  "united kingdom": "GB", gb: "GB", uk: "GB",
-  germany: "DE", de: "DE",
-  france: "FR", fr: "FR",
-  spain: "ES", es: "ES",
-  italy: "IT", it: "IT",
-  netherlands: "NL", nl: "NL",
-  "united states": "US", usa: "US", us: "US",
-  india: "IN", in: "IN",
-  portugal: "PT", pt: "PT",
-  sweden: "SE", se: "SE",
-  denmark: "DK", dk: "DK",
-  belgium: "BE", be: "BE",
-  austria: "AT", at: "AT",
-  ireland: "IE", ie: "IE",
 };
 
 function normalizeCountry(country: string): string {
