@@ -5,20 +5,23 @@ function buildTasteFingerprint(userContext: string) {
   if (!hasReferenceIntent) return "";
 
   const universalReferenceLens = `
-- Reference matching protocol: infer the viewer job behind the reference, not just genre. Score candidates by: emotional engine, character morality, social world/class context, relationship dynamics, pacing, humor darkness, stakes, setting texture, and binge rhythm.
+- Reference matching protocol: infer the viewer job behind the reference, not just genre. First identify why people watch the reference title, then extract 5-7 transferable traits before choosing a pick.
+- Cross-language/cross-culture protocol: when the user says "like X but in Y language/culture", preserve the transferable traits and translate only the language/cultural lane. Do not replace the reference with a generic popular title from that language.
+- Score candidates by: emotional engine, character morality, social world/class context, relationship dynamics, pacing, humor darkness, stakes, setting texture, rewatch/binge rhythm, and the kind of satisfaction the viewer wants.
 - False-positive filter: reject picks that share only one surface trait such as "comedy", "teen", "crime", "workplace", "sci-fi", "prestige", or "family". A good match should share at least three deep traits and should make the user say "yes, that is the feeling I meant."
-- Subscription filter order: first satisfy the taste request, then filter to the user's subscriptions. If a subscription-only result weakens the taste match too much, choose the strongest verified subscription match and make the why-it-fits specific about the compromise.`;
+- Reject popularity translation: "famous in the target language" is not enough. "Same genre in the target language" is not enough. "Available on the selected platform" is not enough.
+- Subscription filter order: first satisfy the taste request, then filter to the user's subscriptions. If a subscription-only result weakens the taste match too much, choose the strongest verified subscription match and make the why-it-fits specific about the compromise.
 
-  if (/shameless/i.test(userContext)) {
-    return `${universalReferenceLens}
-- Taste fingerprint from Shameless: prioritize messy working-class family dynamics, survival humor, loyalty under stress, addiction/poverty pressure, morally compromised choices, raunchy/dark comedy, ensemble chaos, and emotional damage beneath the jokes.
-- Avoid false matches: do NOT recommend clean workplace sitcoms, moral fantasy, cozy optimism, or pleasant friend-group comedy as the main match. Specifically avoid The Good Place, Parks and Recreation, The Office, and Schitt's Creek for this request unless the user asks for lighter comfort instead.
-- Better-fit direction: if restricted to Netflix, favor messy dramedies and chaotic antihero ensembles such as Ginny & Georgia, Orange Is the New Black, Good Girls, Maid, or similarly grounded shows over purely wholesome sitcoms.`;
-  }
-
-  return `${universalReferenceLens}
+Smart reference translation examples. Use these as reasoning patterns, not as title instructions:
+- "Friends but in Hindi": preserve warm hangout ensemble, low-stakes social/romantic chaos, comfort rewatch rhythm, apartment/work-life orbit, and chemistry. Reject generic Hindi family drama, random stand-up comedy, or dark crime just because it is Indian.
+- "Shameless but in Hindi": preserve messy family/social chaos, survival humor, class pressure, morally compromised people, adult edges, loyalty under stress, and emotional damage under the jokes. Reject generic Hindi thrillers, worthy issue dramas, or clean crime procedurals.
+- "Succession but Korean": preserve family power games, inheritance anxiety, corporate warfare, status cruelty, dark comedy, and emotionally stunted elites. Reject any wealthy-family melodrama that lacks strategic viciousness.
+- "Fleabag but Malayalam": preserve intimate self-sabotage, sharp confession-like comedy, grief underneath wit, sexual/emotional mess, and a singular voice. Reject generic rom-coms that lack bite or interiority.
+- "The Bear but Polish": preserve pressure-cooker workplace rhythm, grief, craft obsession, found-family tension, panic under excellence, and short intense episodes. Reject ordinary restaurant shows without anxiety or emotional stakes.
+- "Black Mirror but Bengali": preserve speculative moral premise, modern dread, social/technology consequence, and a sharp ending. Reject generic sci-fi action that lacks an ethical hook.
 - For the named reference, silently build a taste fingerprint before choosing: "People watch this for ___, ___, and ___." Use that fingerprint to choose the pick and write the why-it-fits reasons.
-- When uncertain about a very specific title, prefer a slightly less famous but tonally precise match over a generic popular title.`;
+- When uncertain about a very specific title, prefer a slightly less famous but tonally precise match over a generic popular title.
+- If no exact equivalent exists in the requested language/culture, choose the closest tonal match and make the why-it-fits reasons honest about the match.`;
 }
 
 export function buildRecommendationPrompt(input: RecommendRequest) {
@@ -33,15 +36,28 @@ export function buildRecommendationPrompt(input: RecommendRequest) {
       ].filter(Boolean).join(". ");
 
   const country = input.country || "not provided";
+  const languagePreferences = input.languagePreferences?.length ? input.languagePreferences.join(", ") : "no preference";
   const platforms = input.platforms?.length ? input.platforms.join(", ") : "not specified";
   const mineMode = input.platformFilter === "mine";
 
   const seenClause = input.seenTitles?.length
     ? `\n- Already seen (do NOT recommend): ${input.seenTitles.join(", ")}`
     : "";
+  const recentClause = input.recentTitles?.length
+    ? `\n- Recently recommended in this session (avoid repeating unless the user explicitly asks for the exact same title): ${input.recentTitles.join(", ")}`
+    : "";
 
   const hiddenGemClause = /hidden\s+gem|underrated|overlooked|buried|less\s+obvious/i.test(userContext)
     ? "\n- Hidden-gem intent: Prefer a quieter, less obvious high-quality title over the most famous prestige answer. It can still be acclaimed, but it should feel like a discovery."
+    : "";
+  const explicitLanguageRequest = /\b(hindi|malayalam|tamil|telugu|bengali|bangla|marathi|kannada|polish|english|french|spanish|korean|japanese|german|italian)\b/i.test(userContext);
+  const languagePreferenceClause = input.languagePreferences?.length && !explicitLanguageRequest
+    ? `\n- Language contract: The selected language preference is ${input.languagePreferences.join(", ")}. Because the user's request is broad and does not explicitly ask for another language, the main pick and alternatives MUST stay in that language/culture lane. Do not answer with English, Spanish, Korean, or generic global picks unless that language is selected.`
+    : "";
+  const avoidObviousHindiHiddenGems = input.country?.toLowerCase() === "india" &&
+    input.languagePreferences?.some((language) => /hindi/i.test(language)) &&
+    /hidden\s+gem|underrated|overlooked|buried|less\s+obvious/i.test(userContext)
+    ? "\n- Hindi hidden-gem guardrail: do not default to the usual internet-safe Hindi recommendations such as Tumbbad, Masaan, Andhadhun, Drishyam, or Kahaani unless the user's exact mood makes one of them uniquely right. Prefer a fresher, less over-recommended Hindi-market match."
     : "";
   const explicitGoreWant = /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(userContext) &&
     !/\b(no|not|avoid|without|don't want|do not want|less)\s+(gore|gory|blood|bloody|violence|violent)\b/i.test(userContext);
@@ -49,6 +65,9 @@ export function buildRecommendationPrompt(input: RecommendRequest) {
     ? "\n- Explicit intensity intent: The user is asking FOR gore/gory horror. Recommend intense horror, body horror, splatter, creature horror, or brutal survival horror with visible blood/body threat. Do not soften this into quiet drama, romance, gentle arthouse, or merely sad prestige cinema."
     : "";
   const tasteFingerprint = buildTasteFingerprint(userContext);
+  const crossLanguageReferenceClause = /\b(similar|like|vibe|reminds me|same as|after watching|watching)\b/i.test(userContext) && explicitLanguageRequest
+    ? "\n- Cross-language reference request detected: preserve the reference title's viewer job and deep traits first; use the requested language/culture as the content lane second. Do not let the target language override the actual reason the user liked the reference."
+    : "";
 
   const scopeClause = mineMode
     ? `\n- Scope (streaming filter only): User wants picks available on ${platforms}. CRITICAL: Honor the user's language, genre, culture, and mood request exactly — if they ask for Hindi comedy, pick Hindi comedies; if they ask for French thriller, pick French thrillers. Major platforms carry vast international and non-English catalogues. The filter changes WHERE it streams, NOT what language or genre you pick. Only avoid titles that are exclusively on niche services (Mubi, Criterion Channel, BFI Player) or completely unavailable on mainstream platforms. Find the best match for the request that also lives on ${platforms}.`
@@ -66,9 +85,10 @@ Use your general film/TV knowledge for recommendation. Availability is NOT verif
 
 User context:
 - Country: ${country}
+- Language preference: ${languagePreferences}
 - Current streaming subscriptions: ${platforms}
 - Time context: ${input.contextHint ?? "not provided"}
-- Mood/request: ${userContext}${seenClause}${hiddenGemClause}${intensityClause}${tasteFingerprint}${scopeClause}
+- Mood/request: ${userContext}${seenClause}${recentClause}${hiddenGemClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
 
 Return an array of exactly THREE JSON objects (not a wrapper object) with this schema, no markdown:
 [
@@ -115,6 +135,7 @@ Constraints:
 - Prefer high-quality, not too obvious picks. Lean arthouse, international, or prestige — unless mineMode.
 - Strictly obey avoidance preferences only when they are in "I do not want" / avoids or phrased as no/avoid/without. If the user simply asks for "gore", "gory", "bloody", "splatter", or "body horror", treat that as a positive request for intense horror.
 - Strictly obey explicit language/culture requests. If the user asks for Hindi, the main pick and nearby alternatives should be Hindi or strongly Hindi-market Indian titles unless the user asks otherwise.
+- Use the language preference as the default content lane when the user's request is broad. If the user selected Hindi and asks for "a hidden gem thriller", recommend a Hindi or strongly Hindi-market Indian thriller, not a global English/Spanish title. If the user explicitly asks for a different language, culture, or country, follow the explicit request instead.
 - If the user wants romantic/sexy, recommend sensual mainstream adult-themed content, never pornographic.
 - If a reference film is provided, extract its tone, pacing, aesthetic, and emotional register — use those as calibration signals. Never recommend the reference film itself or an obvious sequel/prequel to it.
 - If a reference TV show is provided, match the real viewer job-to-be-done: social world, emotional engine, character morality, pacing, class/culture context, comedy darkness, and relationship mess. Similar genre labels alone are not enough.

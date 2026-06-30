@@ -5,9 +5,24 @@ function normalizeForMatch(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+function recommendationText(rec: RawRecommendation): string {
+  return [
+    rec.title,
+    rec.vibe,
+    rec.oneLine,
+    ...(rec.whyItFits ?? []),
+    rec.hiddenLayer?.headline,
+    rec.hiddenLayer?.insight,
+  ].filter(Boolean).join(" ");
+}
+
 function isKnownFalsePositiveForRequest(input: RecommendRequest, rec: RawRecommendation): boolean {
   const text = requestText(input);
   const title = normalizeForMatch(rec.title);
+
+  if ((input.recentTitles ?? []).some((recentTitle) => normalizeForMatch(recentTitle) === title)) {
+    return true;
+  }
 
   if (/shameless/i.test(text)) {
     return [
@@ -16,6 +31,33 @@ function isKnownFalsePositiveForRequest(input: RecommendRequest, rec: RawRecomme
       "theoffice",
       "schittscreek",
       "derrygirls",
+      "choked",
+      "paatallok",
+      "pataallok",
+      "mimi",
+      "kotafactory",
+      "yehmerifamily",
+      "gullak",
+      "panchayat",
+      "aakhrisafar",
+    ].includes(title);
+  }
+
+  if (/shameless/i.test(text) && !/\b(messy|chaos|chaotic|dysfunction|dysfunctional|survival|morally|flawed|adult|raunchy|class|poverty|pressure|desperate|bad choices|bad decisions|family wounds)\b/i.test(recommendationText(rec))) {
+    return true;
+  }
+
+  if (/\bfriends\b/i.test(text) && !/\b(friend|friends|friendship|hangout|ensemble|group|comfort|warm|low-stakes|romantic|social|banter|chemistry|roommate|apartment)\b/i.test(recommendationText(rec))) {
+    return true;
+  }
+
+  if (/\bfriends\b/i.test(text)) {
+    return [
+      "theironclaw",
+      "maryandgeorge",
+      "marryme",
+      "kotafactory",
+      "aakhrisafar",
     ].includes(title);
   }
 
@@ -45,14 +87,175 @@ export function filterFalsePositiveRecommendations(input: RecommendRequest, batc
   const wantsGore = /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(text) &&
     !/\b(no|not|avoid|without|don't want|do not want|less)\s+(gore|gory|blood|bloody|violence|violent)\b/i.test(text);
   if (wantsGore) return filtered;
+  if ((input.recentTitles ?? []).length > 0 && filtered.length > 0) return filtered;
   return filtered.length > 0 ? filtered : batch;
 }
 
 export function localFallback(input: RecommendRequest): RawRecommendation[] {
   const text = requestText(input);
   const wantsShameless = /shameless/i.test(text);
+  const wantsFriends = /\bfriends\b/i.test(text);
+  const wantsHindi = /\bhindi\b/i.test(text) || (input.languagePreferences ?? []).some((language) => /hindi/i.test(language));
   const wantsGore = /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(text) &&
     !/\b(no|not|avoid|without|don't want|do not want|less)\s+(gore|gory|blood|bloody|violence|violent)\b/i.test(text);
+
+  if (wantsFriends && wantsHindi) {
+    const baseRec = {
+      format: "Series" as const,
+      whereToWatch: {
+        status: "unverified" as const,
+        primary: "Availability not verified",
+        note: "F.U.N will verify this in real time. Check your apps before watching.",
+      },
+      hiddenLayer: {
+        headline: "Hindi hangout comfort",
+        insight: "The match should feel like people you can sit with for hours, not just a comedy label.",
+        classyJab: "Comfort works when the room feels alive.",
+      },
+    };
+
+    return [
+      {
+        title: "College Romance",
+        year: "2018",
+        runtime: "35 min per episode",
+        vibe: "hangout, youthful, romantic-comic",
+        confidence: 82,
+        oneLine: "Watch College Romance for Hindi friend-group comfort, crushes, banter, and low-stakes chaos.",
+        whyItFits: [
+          "It keeps the friend-group hangout engine that makes Friends easy to return to.",
+          "The pleasure is chemistry, romantic confusion, and everyday social mess rather than plot heaviness.",
+          "It sits in a Hindi youth-comedy lane instead of becoming a dark or prestige detour.",
+        ],
+        hiddenTitles: [
+          { title: "Hostel Daze", year: "2019" },
+          { title: "Permanent Roommates", year: "2014" },
+          { title: "Flames", year: "2018" },
+        ],
+        alternatives: ["Hostel Daze (2019)", "Permanent Roommates (2014)", "Flames (2018)"],
+        ...baseRec,
+      },
+      {
+        title: "Hostel Daze",
+        year: "2019",
+        runtime: "35 min per episode",
+        vibe: "ensemble, campus, comfort-comedy",
+        confidence: 80,
+        oneLine: "Watch Hostel Daze if you want a Hindi ensemble comedy built around shared spaces and everyday friendship.",
+        whyItFits: [
+          "It translates Friends' shared-apartment rhythm into a campus/hostel social world.",
+          "The hook is the group dynamic, not a single hero or heavy plot.",
+          "It keeps the stakes light enough for comfort watching.",
+        ],
+        hiddenTitles: [
+          { title: "College Romance", year: "2018" },
+          { title: "Permanent Roommates", year: "2014" },
+          { title: "Flames", year: "2018" },
+        ],
+        alternatives: ["College Romance (2018)", "Permanent Roommates (2014)", "Flames (2018)"],
+        ...baseRec,
+      },
+      {
+        title: "Permanent Roommates",
+        year: "2014",
+        runtime: "30 min per episode",
+        vibe: "relationship, warm, conversational",
+        confidence: 77,
+        oneLine: "Watch Permanent Roommates for relaxed Hindi relationship comedy with familiar, rewatchable warmth.",
+        whyItFits: [
+          "It shares Friends' conversational comfort and romantic-social confusion.",
+          "The tone is warm and easygoing rather than dark or plot-heavy.",
+          "It works best when you want people and chemistry more than spectacle.",
+        ],
+        hiddenTitles: [
+          { title: "College Romance", year: "2018" },
+          { title: "Hostel Daze", year: "2019" },
+          { title: "Flames", year: "2018" },
+        ],
+        alternatives: ["College Romance (2018)", "Hostel Daze (2019)", "Flames (2018)"],
+        ...baseRec,
+      },
+    ];
+  }
+
+  if (wantsShameless && wantsHindi) {
+    const baseRec = {
+      format: "Series" as const,
+      whereToWatch: {
+        status: "unverified" as const,
+        primary: "Availability not verified",
+        note: "F.U.N will verify this in real time. Check your apps before watching.",
+      },
+      hiddenLayer: {
+        headline: "Hindi chaos, not comfort",
+        insight: "The closest match should have messy people, bad choices, and survival energy rather than a clean thriller shell.",
+        classyJab: "The right mess has its own rhythm.",
+      },
+    };
+
+    return [
+      {
+        title: "Tribhuvan Mishra CA Topper",
+        year: "2024",
+        runtime: "45 min per episode",
+        vibe: "raunchy, desperate, social-comedy",
+        confidence: 83,
+        oneLine: "Watch Tribhuvan Mishra CA Topper if you want a messy Hindi adult comedy built on pressure and survival.",
+        whyItFits: [
+          "It is closer to Shameless' raunchy survival-comedy lane than a prestige thriller.",
+          "The premise turns money pressure and social judgment into escalating personal chaos.",
+          "It keeps flawed people at the center instead of offering clean moral comfort.",
+        ],
+        hiddenTitles: [
+          { title: "Choona", year: "2023" },
+          { title: "Yeh Kaali Kaali Ankhein", year: "2022" },
+          { title: "Rana Naidu", year: "2023" },
+        ],
+        alternatives: ["Choona (2023)", "Yeh Kaali Kaali Ankhein (2022)", "Rana Naidu (2023)"],
+        ...baseRec,
+      },
+      {
+        title: "Choona",
+        year: "2023",
+        runtime: "40 min per episode",
+        vibe: "scheming, comic, desperate",
+        confidence: 79,
+        oneLine: "Watch Choona for Hindi ensemble scheming where desperation keeps turning into comedy.",
+        whyItFits: [
+          "It has flawed people making increasingly bad plans under pressure.",
+          "The ensemble chaos matters more than clean heroism.",
+          "The tone lets desperation and comedy sit in the same room.",
+        ],
+        hiddenTitles: [
+          { title: "Tribhuvan Mishra CA Topper", year: "2024" },
+          { title: "Rana Naidu", year: "2023" },
+          { title: "Yeh Kaali Kaali Ankhein", year: "2022" },
+        ],
+        alternatives: ["Tribhuvan Mishra CA Topper (2024)", "Rana Naidu (2023)", "Yeh Kaali Kaali Ankhein (2022)"],
+        ...baseRec,
+      },
+      {
+        title: "Rana Naidu",
+        year: "2023",
+        runtime: "45 min per episode",
+        vibe: "messy, adult, family-crime",
+        confidence: 75,
+        oneLine: "Watch Rana Naidu if you want the darker family-dysfunction side of a Shameless-like Hindi-market match.",
+        whyItFits: [
+          "It keeps damaged family history and morally compromised people in the center.",
+          "The adult edges and family wounds are closer than a clean thriller would be.",
+          "It is a darker compromise, but still better aligned than a generic crime procedural.",
+        ],
+        hiddenTitles: [
+          { title: "Tribhuvan Mishra CA Topper", year: "2024" },
+          { title: "Choona", year: "2023" },
+          { title: "Yeh Kaali Kaali Ankhein", year: "2022" },
+        ],
+        alternatives: ["Tribhuvan Mishra CA Topper (2024)", "Choona (2023)", "Yeh Kaali Kaali Ankhein (2022)"],
+        ...baseRec,
+      },
+    ];
+  }
 
   if (wantsShameless && (input.platforms ?? []).some((platform) => /netflix/i.test(platform))) {
     const baseRec = {

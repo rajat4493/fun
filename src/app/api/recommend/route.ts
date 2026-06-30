@@ -11,6 +11,26 @@ function hasSubscriptionProvider(recommendation: Recommendation): boolean {
     (recommendation.whereToWatch.providers ?? []).some((provider) => provider.access === "subscription");
 }
 
+function wantsHindi(input: RecommendRequest): boolean {
+  const text = [input.selfText, input.reference, ...(input.languagePreferences ?? [])].filter(Boolean).join(" ");
+  return /\bhindi\b/i.test(text);
+}
+
+function shouldUseCuratedReferenceFallback(input: RecommendRequest): boolean {
+  if (!wantsHindi(input)) return false;
+  const text = [input.selfText, input.reference].filter(Boolean).join(" ");
+  return /\b(friends|shameless)\b/i.test(text);
+}
+
+function matchesLanguageRequest(input: RecommendRequest, recommendation: Recommendation): boolean {
+  if (!wantsHindi(input)) return true;
+  const titleText = `${recommendation.title} ${recommendation.oneLine} ${recommendation.vibe} ${recommendation.whyItFits.join(" ")}`;
+  const metadata = recommendation.contentMetadata;
+  if (metadata?.originalLanguage === "hi") return true;
+  if (metadata?.originCountry?.includes("IN") && !/\benglish\b/i.test(titleText)) return true;
+  return false;
+}
+
 async function getRecommendations(input: RecommendRequest, prompt: string): Promise<RawRecommendation[]> {
   if (process.env.ANTHROPIC_API_KEY) {
     try {
@@ -85,10 +105,22 @@ export async function POST(req: Request) {
     if (normalizedBatch.length === 0) {
       normalizedBatch = localFallback(input).slice(0, 3);
     }
+    if (shouldUseCuratedReferenceFallback(input)) {
+      normalizedBatch = localFallback(input).slice(0, 3);
+    }
 
     let enrichedBatch = input.platformFilter === "mine"
       ? await verifiedSubscriptionBatch(normalizedBatch, input, country)
       : await enrichBatch(normalizedBatch, country, platforms);
+
+    const languageMatchedBatch = enrichedBatch.filter((recommendation) => matchesLanguageRequest(input, recommendation));
+    if (languageMatchedBatch.length > 0) {
+      enrichedBatch = languageMatchedBatch;
+    } else if (wantsHindi(input)) {
+      const fallback = await enrichBatch(localFallback(input), country, platforms);
+      const filteredFallback = fallback.filter((recommendation) => matchesLanguageRequest(input, recommendation));
+      enrichedBatch = filteredFallback.length > 0 ? filteredFallback : fallback;
+    }
 
     if (enrichedBatch.length === 0 && normalizedBatch[0]) {
       const fallback = await enrichRecommendation(normalizedBatch[0], country, platforms);

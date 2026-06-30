@@ -339,6 +339,20 @@ export default function Home() {
     const isWeekend = now.getDay() === 0 || now.getDay() === 6;
     const contextHint = `${isWeekend ? "Weekend" : "Weekday"} ${timeOfDay} (${dayName}), ${season}`;
 
+    const recentTitles = (() => {
+      try {
+        const raw = localStorage.getItem(recommendationStorageKey);
+        if (!raw) return [];
+        const session = JSON.parse(raw) as { recommendation?: Recommendation; batch?: Recommendation[] };
+        return [
+          session.recommendation?.title,
+          ...(session.batch ?? []).map((item) => item.title),
+        ].filter((title): title is string => Boolean(title)).slice(0, 4);
+      } catch {
+        return [];
+      }
+    })();
+
     const requestInput: RecommendRequest = {
       mode,
       mood: mode === "choose" ? moods : undefined,
@@ -346,10 +360,12 @@ export default function Home() {
       avoids: mode === "choose" ? avoids : undefined,
       time: mode === "choose" && time[0] && time[0] !== "no preference" ? time[0] : undefined,
       country: onboarding?.country || "Poland",
+      languagePreferences: onboarding?.languagePreferences,
       platforms: onboarding?.platforms || ["Netflix", "Prime Video"],
       selfText: mode === "self" ? selfText : undefined,
       reference: reference.trim() || undefined,
       seenTitles: loadSeenTitles(),
+      recentTitles,
       platformFilter,
       contextHint,
     };

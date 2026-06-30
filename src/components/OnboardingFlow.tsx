@@ -8,6 +8,7 @@ export const ONBOARDING_KEY = "fun:onboarding";
 export type OnboardingData = {
   country: string;
   countryCode: string;
+  languagePreferences?: string[];
   platforms: string[];
 };
 
@@ -42,6 +43,12 @@ const PLATFORMS = [
   "Crunchyroll",
 ];
 
+const LANGUAGE_OPTIONS: Record<string, string[]> = {
+  IN: ["Hindi", "Malayalam", "Tamil", "Telugu", "Bengali", "Marathi", "Kannada", "English"],
+  PL: ["Polish", "English", "European cinema"],
+  default: ["Local language", "English", "No preference"],
+};
+
 function detectCountry(): { name: string; code: string } {
   try {
     const locale = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -75,8 +82,11 @@ export function saveOnboarding(data: OnboardingData) {
 export default function OnboardingFlow({ onComplete }: { onComplete: (data: OnboardingData) => void }) {
   const [step, setStep] = useState<1 | 2>(1);
   const [selectedCountry, setSelectedCountry] = useState(detectCountry);
+  const [selectedLanguages, setSelectedLanguages] = useState<string[]>(["No preference"]);
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(["Netflix"]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  const languageOptions = [...new Set([...(LANGUAGE_OPTIONS[selectedCountry.code] ?? LANGUAGE_OPTIONS.default), "No preference"])];
 
   function togglePlatform(platform: string) {
     setSelectedPlatforms((prev) =>
@@ -84,10 +94,21 @@ export default function OnboardingFlow({ onComplete }: { onComplete: (data: Onbo
     );
   }
 
+  function toggleLanguage(language: string) {
+    setSelectedLanguages((prev) => {
+      if (language === "No preference") return ["No preference"];
+      const next = prev.includes(language)
+        ? prev.filter((item) => item !== language)
+        : [...prev.filter((item) => item !== "No preference"), language];
+      return next.length > 0 ? next : ["No preference"];
+    });
+  }
+
   function handleComplete() {
     const data: OnboardingData = {
       country: selectedCountry.name,
       countryCode: selectedCountry.code,
+      languagePreferences: selectedLanguages.includes("No preference") ? [] : selectedLanguages,
       platforms: selectedPlatforms,
     };
     saveOnboarding(data);
@@ -137,7 +158,11 @@ export default function OnboardingFlow({ onComplete }: { onComplete: (data: Onbo
                     <button
                       type="button"
                       key={c.code}
-                      onClick={() => { setSelectedCountry(c); setDropdownOpen(false); }}
+                      onClick={() => {
+                        setSelectedCountry(c);
+                        setSelectedLanguages(["No preference"]);
+                        setDropdownOpen(false);
+                      }}
                       className={`flex w-full items-center justify-between px-4 py-3 text-sm transition hover:bg-white/[0.07] ${
                         selectedCountry.code === c.code ? "text-white" : "text-white/72"
                       }`}
@@ -148,6 +173,30 @@ export default function OnboardingFlow({ onComplete }: { onComplete: (data: Onbo
                   ))}
                 </div>
               )}
+            </div>
+
+            <div className="mt-6">
+              <p className="text-sm font-medium text-white">Language mood</p>
+              <p className="mt-1 text-xs text-white/44">Optional. We will still follow your written prompt first.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {languageOptions.map((language) => {
+                  const active = selectedLanguages.includes(language);
+                  return (
+                    <button
+                      type="button"
+                      key={language}
+                      onClick={() => toggleLanguage(language)}
+                      className={`h-9 rounded-full border px-4 text-sm transition ${
+                        active
+                          ? "border-red-400/50 bg-red-500/12 text-white shadow-[0_0_18px_rgba(239,68,68,0.16)]"
+                          : "border-white/10 bg-white/[0.04] text-white/68 hover:border-white/22 hover:text-white"
+                      }`}
+                    >
+                      {language}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <button

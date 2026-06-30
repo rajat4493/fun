@@ -5,10 +5,12 @@ export type RecommendRequest = {
   avoids?: string[];
   time?: string;
   country?: string;
+  languagePreferences?: string[];
   platforms?: string[];
   selfText?: string;
   reference?: string;
   seenTitles?: string[];
+  recentTitles?: string[];
   platformFilter?: "mine" | "any";
   contextHint?: string; // time-of-day, day, season — influences pick tone
 };
@@ -60,6 +62,10 @@ export type Recommendation = {
   omdbPosterUrl?: string; // OMDB/IMDB poster image URL
   alternativePosterUrls?: string[];
   omdbAttribution?: string;
+  contentMetadata?: {
+    originalLanguage?: string;
+    originCountry?: string[];
+  };
 };
 
 export type RecommendationBatch = {
