@@ -3,6 +3,7 @@ import { RecommendRequest, Recommendation, WatchProvider } from "@/lib/types";
 export const recommendationStorageKey = "fun:last-recommendation";
 export const seenTitlesKey = "fun:seen-titles";
 export const feedbackStorageKey = "fun:recommendation-feedback";
+export const recentRecommendationTitlesKey = "fun:recent-recommendation-titles";
 
 export type FeedbackReason = "perfect" | "wrong-vibe" | "not-on-service" | "already-seen";
 
@@ -35,6 +36,24 @@ export function addSeenTitle(title: string): string[] {
   if (!seen.includes(title)) seen.push(title);
   localStorage.setItem(seenTitlesKey, JSON.stringify(seen));
   return seen;
+}
+
+export function loadRecentRecommendationTitles(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(recentRecommendationTitlesKey);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function rememberRecommendationTitles(titles: string[]): string[] {
+  const cleanTitles = titles.map((title) => title.trim()).filter(Boolean);
+  const existing = loadRecentRecommendationTitles();
+  const next = [...cleanTitles, ...existing.filter((title) => !cleanTitles.includes(title))].slice(0, 24);
+  localStorage.setItem(recentRecommendationTitlesKey, JSON.stringify(next));
+  return next;
 }
 
 export function loadRecommendationFeedback(): RecommendationFeedback[] {

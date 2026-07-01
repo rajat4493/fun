@@ -1,3 +1,5 @@
+export type CrazinessLevel = 0 | 1 | 2 | 3; // 0=Safe, 1=Curious, 2=Bold, 3=Unhinged
+
 export type RecommendRequest = {
   mode: "choose" | "self";
   mood?: string[];
@@ -13,6 +15,7 @@ export type RecommendRequest = {
   recentTitles?: string[];
   platformFilter?: "mine" | "any";
   contextHint?: string; // time-of-day, day, season — influences pick tone
+  craziness?: CrazinessLevel;
 };
 
 export type WatchProvider = {

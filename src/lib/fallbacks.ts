@@ -19,6 +19,7 @@ function recommendationText(rec: RawRecommendation): string {
 function isKnownFalsePositiveForRequest(input: RecommendRequest, rec: RawRecommendation): boolean {
   const text = requestText(input);
   const title = normalizeForMatch(rec.title);
+  const recText = recommendationText(rec);
 
   if ((input.recentTitles ?? []).some((recentTitle) => normalizeForMatch(recentTitle) === title)) {
     return true;
@@ -43,11 +44,15 @@ function isKnownFalsePositiveForRequest(input: RecommendRequest, rec: RawRecomme
     ].includes(title);
   }
 
-  if (/shameless/i.test(text) && !/\b(messy|chaos|chaotic|dysfunction|dysfunctional|survival|morally|flawed|adult|raunchy|class|poverty|pressure|desperate|bad choices|bad decisions|family wounds)\b/i.test(recommendationText(rec))) {
+  if (/\b(comedy|funny|laugh|comfort|light|sitcom)\b/i.test(text) && /\b(dark|crime|criminal|thriller|murder|killer|revenge|suspense|harsh|grim|haunting|tragic|war|documentary)\b/i.test(recText)) {
     return true;
   }
 
-  if (/\bfriends\b/i.test(text) && !/\b(friend|friends|friendship|hangout|ensemble|group|comfort|warm|low-stakes|romantic|social|banter|chemistry|roommate|apartment)\b/i.test(recommendationText(rec))) {
+  if (/shameless/i.test(text) && !/\b(messy|chaos|chaotic|dysfunction|dysfunctional|survival|morally|flawed|adult|raunchy|class|poverty|pressure|desperate|bad choices|bad decisions|family wounds)\b/i.test(recText)) {
+    return true;
+  }
+
+  if (/\bfriends\b/i.test(text) && !/\b(friend|friends|friendship|hangout|ensemble|group|comfort|warm|low-stakes|romantic|social|banter|chemistry|roommate|apartment)\b/i.test(recText)) {
     return true;
   }
 
@@ -86,8 +91,9 @@ export function filterFalsePositiveRecommendations(input: RecommendRequest, batc
   const text = requestText(input);
   const wantsGore = /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(text) &&
     !/\b(no|not|avoid|without|don't want|do not want|less)\s+(gore|gory|blood|bloody|violence|violent)\b/i.test(text);
+  const hasRepeatExclusions = (input.recentTitles?.length ?? 0) > 0 || (input.seenTitles?.length ?? 0) > 0;
+  if (hasRepeatExclusions) return filtered;
   if (wantsGore) return filtered;
-  if ((input.recentTitles ?? []).length > 0 && filtered.length > 0) return filtered;
   return filtered.length > 0 ? filtered : batch;
 }
 
@@ -96,6 +102,10 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
   const wantsShameless = /shameless/i.test(text);
   const wantsFriends = /\bfriends\b/i.test(text);
   const wantsHindi = /\bhindi\b/i.test(text) || (input.languagePreferences ?? []).some((language) => /hindi/i.test(language));
+  const wantsThriller = /\b(thriller|tense|suspense|mystery|crime)\b/i.test(text);
+  const wantsComedy = /\b(comedy|funny|laugh|comfort|sitcom|light)\b/i.test(text);
+  const wantsRomance = /\b(romance|romantic|love|date)\b/i.test(text);
+  const wantsEmotional = /\b(emotional|moving|heartfelt|feel|feeling|sad|bittersweet)\b/i.test(text);
   const wantsGore = /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(text) &&
     !/\b(no|not|avoid|without|don't want|do not want|less)\s+(gore|gory|blood|bloody|violence|violent)\b/i.test(text);
 
@@ -252,6 +262,164 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
           { title: "Yeh Kaali Kaali Ankhein", year: "2022" },
         ],
         alternatives: ["Tribhuvan Mishra CA Topper (2024)", "Choona (2023)", "Yeh Kaali Kaali Ankhein (2022)"],
+        ...baseRec,
+      },
+    ];
+  }
+
+  if (wantsHindi && wantsComedy) {
+    const baseRec = {
+      format: "Film" as const,
+      whereToWatch: {
+        status: "unverified" as const,
+        primary: "Availability not verified",
+        note: "F.U.N will verify this in real time. Check your apps before watching.",
+      },
+      hiddenLayer: {
+        headline: "Hindi comfort with timing",
+        insight: "The right light pick should still have comic shape, not just a harmless label.",
+        classyJab: "Easy can still be sharp.",
+      },
+    };
+
+    return [
+      {
+        title: "Hera Pheri",
+        year: "2000",
+        runtime: "156 min",
+        vibe: "slapstick, classic, chaotic-comic",
+        confidence: 85,
+        oneLine: "Watch Hera Pheri if you want Hindi comedy that is genuinely unhinged and endlessly rewatchable.",
+        whyItFits: [
+          "It has one of the tightest comic trio dynamics in Hindi cinema.",
+          "The escalating chaos is built from character, not darkness.",
+          "It is light without feeling empty.",
+        ],
+        hiddenTitles: [
+          { title: "Andaz Apna Apna", year: "1994" },
+          { title: "Lootcase", year: "2020" },
+          { title: "Fukrey", year: "2013" },
+        ],
+        alternatives: ["Andaz Apna Apna (1994)", "Lootcase (2020)", "Fukrey (2013)"],
+        ...baseRec,
+      },
+      {
+        title: "Lootcase",
+        year: "2020",
+        runtime: "130 min",
+        vibe: "caper, comedy, light chaos",
+        confidence: 82,
+        oneLine: "Watch Lootcase for a breezy Hindi caper with warmth, timing, and low-stakes chaos.",
+        whyItFits: [
+          "It is funny through situation and character rather than dark shock.",
+          "The caper setup gives it momentum without heaviness.",
+          "It feels relaxed but still specific.",
+        ],
+        hiddenTitles: [
+          { title: "Hera Pheri", year: "2000" },
+          { title: "Fukrey", year: "2013" },
+          { title: "Do Dooni Chaar", year: "2010" },
+        ],
+        alternatives: ["Hera Pheri (2000)", "Fukrey (2013)", "Do Dooni Chaar (2010)"],
+        ...baseRec,
+      },
+      {
+        title: "Fukrey",
+        year: "2013",
+        runtime: "139 min",
+        vibe: "buddy-comedy, silly, Delhi-chaos",
+        confidence: 78,
+        oneLine: "Watch Fukrey if you want Hindi buddy chaos that stays light on its feet.",
+        whyItFits: [
+          "The appeal is group chemistry and ridiculous plans.",
+          "It keeps the mood comic rather than punishing.",
+          "It has enough local texture to feel less generic.",
+        ],
+        hiddenTitles: [
+          { title: "Lootcase", year: "2020" },
+          { title: "Hera Pheri", year: "2000" },
+          { title: "Khosla Ka Ghosla!", year: "2006" },
+        ],
+        alternatives: ["Lootcase (2020)", "Hera Pheri (2000)", "Khosla Ka Ghosla! (2006)"],
+        ...baseRec,
+      },
+    ];
+  }
+
+  if (wantsHindi && wantsEmotional) {
+    const baseRec = {
+      format: "Film" as const,
+      whereToWatch: {
+        status: "unverified" as const,
+        primary: "Availability not verified",
+        note: "F.U.N will verify this in real time. Check your apps before watching.",
+      },
+      hiddenLayer: {
+        headline: "Feeling without the lecture",
+        insight: "The right Hindi emotional pick should move cleanly, not sink into homework cinema.",
+        classyJab: "The heart can have rhythm.",
+      },
+    };
+
+    return [
+      {
+        title: "Udaan",
+        year: "2010",
+        runtime: "138 min",
+        vibe: "coming-of-age, wounded, quietly defiant",
+        confidence: 84,
+        oneLine: "Watch Udaan for Hindi emotional cinema that hurts without becoming dull.",
+        whyItFits: [
+          "It is deeply felt but driven by conflict and momentum.",
+          "The emotion comes from character pressure rather than melodrama.",
+          "It remains specific, sharp, and hard to shake.",
+        ],
+        hiddenTitles: [
+          { title: "Kapoor & Sons", year: "2016" },
+          { title: "Queen", year: "2013" },
+          { title: "Margarita with a Straw", year: "2014" },
+        ],
+        alternatives: ["Kapoor & Sons (2016)", "Queen (2013)", "Margarita with a Straw (2014)"],
+        ...baseRec,
+      },
+      {
+        title: "Kapoor & Sons",
+        year: "2016",
+        runtime: "132 min",
+        vibe: "family, bittersweet, sharp",
+        confidence: 82,
+        oneLine: "Watch Kapoor & Sons for family emotion with enough secrets and bite to stay awake.",
+        whyItFits: [
+          "It gives emotional payoff without flattening everyone into saints.",
+          "The family tension keeps the story moving.",
+          "It balances warmth, resentment, and reveal-driven drama.",
+        ],
+        hiddenTitles: [
+          { title: "Udaan", year: "2010" },
+          { title: "Queen", year: "2013" },
+          { title: "Margarita with a Straw", year: "2014" },
+        ],
+        alternatives: ["Udaan (2010)", "Queen (2013)", "Margarita with a Straw (2014)"],
+        ...baseRec,
+      },
+      {
+        title: "Queen",
+        year: "2013",
+        runtime: "146 min",
+        vibe: "warm, self-discovery, funny-emotional",
+        confidence: 80,
+        oneLine: "Watch Queen if you want Hindi emotion that feels alive, funny, and freeing.",
+        whyItFits: [
+          "It is emotional without turning heavy or static.",
+          "The character arc has clear momentum and charm.",
+          "It stays accessible while still feeling personal.",
+        ],
+        hiddenTitles: [
+          { title: "Udaan", year: "2010" },
+          { title: "Kapoor & Sons", year: "2016" },
+          { title: "Margarita with a Straw", year: "2014" },
+        ],
+        alternatives: ["Udaan (2010)", "Kapoor & Sons (2016)", "Margarita with a Straw (2014)"],
         ...baseRec,
       },
     ];
@@ -494,8 +662,87 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
     ];
   }
 
+  if (wantsHindi) {
+    const baseRec = {
+      format: "Film" as const,
+      whereToWatch: {
+        status: "unverified" as const,
+        primary: "Availability not verified",
+        note: "F.U.N will verify this in real time. Check your apps before watching.",
+      },
+      hiddenLayer: {
+        headline: "Hindi cinema beyond the obvious",
+        insight: "The best Hindi picks often sit just outside what the homepage surfaces first.",
+        classyJab: "Your taste deserves a better map.",
+      },
+    };
+
+    return [
+      {
+        title: "Stree",
+        year: "2018",
+        runtime: "128 min",
+        vibe: "horror-comedy, quirky, ensemble",
+        confidence: 87,
+        oneLine: "Watch Stree for a genuinely funny Hindi horror-comedy with a sharp small-town ensemble.",
+        whyItFits: [
+          "It blends comedy and horror with real craft, not just genre labeling.",
+          "The ensemble chemistry and local flavour make it instantly rewatchable.",
+          "It is funny, surprising, and never outstays its welcome.",
+        ],
+        hiddenTitles: [
+          { title: "Lootcase", year: "2020" },
+          { title: "Fukrey", year: "2013" },
+          { title: "Mard Ko Dard Nahi Hota", year: "2019" },
+        ],
+        alternatives: ["Lootcase (2020)", "Fukrey (2013)", "Mard Ko Dard Nahi Hota (2019)"],
+        ...baseRec,
+      },
+      {
+        title: "Hera Pheri",
+        year: "2000",
+        runtime: "156 min",
+        vibe: "slapstick, classic, chaotic-comic",
+        confidence: 85,
+        oneLine: "Watch Hera Pheri if you want a Hindi comedy that is genuinely unhinged and endlessly rewatchable.",
+        whyItFits: [
+          "It has one of the tightest comic trio dynamics in Hindi cinema.",
+          "The escalating chaos is built from character, not just gags.",
+          "It holds up completely — the timing and energy haven't aged.",
+        ],
+        hiddenTitles: [
+          { title: "Phir Hera Pheri", year: "2006" },
+          { title: "Andaz Apna Apna", year: "1994" },
+          { title: "Jaane Bhi Do Yaaron", year: "1983" },
+        ],
+        alternatives: ["Andaz Apna Apna (1994)", "Phir Hera Pheri (2006)", "Jaane Bhi Do Yaaron (1983)"],
+        ...baseRec,
+      },
+      {
+        title: "Lootcase",
+        year: "2020",
+        runtime: "130 min",
+        vibe: "caper, comedy, light chaos",
+        confidence: 80,
+        oneLine: "Watch Lootcase for a low-stakes Hindi caper with relaxed pacing and genuine warmth.",
+        whyItFits: [
+          "It is a proper comedy caper — everyone wants the same suitcase, nobody is competent.",
+          "The tone stays breezy without becoming brainless.",
+          "It is comfort-watching with enough story to stay engaged.",
+        ],
+        hiddenTitles: [
+          { title: "Stree", year: "2018" },
+          { title: "Fukrey Returns", year: "2017" },
+          { title: "Kaalakaandi", year: "2018" },
+        ],
+        alternatives: ["Stree (2018)", "Fukrey Returns (2017)", "Kaalakaandi (2018)"],
+        ...baseRec,
+      },
+    ];
+  }
+
   const avoids = new Set((input.avoids ?? []).map((avoid) => avoid.toLowerCase()));
-  const light = avoids.has("violence") || avoids.has("gore") || avoids.has("heavy drama");
+  const light = avoids.has("violence") || avoids.has("gore") || avoids.has("heavy drama") || wantsComedy || wantsRomance;
   const baseRec = {
     format: "Film" as const,
     whereToWatch: {
@@ -510,67 +757,132 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
     },
   };
 
+  if (wantsThriller) {
+    return [
+      {
+        title: "Blue Ruin",
+        year: "2013",
+        runtime: "90 min",
+        vibe: "lean, tense, revenge-thriller",
+        confidence: 80,
+        oneLine: "Watch Blue Ruin for a stripped-down thriller that stays tense without turning glossy.",
+        whyItFits: [
+          "It delivers suspense through pressure and bad choices, not franchise noise.",
+          "The runtime is lean enough for a focused night.",
+          "It feels discovered rather than algorithmically obvious.",
+        ],
+        hiddenTitles: [
+          { title: "Calibre", year: "2018" },
+          { title: "The Clovehitch Killer", year: "2018" },
+          { title: "The Invitation", year: "2015" },
+        ],
+        alternatives: ["Calibre (2018)", "The Invitation (2015)", "The Guilty (2018)"],
+        ...baseRec,
+      },
+      {
+        title: "Calibre",
+        year: "2018",
+        runtime: "101 min",
+        vibe: "grim, moral-pressure, thriller",
+        confidence: 78,
+        oneLine: "Watch Calibre if you want a tight thriller where one mistake keeps tightening the room.",
+        whyItFits: [
+          "It is built around consequence and dread rather than spectacle.",
+          "The tension escalates from character decisions.",
+          "It is underseen enough to feel like a proper find.",
+        ],
+        hiddenTitles: [
+          { title: "Blue Ruin", year: "2013" },
+          { title: "The Invitation", year: "2015" },
+          { title: "The Guilty", year: "2018" },
+        ],
+        alternatives: ["Blue Ruin (2013)", "The Guilty (2018)", "The Invitation (2015)"],
+        ...baseRec,
+      },
+      {
+        title: "The Invitation",
+        year: "2015",
+        runtime: "100 min",
+        vibe: "paranoid, dinner-party, slow-burn",
+        confidence: 77,
+        oneLine: "Watch The Invitation for a slow-burn thriller that turns politeness into dread.",
+        whyItFits: [
+          "It has a clean, escalating social tension hook.",
+          "The suspense comes from mood and suspicion.",
+          "It is compact, sharp, and easy to recommend without overexplaining.",
+        ],
+        hiddenTitles: [
+          { title: "Blue Ruin", year: "2013" },
+          { title: "Calibre", year: "2018" },
+          { title: "Coherence", year: "2013" },
+        ],
+        alternatives: ["Coherence (2013)", "Calibre (2018)", "Blue Ruin (2013)"],
+        ...baseRec,
+      },
+    ];
+  }
+
   return [
     {
-      title: light ? "Perfect Days" : "Past Lives",
-      year: "2023",
-      runtime: light ? "124 min" : "106 min",
-      vibe: light ? "quiet, warm, reflective" : "emotional, elegant, bittersweet",
+      title: light ? "The Forty-Year-Old Version" : "The Worst Person in the World",
+      year: light ? "2020" : "2021",
+      runtime: light ? "124 min" : "128 min",
+      vibe: light ? "wry, warm, creative" : "restless, romantic, bittersweet",
       confidence: 78,
       oneLine: light
-        ? "Tonight, watch Perfect Days if you want calm without boredom."
-        : "Tonight, watch Past Lives if you want emotion without noise.",
+        ? "Watch The Forty-Year-Old Version if you want wit, warmth, and a real point of view."
+        : "Watch The Worst Person in the World if you want sharp feeling without a boring prestige shell.",
       whyItFits: [
         "It matches the mood-first request instead of forcing a genre.",
         "It is strong enough to feel special, but not mentally exhausting.",
         "It fits F.U.N's promise: one decision, not another endless list.",
       ],
       hiddenTitles: [
-        { title: "Aftersun", year: "2022" },
-        { title: "All of Us Strangers", year: "2023" },
-        { title: "The Zone of Interest", year: "2023" },
+        { title: "Columbus", year: "2017" },
+        { title: "Support the Girls", year: "2018" },
+        { title: "Paterson", year: "2016" },
       ],
-      alternatives: ["Aftersun (2022)", "The Worst Person in the World (2021)", "Drive My Car (2021)"],
+      alternatives: ["Columbus (2017)", "Support the Girls (2018)", "Paterson (2016)"],
       ...baseRec,
     },
     {
-      title: light ? "A Thousand and One" : "20 Days in Mariupol",
-      year: "2023",
-      runtime: light ? "97 min" : "130 min",
-      vibe: light ? "uplifting, intimate, human" : "powerful, haunting, necessary",
+      title: light ? "Support the Girls" : "Columbus",
+      year: light ? "2018" : "2017",
+      runtime: light ? "93 min" : "100 min",
+      vibe: light ? "workplace, humane, funny-sad" : "quiet, architectural, intimate",
       confidence: 72,
-      oneLine: light ? "Warmth and humor in unexpected places." : "A vital documentary about resilience.",
+      oneLine: light ? "Watch Support the Girls for humane comedy that sneaks up on you." : "Watch Columbus for quiet beauty and unusually precise feeling.",
       whyItFits: [
-        "A different format to keep things fresh.",
-        "Strong storytelling without the usual streaming algorithm picks.",
-        "Surprises you without exhausting you.",
+        "It avoids the usual homepage picks.",
+        "The storytelling is specific rather than broadly generic.",
+        "It gives the night a clear mood instead of another scroll.",
       ],
       hiddenTitles: [
-        { title: "The Eternal Memory", year: "2023" },
-        { title: "Grand Concourse", year: "2021" },
-        { title: "Neon Flesh", year: "2010" },
+        { title: "The Forty-Year-Old Version", year: "2020" },
+        { title: "Paterson", year: "2016" },
+        { title: "The Rider", year: "2017" },
       ],
-      alternatives: ["Showing Up (2022)", "In the Mood for Love (2000)", "Stalker (1979)"],
+      alternatives: ["Paterson (2016)", "The Rider (2017)", "The Forty-Year-Old Version (2020)"],
       ...baseRec,
     },
     {
-      title: light ? "The Eternal Memory" : "The Iron Claw",
-      year: "2023",
-      runtime: light ? "90 min" : "128 min",
-      vibe: light ? "meditative, poetic, gentle" : "intense, tragic, unforgettable",
+      title: light ? "Paterson" : "Leave No Trace",
+      year: light ? "2016" : "2018",
+      runtime: light ? "118 min" : "109 min",
+      vibe: light ? "gentle, poetic, everyday" : "quiet, humane, haunting",
       confidence: 75,
-      oneLine: light ? "A meditation on memory and love." : "A devastating portrait of ambition and family.",
+      oneLine: light ? "Watch Paterson for calm that still has texture." : "Watch Leave No Trace for a deeply felt film that never begs for attention.",
       whyItFits: [
-        "International cinema brings perspective.",
-        "Beautiful direction and cinematography.",
-        "Worth your full attention tonight.",
+        "It is distinctive without being difficult for the sake of it.",
+        "The emotional register is clear and controlled.",
+        "It feels like a recommendation, not a default list filler.",
       ],
       hiddenTitles: [
-        { title: "The Taste of Things", year: "2023" },
-        { title: "In My Room", year: "2018" },
-        { title: "Bergman Island", year: "2021" },
+        { title: "Columbus", year: "2017" },
+        { title: "The Rider", year: "2017" },
+        { title: "Support the Girls", year: "2018" },
       ],
-      alternatives: ["La Haine (1995)", "The Celebration (1998)", "Requiem for a Dream (2000)"],
+      alternatives: ["The Rider (2017)", "Columbus (2017)", "Support the Girls (2018)"],
       ...baseRec,
     },
   ];

@@ -24,8 +24,10 @@ import {
   createRecommendationSession,
   defaultRecommendation,
   FeedbackReason,
+  loadRecentRecommendationTitles,
   RecommendationSession,
   recommendationStorageKey,
+  rememberRecommendationTitles,
   saveRecommendationFeedback,
   toTitleCase,
 } from "@/lib/recommendation-session";
@@ -223,7 +225,11 @@ export default function RecommendationPage() {
         setBatchIndex(nextIndex);
         setFeedbackReason(null);
       } else {
-        const request = { ...session.request, seenTitles: seen };
+        const request = {
+          ...session.request,
+          seenTitles: seen,
+          recentTitles: [...loadRecentRecommendationTitles(), ...batch.map((item) => item.title)].slice(0, 24),
+        };
         const response = await fetch("/api/recommend", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -233,6 +239,7 @@ export default function RecommendationPage() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data = await response.json() as any;
         const newBatch: Recommendation[] = data._batch ?? [data];
+        rememberRecommendationTitles(newBatch.map((item) => item.title));
         const newSession = createRecommendationSession(newBatch[0], request, newBatch);
         localStorage.setItem(recommendationStorageKey, JSON.stringify(newSession));
         setSession(newSession);
@@ -257,7 +264,14 @@ export default function RecommendationPage() {
     if (!session) return;
     setRerolling(true);
     try {
-      const request = { ...session.request, platformFilter: "any" as const };
+      const request = {
+        ...session.request,
+        platformFilter: "any" as const,
+        recentTitles: [
+          ...loadRecentRecommendationTitles(),
+          ...(session.batch ?? [session.recommendation]).map((item) => item.title),
+        ].slice(0, 24),
+      };
       const response = await fetch("/api/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -267,6 +281,7 @@ export default function RecommendationPage() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const data = await response.json() as any;
       const newBatch: Recommendation[] = data._batch ?? [data];
+      rememberRecommendationTitles(newBatch.map((item) => item.title));
       const newSession = createRecommendationSession(newBatch[0], request, newBatch);
       localStorage.setItem(recommendationStorageKey, JSON.stringify(newSession));
       setSession(newSession);

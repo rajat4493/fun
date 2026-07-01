@@ -24,10 +24,10 @@ function shouldUseCuratedReferenceFallback(input: RecommendRequest): boolean {
 
 function matchesLanguageRequest(input: RecommendRequest, recommendation: Recommendation): boolean {
   if (!wantsHindi(input)) return true;
-  const titleText = `${recommendation.title} ${recommendation.oneLine} ${recommendation.vibe} ${recommendation.whyItFits.join(" ")}`;
   const metadata = recommendation.contentMetadata;
   if (metadata?.originalLanguage === "hi") return true;
-  if (metadata?.originCountry?.includes("IN") && !/\benglish\b/i.test(titleText)) return true;
+  if (metadata?.originCountry?.includes("IN")) return true;
+  // Hindi requests are strict. If metadata is missing or confirms a non-Indian title, fall back instead of leaking global picks.
   return false;
 }
 
@@ -48,7 +48,12 @@ async function getRecommendations(input: RecommendRequest, prompt: string): Prom
     }
   }
 
-  return localFallback(input);
+  return filteredLocalFallback(input);
+}
+
+function filteredLocalFallback(input: RecommendRequest): RawRecommendation[] {
+  const filtered = filterFalsePositiveRecommendations(input, localFallback(input));
+  return filtered.length > 0 ? filtered : [];
 }
 
 async function enrichBatch(
@@ -69,7 +74,7 @@ async function verifiedSubscriptionBatch(
   const verified = enriched.filter(hasSubscriptionProvider);
   if (verified.length > 0) return verified;
 
-  const fallback = await enrichBatch(localFallback(input), country, platforms);
+  const fallback = await enrichBatch(filteredLocalFallback(input), country, platforms);
   return fallback.filter(hasSubscriptionProvider);
 }
 
@@ -103,10 +108,10 @@ export async function POST(req: Request) {
       console.warn(`Expected 3 recommendations, got ${normalizedBatch.length}`);
     }
     if (normalizedBatch.length === 0) {
-      normalizedBatch = localFallback(input).slice(0, 3);
+      normalizedBatch = filteredLocalFallback(input).slice(0, 3);
     }
     if (shouldUseCuratedReferenceFallback(input)) {
-      normalizedBatch = localFallback(input).slice(0, 3);
+      normalizedBatch = filteredLocalFallback(input).slice(0, 3);
     }
 
     let enrichedBatch = input.platformFilter === "mine"
@@ -117,7 +122,7 @@ export async function POST(req: Request) {
     if (languageMatchedBatch.length > 0) {
       enrichedBatch = languageMatchedBatch;
     } else if (wantsHindi(input)) {
-      const fallback = await enrichBatch(localFallback(input), country, platforms);
+      const fallback = await enrichBatch(filteredLocalFallback(input), country, platforms);
       const filteredFallback = fallback.filter((recommendation) => matchesLanguageRequest(input, recommendation));
       enrichedBatch = filteredFallback.length > 0 ? filteredFallback : fallback;
     }
@@ -125,6 +130,13 @@ export async function POST(req: Request) {
     if (enrichedBatch.length === 0 && normalizedBatch[0]) {
       const fallback = await enrichRecommendation(normalizedBatch[0], country, platforms);
       enrichedBatch = [unavailableSubscriptionFallback(fallback, country)];
+    }
+
+    if (enrichedBatch.length === 0) {
+      return NextResponse.json(
+        { error: "No fresh recommendation found. Try a different mood or clear seen titles." },
+        { status: 409 },
+      );
     }
 
     const firstPick = enrichedBatch[0];

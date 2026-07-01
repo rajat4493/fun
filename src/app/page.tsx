@@ -27,8 +27,14 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import OnboardingFlow, { loadOnboarding, OnboardingData } from "@/components/OnboardingFlow";
-import { createRecommendationSession, loadSeenTitles, recommendationStorageKey } from "@/lib/recommendation-session";
-import { RecommendRequest, Recommendation, WatchProvider } from "@/lib/types";
+import {
+  createRecommendationSession,
+  loadRecentRecommendationTitles,
+  loadSeenTitles,
+  recommendationStorageKey,
+  rememberRecommendationTitles,
+} from "@/lib/recommendation-session";
+import { CrazinessLevel, RecommendRequest, Recommendation, WatchProvider } from "@/lib/types";
 
 type IconType = typeof User;
 
@@ -283,6 +289,7 @@ export default function Home() {
   const [hasGenerated, setHasGenerated] = useState(false);
   const [showWhy, setShowWhy] = useState(false);
   const [platformFilter, setPlatformFilter] = useState<"mine" | "any">("any");
+  const [craziness, setCraziness] = useState<CrazinessLevel>(0);
 
   useEffect(() => {
     const saved = loadOnboarding();
@@ -342,14 +349,15 @@ export default function Home() {
     const recentTitles = (() => {
       try {
         const raw = localStorage.getItem(recommendationStorageKey);
-        if (!raw) return [];
+        if (!raw) return loadRecentRecommendationTitles();
         const session = JSON.parse(raw) as { recommendation?: Recommendation; batch?: Recommendation[] };
         return [
+          ...loadRecentRecommendationTitles(),
           session.recommendation?.title,
           ...(session.batch ?? []).map((item) => item.title),
-        ].filter((title): title is string => Boolean(title)).slice(0, 4);
+        ].filter((title): title is string => Boolean(title)).slice(0, 24);
       } catch {
-        return [];
+        return loadRecentRecommendationTitles();
       }
     })();
 
@@ -368,6 +376,7 @@ export default function Home() {
       recentTitles,
       platformFilter,
       contextHint,
+      craziness,
     };
 
     // Navigate immediately — recommendation page shows cinematic loading state
@@ -387,6 +396,7 @@ export default function Home() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const data = await response.json() as any;
       const batch: Recommendation[] = data._batch ?? [data];
+      rememberRecommendationTitles(batch.map((item) => item.title));
       localStorage.setItem(
         recommendationStorageKey,
         JSON.stringify(createRecommendationSession(batch[0], requestInput, batch)),
@@ -560,37 +570,67 @@ export default function Home() {
             </div>
           )}
 
-          <div className="mt-4 px-2">
-            <p className="mb-2 text-xs uppercase tracking-widest text-white/28">Search within</p>
-            <div className="flex w-fit rounded-xl border border-white/[0.1] bg-black/30 p-1">
-              <button
-                type="button"
-                onClick={() => setPlatformFilter("any")}
-                className={`rounded-lg px-5 py-2 text-sm font-medium transition ${
-                  platformFilter === "any"
-                    ? "bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
-                    : "text-white/38 hover:text-white/60"
-                }`}
-              >
-                All cinema
-              </button>
-              <button
-                type="button"
-                onClick={() => setPlatformFilter("mine")}
-                className={`rounded-lg px-5 py-2 text-sm font-medium transition ${
-                  platformFilter === "mine"
-                    ? "bg-emerald-500/18 text-emerald-100 shadow-[inset_0_1px_0_rgba(52,211,153,0.1)]"
-                    : "text-white/38 hover:text-white/60"
-                }`}
-              >
-                My subscriptions
-              </button>
+          <div className="mt-4 grid gap-4 px-2 sm:grid-cols-2">
+            <div>
+              <p className="mb-2 text-xs uppercase tracking-widest text-white/28">Search within</p>
+              <div className="flex w-fit rounded-xl border border-white/[0.1] bg-black/30 p-1">
+                <button
+                  type="button"
+                  onClick={() => setPlatformFilter("any")}
+                  className={`rounded-lg px-5 py-2 text-sm font-medium transition ${
+                    platformFilter === "any"
+                      ? "bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+                      : "text-white/38 hover:text-white/60"
+                  }`}
+                >
+                  All cinema
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPlatformFilter("mine")}
+                  className={`rounded-lg px-5 py-2 text-sm font-medium transition ${
+                    platformFilter === "mine"
+                      ? "bg-emerald-500/18 text-emerald-100 shadow-[inset_0_1px_0_rgba(52,211,153,0.1)]"
+                      : "text-white/38 hover:text-white/60"
+                  }`}
+                >
+                  My subscriptions
+                </button>
+              </div>
+              <p className="mt-1.5 text-xs text-white/28">
+                {platformFilter === "mine"
+                  ? `Picks from: ${(onboarding?.platforms ?? []).slice(0, 3).join(" · ")}`
+                  : "Includes films outside your current apps"}
+              </p>
             </div>
-            <p className="mt-1.5 text-xs text-white/28">
-              {platformFilter === "mine"
-                ? `Picks from: ${(onboarding?.platforms ?? []).slice(0, 3).join(" · ")}`
-                : "Includes films outside your current apps"}
-            </p>
+
+            <div>
+              <p className="mb-2 text-xs uppercase tracking-widest text-white/28">Taste Risk</p>
+              <div className="flex rounded-xl border border-white/[0.1] bg-black/30 p-1">
+                {(
+                  [
+                    { level: 0 as CrazinessLevel, label: "Safe", activeClass: "bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]" },
+                    { level: 1 as CrazinessLevel, label: "Curious", activeClass: "bg-amber-500/18 text-amber-100 shadow-[inset_0_1px_0_rgba(251,191,36,0.1)]" },
+                    { level: 2 as CrazinessLevel, label: "Bold", activeClass: "bg-orange-500/18 text-orange-100 shadow-[inset_0_1px_0_rgba(249,115,22,0.12)]" },
+                    { level: 3 as CrazinessLevel, label: "Unhinged", activeClass: "bg-rose-600/22 text-rose-100 shadow-[inset_0_1px_0_rgba(225,29,72,0.18)]" },
+                  ] as const
+                ).map(({ level, label, activeClass }) => (
+                  <button
+                    key={level}
+                    type="button"
+                    onClick={() => setCraziness(level)}
+                    className={`flex-1 rounded-lg py-2 text-xs font-medium transition ${
+                      craziness === level ? activeClass : "text-white/38 hover:text-white/60"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-xs text-white/28">
+                {["Crowd-pleasing and acclaimed", "Off-mainstream, critically loved", "Festival, provocative, challenging", "Cult, extreme, avant-garde, divisive"][craziness]}
+              </p>
+            </div>
           </div>
 
           <div className="mt-3 grid gap-3 px-2 sm:grid-cols-[1fr_220px]">

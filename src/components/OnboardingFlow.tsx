@@ -30,18 +30,43 @@ const COUNTRIES = [
   { name: "Ireland", code: "IE" },
 ];
 
-const PLATFORMS = [
-  "Netflix",
-  "Prime Video",
-  "Disney+",
-  "HBO Max",
-  "Apple TV+",
-  "MUBI",
-  "SkyShowtime",
-  "CANAL+",
-  "Viaplay",
-  "Crunchyroll",
-];
+const PLATFORM_OPTIONS: Record<string, string[]> = {
+  IN: [
+    "Netflix",
+    "Prime Video",
+    "JioHotstar",
+    "Zee5",
+    "SonyLIV",
+    "Hoichoi",
+    "Aha",
+    "Sun NXT",
+    "MX Player",
+    "YouTube",
+  ],
+  PL: [
+    "Netflix",
+    "Prime Video",
+    "Disney+",
+    "HBO Max",
+    "Apple TV+",
+    "SkyShowtime",
+    "CANAL+",
+    "Player",
+    "TVP VOD",
+    "Polsat Box Go",
+    "MUBI",
+    "YouTube",
+  ],
+  default: [
+    "Netflix",
+    "Prime Video",
+    "Disney+",
+    "HBO Max",
+    "Apple TV+",
+    "MUBI",
+    "YouTube",
+  ],
+};
 
 const LANGUAGE_OPTIONS: Record<string, string[]> = {
   IN: ["Hindi", "Malayalam", "Tamil", "Telugu", "Bengali", "Marathi", "Kannada", "English"],
@@ -64,6 +89,15 @@ function detectCountry(): { name: string; code: string } {
   return { name: "Poland", code: "PL" };
 }
 
+function platformOptionsForCountry(countryCode: string) {
+  return PLATFORM_OPTIONS[countryCode] ?? PLATFORM_OPTIONS.default;
+}
+
+function defaultPlatformsForCountry(countryCode: string) {
+  const options = platformOptionsForCountry(countryCode);
+  return options.includes("Netflix") ? ["Netflix"] : options.slice(0, 1);
+}
+
 export function loadOnboarding(): OnboardingData | null {
   if (typeof window === "undefined") return null;
   try {
@@ -81,12 +115,13 @@ export function saveOnboarding(data: OnboardingData) {
 
 export default function OnboardingFlow({ onComplete }: { onComplete: (data: OnboardingData) => void }) {
   const [step, setStep] = useState<1 | 2>(1);
-  const [selectedCountry, setSelectedCountry] = useState(detectCountry);
+  const [selectedCountry, setSelectedCountry] = useState(() => detectCountry());
   const [selectedLanguages, setSelectedLanguages] = useState<string[]>(["No preference"]);
-  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(["Netflix"]);
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(() => defaultPlatformsForCountry(detectCountry().code));
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   const languageOptions = [...new Set([...(LANGUAGE_OPTIONS[selectedCountry.code] ?? LANGUAGE_OPTIONS.default), "No preference"])];
+  const platformOptions = platformOptionsForCountry(selectedCountry.code);
 
   function togglePlatform(platform: string) {
     setSelectedPlatforms((prev) =>
@@ -161,6 +196,7 @@ export default function OnboardingFlow({ onComplete }: { onComplete: (data: Onbo
                       onClick={() => {
                         setSelectedCountry(c);
                         setSelectedLanguages(["No preference"]);
+                        setSelectedPlatforms(defaultPlatformsForCountry(c.code));
                         setDropdownOpen(false);
                       }}
                       className={`flex w-full items-center justify-between px-4 py-3 text-sm transition hover:bg-white/[0.07] ${
@@ -219,7 +255,7 @@ export default function OnboardingFlow({ onComplete }: { onComplete: (data: Onbo
             <p className="mt-2 text-sm text-white/54">F.U.N uses this to reveal what you're missing — not to limit what you see.</p>
 
             <div className="mt-6 grid grid-cols-2 gap-2">
-              {PLATFORMS.map((platform) => {
+              {platformOptions.map((platform) => {
                 const active = selectedPlatforms.includes(platform);
                 return (
                   <button

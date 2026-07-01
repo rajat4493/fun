@@ -62,11 +62,34 @@ export function parseAltTitle(alt: string): { title: string; year: string } {
 
 export function isOnUserPlatforms(providers: Array<{ name: string; access: string }>, userPlatforms: string[]): boolean {
   const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
-  const userNorm = userPlatforms.map(normalize);
+  const aliases: Record<string, string[]> = {
+    jiohotstar: ["jiohotstar", "hotstar", "disneyhotstar", "disneyplushotstar"],
+    hotstar: ["jiohotstar", "hotstar", "disneyhotstar", "disneyplushotstar"],
+    disney: ["disney", "disneyplus", "disneyplushotstar", "hotstar"],
+    hbomax: ["hbomax", "max"],
+    max: ["hbomax", "max"],
+    canal: ["canal", "canalplus"],
+    canalplus: ["canal", "canalplus"],
+    zee5: ["zee5", "zee"],
+    sonyliv: ["sonyliv", "sony"],
+    tvpvod: ["tvpvod", "tvp"],
+    polsatboxgo: ["polsatboxgo", "polsat"],
+    primevideo: ["primevideo", "amazonprimevideo", "amazonprime"],
+    amazonprimevideo: ["primevideo", "amazonprimevideo", "amazonprime"],
+    youtube: ["youtube", "youtubemovies"],
+  };
+  const expand = (value: string) => {
+    const key = normalize(value);
+    return aliases[key] ?? [key];
+  };
+  const userNorm = userPlatforms.flatMap(expand);
   return providers
     .filter((provider) => provider.access === "subscription")
     .some((provider) => {
       const providerNorm = normalize(provider.name);
-      return userNorm.some((user) => providerNorm.includes(user) || user.includes(providerNorm));
+      const providerAliases = aliases[providerNorm] ?? [providerNorm];
+      return userNorm.some((user) =>
+        providerAliases.some((providerAlias) => providerAlias.includes(user) || user.includes(providerAlias)),
+      );
     });
 }
