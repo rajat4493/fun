@@ -13,6 +13,7 @@ import {
   Film,
   Heart,
   Layers,
+  MapPin,
   Monitor,
   Play,
   RefreshCw,
@@ -24,6 +25,7 @@ import {
   createRecommendationSession,
   defaultRecommendation,
   FeedbackReason,
+  getOrCreateSessionId,
   loadRecommendationFeedbackContext,
   loadRecentRecommendationTitles,
   RecommendationSession,
@@ -269,6 +271,32 @@ export default function RecommendationPage() {
     if (!session) return;
     saveRecommendationFeedback(reason, session);
     setFeedbackReason(reason);
+
+    // Fire-and-forget server-side collection — never blocks UI, never surfaces errors
+    const req = session.request;
+    fetch("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: getOrCreateSessionId(),
+        reason,
+        title: session.recommendation.title,
+        year: session.recommendation.year,
+        format: session.recommendation.format,
+        confidence: session.recommendation.confidence,
+        country: req.country,
+        mood: req.mood,
+        wants: req.wants,
+        avoids: req.avoids,
+        languagePreferences: req.languagePreferences,
+        craziness: req.craziness,
+        platformFilter: req.platformFilter,
+        contextHint: req.contextHint,
+        batchIndex: session.batchIndex ?? 0,
+        batchSize: session.batch?.length ?? 1,
+        // selfText deliberately excluded — free text, could contain personal info
+      }),
+    }).catch(() => {});
   }
 
   async function handleSearchBeyondSubscriptions() {
@@ -319,6 +347,10 @@ export default function RecommendationPage() {
   const verified = pick.whereToWatch.status === "verified";
   const subscriptionOnly = session?.request?.platformFilter === "mine";
   const exhaustedSubscriptionBatch = subscriptionOnly && batch.length > 0 && batchIndex >= batch.length - 1;
+  const regionLabel = session?.request?.country ?? "Region";
+  const languageLabel = session?.request?.languagePreferences?.length
+    ? session.request.languagePreferences.slice(0, 2).join(", ")
+    : "Any language";
 
   const isSeries = pick.format === "Series" || pick.format === "Episode";
   const isDoc = pick.format === "Documentary";
@@ -438,9 +470,14 @@ export default function RecommendationPage() {
           <Link href="/" className="flex items-center gap-4 text-white">
             <span className="text-3xl font-medium tracking-[0.34em]">F<span className="text-red-500">.</span>U<span className="text-red-500">.</span>N</span>
           </Link>
-          <Link href="/" className="inline-flex h-9 items-center gap-2 rounded-full border border-white/14 bg-white/[0.06] px-4 text-sm text-white/78 transition hover:border-white/28 hover:text-white">
-            <ArrowLeft size={16} /> New mood
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href="/" className="hidden h-9 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 text-sm text-white/54 transition hover:border-white/22 hover:text-white/78 sm:inline-flex">
+              <MapPin size={14} /> {regionLabel} · {languageLabel}
+            </Link>
+            <Link href="/" className="inline-flex h-9 items-center gap-2 rounded-full border border-white/14 bg-white/[0.06] px-4 text-sm text-white/78 transition hover:border-white/28 hover:text-white">
+              <ArrowLeft size={16} /> New mood
+            </Link>
+          </div>
         </header>
 
         <section className="grid flex-1 items-center gap-10 py-10 lg:grid-cols-[1.05fr_0.95fr]">

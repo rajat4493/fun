@@ -4,6 +4,20 @@ export const recommendationStorageKey = "fun:last-recommendation";
 export const seenTitlesKey = "fun:seen-titles";
 export const feedbackStorageKey = "fun:recommendation-feedback";
 export const recentRecommendationTitlesKey = "fun:recent-recommendation-titles";
+const sessionIdKey = "fun:session-id";
+
+export function getOrCreateSessionId(): string {
+  if (typeof window === "undefined") return "ssr";
+  try {
+    const existing = localStorage.getItem(sessionIdKey);
+    if (existing) return existing;
+    const id = `anon-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+    localStorage.setItem(sessionIdKey, id);
+    return id;
+  } catch {
+    return "unknown";
+  }
+}
 
 export type FeedbackReason = "perfect" | "wrong-vibe" | "not-on-service" | "already-seen";
 

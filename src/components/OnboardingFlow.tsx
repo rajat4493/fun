@@ -12,7 +12,7 @@ export type OnboardingData = {
   platforms: string[];
 };
 
-const COUNTRIES = [
+export const COUNTRIES = [
   { name: "Poland", code: "PL" },
   { name: "United Kingdom", code: "GB" },
   { name: "Germany", code: "DE" },
@@ -30,7 +30,7 @@ const COUNTRIES = [
   { name: "Ireland", code: "IE" },
 ];
 
-const PLATFORM_OPTIONS: Record<string, string[]> = {
+export const PLATFORM_OPTIONS: Record<string, string[]> = {
   IN: [
     "Netflix",
     "Prime Video",
@@ -68,7 +68,7 @@ const PLATFORM_OPTIONS: Record<string, string[]> = {
   ],
 };
 
-const LANGUAGE_OPTIONS: Record<string, string[]> = {
+export const LANGUAGE_OPTIONS: Record<string, string[]> = {
   IN: ["Hindi", "Malayalam", "Tamil", "Telugu", "Bengali", "Marathi", "Kannada", "English"],
   PL: ["Polish", "English", "European cinema"],
   default: ["Local language", "English", "No preference"],
@@ -89,11 +89,11 @@ function detectCountry(): { name: string; code: string } {
   return { name: "Poland", code: "PL" };
 }
 
-function platformOptionsForCountry(countryCode: string) {
+export function platformOptionsForCountry(countryCode: string) {
   return PLATFORM_OPTIONS[countryCode] ?? PLATFORM_OPTIONS.default;
 }
 
-function defaultPlatformsForCountry(countryCode: string) {
+export function defaultPlatformsForCountry(countryCode: string) {
   const options = platformOptionsForCountry(countryCode);
   return options.includes("Netflix") ? ["Netflix"] : options.slice(0, 1);
 }

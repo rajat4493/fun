@@ -25,7 +25,15 @@ import {
   User,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import OnboardingFlow, { loadOnboarding, OnboardingData } from "@/components/OnboardingFlow";
+import OnboardingFlow, {
+  COUNTRIES,
+  defaultPlatformsForCountry,
+  LANGUAGE_OPTIONS,
+  loadOnboarding,
+  OnboardingData,
+  platformOptionsForCountry,
+  saveOnboarding,
+} from "@/components/OnboardingFlow";
 import {
   createRecommendationSession,
   loadRecommendationFeedbackContext,
@@ -268,6 +276,10 @@ function toggleList(value: string, list: string[], setter: (next: string[]) => v
   setter(list.includes(value) ? list.filter((item) => item !== value) : [...list, value]);
 }
 
+function languageOptionsForCountry(countryCode: string) {
+  return [...new Set([...(LANGUAGE_OPTIONS[countryCode] ?? LANGUAGE_OPTIONS.default), "No preference"])];
+}
+
 export default function Home() {
   const router = useRouter();
   const resultRef = useRef<HTMLDivElement>(null);
@@ -289,6 +301,7 @@ export default function Home() {
   const [showWhy, setShowWhy] = useState(false);
   const [platformFilter, setPlatformFilter] = useState<"mine" | "any">("any");
   const [craziness, setCraziness] = useState<CrazinessLevel>(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     const saved = loadOnboarding();
@@ -329,6 +342,41 @@ export default function Home() {
       },
     ];
   }, [pick.whereToWatch]);
+
+  const activeLanguages = onboarding?.languagePreferences?.length ? onboarding.languagePreferences : ["No preference"];
+  const languageOptions = onboarding ? languageOptionsForCountry(onboarding.countryCode) : ["No preference"];
+
+  function updateOnboardingCountry(countryCode: string) {
+    if (!onboarding) return;
+    const country = COUNTRIES.find((item) => item.code === countryCode);
+    if (!country) return;
+    const validPlatforms = platformOptionsForCountry(country.code);
+    const nextPlatforms = onboarding.platforms.filter((platform) => validPlatforms.includes(platform));
+    const next: OnboardingData = {
+      country: country.name,
+      countryCode: country.code,
+      languagePreferences: [],
+      platforms: nextPlatforms.length ? nextPlatforms : defaultPlatformsForCountry(country.code),
+    };
+    saveOnboarding(next);
+    setOnboarding(next);
+  }
+
+  function updateOnboardingLanguage(language: string) {
+    if (!onboarding) return;
+    const current = onboarding.languagePreferences ?? [];
+    const nextLanguages = language === "No preference"
+      ? []
+      : current.includes(language)
+        ? current.filter((item) => item !== language)
+        : [...current, language];
+    const next: OnboardingData = {
+      ...onboarding,
+      languagePreferences: nextLanguages,
+    };
+    saveOnboarding(next);
+    setOnboarding(next);
+  }
 
   async function findPick() {
     setLoading(true);
@@ -458,12 +506,88 @@ export default function Home() {
           <div className="flex items-center gap-5">
             <Search size={24} className="text-white" />
             <div className="hidden h-8 w-px bg-white/12 sm:block" />
-            <div className="flex items-center gap-3">
-              <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-full border border-white/20 bg-white/10 text-sm font-semibold">
-                {onboarding.countryCode}
-              </div>
-              <span className="hidden text-sm text-white/82 sm:inline">{onboarding.country}</span>
-              <ChevronDown size={15} className="hidden text-white/72 sm:block" />
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setSettingsOpen((open) => !open)}
+                className="flex h-9 items-center gap-3 rounded-full border border-white/12 bg-white/[0.055] pl-1.5 pr-3 text-white transition hover:border-white/24 hover:bg-white/[0.08]"
+                aria-expanded={settingsOpen}
+                aria-label="Change region and language"
+              >
+                <span className="grid h-6 w-6 place-items-center rounded-full bg-white/10 text-[10px] font-semibold">
+                  {onboarding.countryCode}
+                </span>
+                <span className="hidden text-sm text-white/82 sm:inline">
+                  {onboarding.country}
+                  {activeLanguages[0] !== "No preference" && (
+                    <span className="text-white/38"> · {activeLanguages.slice(0, 2).join(", ")}</span>
+                  )}
+                </span>
+                <ChevronDown size={14} className={`text-white/54 transition ${settingsOpen ? "rotate-180" : ""}`} />
+              </button>
+
+              {settingsOpen && (
+                <div className="absolute right-0 z-30 mt-3 w-[min(88vw,360px)] rounded-2xl border border-white/12 bg-[#111315]/96 p-4 text-left shadow-[0_24px_80px_rgba(0,0,0,0.7)] backdrop-blur-2xl">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-medium text-white">Region & language</p>
+                      <p className="mt-1 text-xs leading-4 text-white/42">Region affects availability. Language guides the mood lane.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSettingsOpen(false)}
+                      className="rounded-full border border-white/10 px-2 py-1 text-xs text-white/52 transition hover:text-white"
+                    >
+                      Done
+                    </button>
+                  </div>
+
+                  <div className="mt-4">
+                    <p className="mb-2 text-xs uppercase tracking-widest text-white/30">Watching from</p>
+                    <div className="grid max-h-44 grid-cols-2 gap-2 overflow-y-auto pr-1">
+                      {COUNTRIES.map((country) => (
+                        <button
+                          key={country.code}
+                          type="button"
+                          onClick={() => updateOnboardingCountry(country.code)}
+                          className={`h-9 rounded-lg border px-3 text-left text-sm transition ${
+                            onboarding.countryCode === country.code
+                              ? "border-red-400/45 bg-red-500/14 text-white"
+                              : "border-white/10 bg-white/[0.04] text-white/62 hover:border-white/22 hover:text-white"
+                          }`}
+                        >
+                          {country.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <p className="mb-2 text-xs uppercase tracking-widest text-white/30">Prefer language</p>
+                    <div className="flex flex-wrap gap-2">
+                      {languageOptions.map((language) => {
+                        const active = language === "No preference"
+                          ? activeLanguages[0] === "No preference"
+                          : activeLanguages.includes(language);
+                        return (
+                          <button
+                            key={language}
+                            type="button"
+                            onClick={() => updateOnboardingLanguage(language)}
+                            className={`h-8 rounded-full border px-3 text-xs transition ${
+                              active
+                                ? "border-red-300/45 bg-red-500/14 text-white"
+                                : "border-white/10 bg-white/[0.04] text-white/56 hover:border-white/22 hover:text-white"
+                            }`}
+                          >
+                            {language}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </header>
