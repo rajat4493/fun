@@ -1,9 +1,17 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "F.U.N — One perfect pick tonight",
   description: "A classy streaming decision engine that gives one pick, with availability verified where possible.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  viewportFit: "cover",
+  themeColor: "#030303",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
