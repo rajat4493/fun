@@ -32,7 +32,7 @@ function parseRecommendationJson(text: string): RawRecommendation[] {
   return [parsed as RawRecommendation];
 }
 
-export async function recommendWithAnthropic(prompt: string): Promise<RawRecommendation[]> {
+export async function recommendWithAnthropic(prompt: string, temperature = 0.85): Promise<RawRecommendation[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY");
 
@@ -47,7 +47,7 @@ export async function recommendWithAnthropic(prompt: string): Promise<RawRecomme
       body: JSON.stringify({
         model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
         max_tokens: 4000,
-        temperature: 0.85,
+        temperature,
         messages: [{ role: "user", content: prompt }],
       }),
     }),
@@ -69,7 +69,7 @@ function openAIText(data: OpenAIResponse): string {
     .join("\n") ?? "";
 }
 
-export async function recommendWithOpenAI(prompt: string): Promise<RawRecommendation[]> {
+export async function recommendWithOpenAI(prompt: string, temperature = 0.85): Promise<RawRecommendation[]> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
 
@@ -86,7 +86,7 @@ export async function recommendWithOpenAI(prompt: string): Promise<RawRecommenda
           body: JSON.stringify({
             model,
             input: prompt,
-            temperature: 0.85,
+            temperature,
           }),
         }),
         LLM_TIMEOUT_MS,

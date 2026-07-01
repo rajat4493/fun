@@ -49,6 +49,58 @@ function detectRequestedLanguage(text: string): string | null {
   return null;
 }
 
+function buildEmotionalJobProtocol(userContext: string) {
+  return `
+- Emotional job protocol: before choosing any title, silently infer "what emotional outcome is this person chasing tonight?" Use that as the primary selection signal. Do not surface this chain of thought; only reflect it through the title and why-it-fits.
+- Convert tags into needs, not genres. "Tired" may mean refuge, easy escapism, emotional validation, or no-prestige fun. "Lonely" may mean warmth, intimacy, social energy, or 3am alienation. "Hidden gem" often means discovery pride plus quality. "Gore" means intensity and body shock, not just horror branding.
+- Avoid tag averaging. When signals conflict, identify the dominant emotional job and pick for that. Do not mush "tired + nostalgic + emotional" into a generic sad indie.
+- Affect bridging: when the user says "like X but lighter/darker/weirder", preserve the emotional engine of X and only adjust the requested weight. Example: "Parasite but lighter" means class anxiety + dark irony + twist satisfaction with less brutality, not "Korean romcom".`;
+}
+
+function buildSignalPriorityProtocol(input: RecommendRequest) {
+  return `
+- Signal priority hierarchy:
+  1. Hard avoids and explicit negatives are strict.
+  2. Free-text self-description overrides picker tags if both exist.
+  3. Reference-title emotional fingerprint overrides broad genre labels.
+  4. Taste Risk controls emotional appetite: refuge vs discovery vs challenge vs intensity.
+  5. Extreme time context can bend tone: very late night should be more precise/intimate; weekday tired should be lower-friction.
+  6. Language and region choose the content lane, but should not erase the emotional job.
+  7. Picker mood/want tags are supporting evidence, not the whole request.
+  8. Platform availability filters the answer after taste match, not before.`;
+}
+
+function buildContextAmplifier(input: RecommendRequest) {
+  return `
+- Context amplifier:
+  - Weekend late night + lonely: intimate, hypnotic, emotionally precise; avoid generic cheer-up picks unless requested.
+  - Weekday + tired: short, rewarding, low-friction; avoid homework cinema unless Taste Risk is Bold/Unhinged.
+  - Friday/weekend evening + happy: celebratory, kinetic, social, or deliciously entertaining; avoid overly introspective picks.
+  - Late night + anxious/lonely: either controlled catharsis or beautiful alienation; avoid loud crowd-pleasers unless the user asks for escape.
+  - Morning/afternoon: cleaner energy, more focused, less punishing.
+  - Winter/autumn context can support cozy, gothic, reflective, or nocturnal choices; summer/spring can support kinetic, sensual, open-air, or lighter picks.`;
+}
+
+function buildFeedbackRepairClause(input: RecommendRequest) {
+  const feedback = input.feedbackContext;
+  if (!feedback) return "";
+  const clauses: string[] = [];
+  if (feedback.wrongVibeTitles?.length) {
+    clauses.push(`Recent wrong-vibe titles: ${feedback.wrongVibeTitles.join(", ")}. Treat this as an emotional-job miss. Do NOT simply recommend another title with the same surface genre; infer a different emotional interpretation.`);
+  }
+  if (feedback.notOnServiceTitles?.length) {
+    clauses.push(`Recent not-on-service titles: ${feedback.notOnServiceTitles.join(", ")}. If subscription mode is active, prioritize picks more likely to satisfy the selected services and region.`);
+  }
+  if (feedback.alreadySeenTitles?.length) {
+    clauses.push(`Recent already-seen feedback: ${feedback.alreadySeenTitles.join(", ")}. Avoid these and nearby obvious repeats.`);
+  }
+  if (feedback.perfectTitles?.length) {
+    clauses.push(`Recent perfect picks: ${feedback.perfectTitles.join(", ")}. Preserve their successful emotional traits only when they match the current request; do not repeat the exact titles.`);
+  }
+  if (!clauses.length) return "";
+  return `\n- Feedback repair context: ${clauses.join(" ")}`;
+}
+
 export function buildRecommendationPrompt(input: RecommendRequest) {
   const userContext = input.mode === "self"
     ? input.selfText || "The user gave no extra context."
@@ -113,15 +165,19 @@ export function buildRecommendationPrompt(input: RecommendRequest) {
     ? "\n- Explicit intensity intent: The user is asking FOR gore/violent/extreme content. Recommend intense horror, body horror, splatter, brutal survival horror, or extreme transgressive cinema with visible violence and body threat. Examples in range: Martyrs, Inside, The Sadness, Terrifier 2, Raw, Mandy, Possessor, When Evil Lurks. Do not soften this into quiet drama, romance, gentle arthouse, or merely sad prestige cinema. A safe pick is a failure."
     : "";
   const tasteFingerprint = buildTasteFingerprint(userContext);
+  const emotionalJobProtocol = buildEmotionalJobProtocol(userContext);
+  const signalPriorityProtocol = buildSignalPriorityProtocol(input);
+  const contextAmplifier = buildContextAmplifier(input);
+  const feedbackRepairClause = buildFeedbackRepairClause(input);
   const crossLanguageReferenceClause = /\b(similar|like|vibe|reminds me|same as|after watching|watching)\b/i.test(userContext) && explicitLanguageRequest
     ? "\n- Cross-language reference request detected: preserve the reference title's viewer job and deep traits first; use the requested language/culture as the content lane second. Do not let the target language override the actual reason the user liked the reference."
     : "";
 
   const CRAZINESS_PHILOSOPHY = [
-    "Safe — pick titles with wide mainstream appeal and high satisfaction rates. Crowd-pleasing, critically loved, easy to recommend to anyone. The pick should feel like a confident, trustworthy choice. Avoid experimental, niche, polarising, or challenging content.",
-    "Curious — prefer acclaimed but slightly off-mainstream picks. Critical darlings, international breakouts, overlooked prestige titles, or quiet cult classics. One step beyond what the algorithm surfaces. The pick should feel like a smart recommendation from someone who watches a lot.",
-    "Bold — actively seek challenging, provocative, or unconventional titles. Festival picks, films controversial or banned in some regions, morally complex narratives, surrealist or politically charged works. If the user's mood has explicit violence/gore/horror signals, go full extreme: Martyrs, Inside, Raw, When Evil Lurks. The pick should surprise and unsettle. A mainstream safe pick at this level is a failure.",
-    "Unhinged — IGNORE mainstream appeal and language-preference constraints entirely. If the user's mood has ANY violence/gore/horror/intensity signal: go ALL IN on extreme global cinema — The Serbian Film, Human Centipede, Martyrs, Inside, The Sadness, Terrifier 2, Mandy, Possessor. If no explicit intensity signal: target avant-garde, transgressive, surrealist, or genuinely banned/censored works worldwide. Language, country, and comfort are irrelevant. A safe, mainstream, or country-specific pick at this level is a total failure.",
+    "Safe — emotional appetite is refuge. The user wants certainty, familiarity, low regret, and no emotional tax. Pick satisfying, accessible, well-liked titles that solve the mood without punishing the viewer. Avoid experimental, niche, polarising, or homework-feeling content.",
+    "Curious — emotional appetite is discovery without punishment. The user wants to feel a little smarter or surprised, but still cared for. Prefer acclaimed but slightly off-mainstream picks, international breakouts, overlooked prestige, or quiet cult classics.",
+    "Bold — emotional appetite is stimulation and challenge. The user wants surprise, provocation, intensity, or a title with real teeth. Use festival picks, morally complex films, politically charged work, surrealism, or challenging genre cinema when it matches the emotional job. If the user's mood has explicit violence/gore/horror signals, go full extreme. A mainstream safe pick at this level is a failure.",
+    "Unhinged — emotional appetite is aliveness through unfamiliarity, discomfort, extremity, or strangeness. Ignore mainstream appeal. Target cult, avant-garde, extreme, transgressive, experimental, or genuinely divisive works. If the request includes gore/horror/intensity, go extreme. If not, go formally or emotionally strange. A safe pick at this level is a total failure.",
   ];
   const crazinessClause = `\n- Taste Risk (${["Safe", "Curious", "Bold", "Unhinged"][crazinessLevel]}): ${CRAZINESS_PHILOSOPHY[crazinessLevel]}`;
 
@@ -160,7 +216,7 @@ User context:
 - Language preference: ${languagePreferences}
 - Current streaming subscriptions: ${platforms}
 - Time context: ${input.contextHint ?? "not provided"}
-- Mood/request: ${userContext}${seenClause}${recentClause}${hiddenGemClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${crazinessClause}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
+- Mood/request: ${userContext}${seenClause}${recentClause}${hiddenGemClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${crazinessClause}${feedbackRepairClause}${emotionalJobProtocol}${signalPriorityProtocol}${contextAmplifier}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
 
 Return an array of exactly THREE JSON objects (not a wrapper object) with this schema, no markdown:
 [

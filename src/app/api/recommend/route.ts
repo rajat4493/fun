@@ -27,14 +27,21 @@ function matchesLanguageRequest(input: RecommendRequest, recommendation: Recomme
   const metadata = recommendation.contentMetadata;
   if (metadata?.originalLanguage === "hi") return true;
   if (metadata?.originCountry?.includes("IN")) return true;
-  // Hindi requests are strict. If metadata is missing or confirms a non-Indian title, fall back instead of leaking global picks.
+  // If TMDB had no data, give the pick benefit of the doubt; don't reject a valid Hindi title just because TMDB lookup failed.
+  if (!metadata?.originalLanguage && !metadata?.originCountry?.length) return true;
+  // TMDB found it and confirmed it's non-Indian.
   return false;
 }
 
+function llmTemperature(input: RecommendRequest): number {
+  return input.craziness === 3 ? 1 : 0.85;
+}
+
 async function getRecommendations(input: RecommendRequest, prompt: string): Promise<RawRecommendation[]> {
+  const temperature = llmTemperature(input);
   if (process.env.ANTHROPIC_API_KEY) {
     try {
-      return await recommendWithAnthropic(prompt);
+      return await recommendWithAnthropic(prompt, temperature);
     } catch (error) {
       console.warn("Anthropic failed, trying OpenAI:", error instanceof Error ? error.message : String(error));
     }
@@ -42,7 +49,7 @@ async function getRecommendations(input: RecommendRequest, prompt: string): Prom
 
   if (process.env.OPENAI_API_KEY) {
     try {
-      return await recommendWithOpenAI(prompt);
+      return await recommendWithOpenAI(prompt, temperature);
     } catch (error) {
       console.warn("OpenAI failed, using local fallback:", error instanceof Error ? error.message : String(error));
     }

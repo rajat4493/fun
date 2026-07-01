@@ -24,6 +24,7 @@ import {
   createRecommendationSession,
   defaultRecommendation,
   FeedbackReason,
+  loadRecommendationFeedbackContext,
   loadRecentRecommendationTitles,
   RecommendationSession,
   recommendationStorageKey,
@@ -39,9 +40,18 @@ const ERROR_KEY = "fun:recommendation-error";
 const LOADING_TIMEOUT_MS = 85000;
 
 const SEARCH_TITLES = [
-  "The Godfather", "Moonlight", "Her", "Past Lives", "Drive My Car",
-  "Portrait of a Lady on Fire", "Parasite", "Lost in Translation",
-  "Aftersun", "Carol", "All About Eve", "Mulholland Drive",
+  "Parasite for the perfect trap",
+  "Moonlight for quiet ache",
+  "Her for lonely circuitry",
+  "Past Lives for impossible timing",
+  "The Godfather for family pressure",
+  "Portrait of a Lady on Fire for restraint",
+  "Lost in Translation for beautiful drift",
+  "Aftersun for memory bruises",
+  "Carol for elegant longing",
+  "All About Eve for sharp ambition",
+  "Mulholland Drive for dream logic",
+  "Before Sunrise for one-night magic",
 ];
 
 const FEEDBACK_OPTIONS: Array<{ reason: FeedbackReason; label: string }> = [
@@ -229,6 +239,7 @@ export default function RecommendationPage() {
           ...session.request,
           seenTitles: seen,
           recentTitles: [...loadRecentRecommendationTitles(), ...batch.map((item) => item.title)].slice(0, 24),
+          feedbackContext: loadRecommendationFeedbackContext(),
         };
         const response = await fetch("/api/recommend", {
           method: "POST",
@@ -271,6 +282,7 @@ export default function RecommendationPage() {
           ...loadRecentRecommendationTitles(),
           ...(session.batch ?? [session.recommendation]).map((item) => item.title),
         ].slice(0, 24),
+        feedbackContext: loadRecommendationFeedbackContext(),
       };
       const response = await fetch("/api/recommend", {
         method: "POST",

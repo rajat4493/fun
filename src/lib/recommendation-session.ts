@@ -1,4 +1,4 @@
-import { RecommendRequest, Recommendation, WatchProvider } from "@/lib/types";
+import { RecommendRequest, Recommendation, RecommendationFeedbackContext, WatchProvider } from "@/lib/types";
 
 export const recommendationStorageKey = "fun:last-recommendation";
 export const seenTitlesKey = "fun:seen-titles";
@@ -88,6 +88,24 @@ export function saveRecommendationFeedback(
   const next = [feedback, ...existing].slice(0, 200);
   localStorage.setItem(feedbackStorageKey, JSON.stringify(next));
   return next;
+}
+
+export function loadRecommendationFeedbackContext(): RecommendationFeedbackContext {
+  const feedback = loadRecommendationFeedback().slice(0, 12);
+  const titlesByReason = (reason: FeedbackReason) =>
+    feedback
+      .filter((item) => item.reason === reason)
+      .map((item) => item.title)
+      .filter(Boolean)
+      .slice(0, 6);
+
+  return {
+    lastReason: feedback[0]?.reason,
+    wrongVibeTitles: titlesByReason("wrong-vibe"),
+    notOnServiceTitles: titlesByReason("not-on-service"),
+    alreadySeenTitles: titlesByReason("already-seen"),
+    perfectTitles: titlesByReason("perfect"),
+  };
 }
 
 export type RecommendationSession = {

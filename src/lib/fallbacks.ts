@@ -25,6 +25,10 @@ function isKnownFalsePositiveForRequest(input: RecommendRequest, rec: RawRecomme
     return true;
   }
 
+  if ((input.seenTitles ?? []).some((seenTitle) => normalizeForMatch(seenTitle) === title)) {
+    return true;
+  }
+
   if (/shameless/i.test(text)) {
     return [
       "thegoodplace",

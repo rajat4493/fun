@@ -1,4 +1,13 @@
 export type CrazinessLevel = 0 | 1 | 2 | 3; // 0=Safe, 1=Curious, 2=Bold, 3=Unhinged
+export type FeedbackSignal = "perfect" | "wrong-vibe" | "not-on-service" | "already-seen";
+
+export type RecommendationFeedbackContext = {
+  lastReason?: FeedbackSignal;
+  wrongVibeTitles?: string[];
+  notOnServiceTitles?: string[];
+  alreadySeenTitles?: string[];
+  perfectTitles?: string[];
+};
 
 export type RecommendRequest = {
   mode: "choose" | "self";
@@ -16,6 +25,7 @@ export type RecommendRequest = {
   platformFilter?: "mine" | "any";
   contextHint?: string; // time-of-day, day, season — influences pick tone
   craziness?: CrazinessLevel;
+  feedbackContext?: RecommendationFeedbackContext;
 };
 
 export type WatchProvider = {

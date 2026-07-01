@@ -6,7 +6,6 @@ import {
   Ban,
   Bookmark,
   ChevronDown,
-  ChevronRight,
   Clock3,
   Droplet,
   Film,
@@ -29,6 +28,7 @@ import { useRouter } from "next/navigation";
 import OnboardingFlow, { loadOnboarding, OnboardingData } from "@/components/OnboardingFlow";
 import {
   createRecommendationSession,
+  loadRecommendationFeedbackContext,
   loadRecentRecommendationTitles,
   loadSeenTitles,
   recommendationStorageKey,
@@ -271,7 +271,6 @@ function toggleList(value: string, list: string[], setter: (next: string[]) => v
 export default function Home() {
   const router = useRouter();
   const resultRef = useRef<HTMLDivElement>(null);
-  const alternativesScrollRef = useRef<HTMLDivElement>(null);
 
   const [onboarding, setOnboarding] = useState<OnboardingData | null>(null);
   const [onboardingReady, setOnboardingReady] = useState(false);
@@ -377,6 +376,7 @@ export default function Home() {
       platformFilter,
       contextHint,
       craziness,
+      feedbackContext: loadRecommendationFeedbackContext(),
     };
 
     // Navigate immediately — recommendation page shows cinematic loading state
@@ -793,31 +793,21 @@ export default function Home() {
           <section className="pt-3">
             <h2 className="mb-3 flex items-center gap-2 text-lg text-white">
               More picks you'll love
-              <ChevronRight size={19} />
             </h2>
-            <div className="flex items-end gap-3">
-              <div ref={alternativesScrollRef} className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
-                {pick.alternatives.map((alt, i) => {
-                  const [titlePart] = alt.split(" (");
-                  const yearMatch = alt.match(/\((\d{4})\)/);
-                  const year = yearMatch?.[1] ?? "";
-                  return (
-                    <AlternativeCard
-                      key={`${alt}-${i}`}
-                      title={titlePart}
-                      posterUrl={pick.alternativePosterUrls?.[i]}
-                      meta={year}
-                    />
-                  );
-                })}
-              </div>
-              <button
-                type="button"
-                onClick={() => alternativesScrollRef.current?.scrollBy({ left: 300, behavior: "smooth" })}
-                className="mb-2 grid h-11 w-11 shrink-0 place-items-center rounded-full border border-white/14 bg-white/[0.06] text-white transition hover:bg-white/[0.12]"
-              >
-                <ChevronRight size={22} />
-              </button>
+            <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
+              {pick.alternatives.map((alt, i) => {
+                const [titlePart] = alt.split(" (");
+                const yearMatch = alt.match(/\((\d{4})\)/);
+                const year = yearMatch?.[1] ?? "";
+                return (
+                  <AlternativeCard
+                    key={`${alt}-${i}`}
+                    title={titlePart}
+                    posterUrl={pick.alternativePosterUrls?.[i]}
+                    meta={year}
+                  />
+                );
+              })}
             </div>
           </section>
         )}
