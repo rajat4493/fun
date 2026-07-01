@@ -134,6 +134,14 @@ function providerDetail(provider: WatchProvider) {
   return "Check provider";
 }
 
+function isPlaceholderPick(recommendation?: Recommendation | null) {
+  return !recommendation || (
+    recommendation.title === defaultPick.title &&
+    recommendation.year === defaultPick.year &&
+    recommendation.oneLine === defaultPick.oneLine
+  );
+}
+
 function MovieImage({
   posterUrl,
   title,
@@ -177,6 +185,16 @@ function ProviderCard({ provider }: { provider: WatchProvider }) {
   const tone = providerTone(provider);
   const colorClass =
     tone === "blue" ? "text-blue-300" : tone === "red" ? "text-red-300" : tone === "teal" ? "text-teal-300" : "text-white";
+  const detail = providerDetail(provider);
+
+  if (provider.access === "unknown") {
+    return (
+      <div className="flex min-h-[132px] min-w-[220px] flex-col justify-center rounded-xl border border-white/12 bg-white/[0.055] px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+        <div className="text-sm font-medium text-white">{provider.name}</div>
+        <div className="mt-2 text-sm leading-5 text-white/54">{detail}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-[132px] w-[84px] flex-col items-center justify-center rounded-xl border border-white/12 bg-white/[0.055] px-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
@@ -187,7 +205,7 @@ function ProviderCard({ provider }: { provider: WatchProvider }) {
         <div className={`text-4xl font-black ${colorClass}`}>{providerMark(provider.name)}</div>
       )}
       <div className="mt-2 text-sm text-white">{provider.name}</div>
-      <div className={tone === "red" ? "mt-1 text-xs text-red-300" : "mt-1 text-xs text-white/54"}>{providerDetail(provider)}</div>
+      <div className={tone === "red" ? "mt-1 text-xs text-red-300" : "mt-1 text-xs text-white/54"}>{detail}</div>
     </div>
   );
 }
@@ -312,7 +330,7 @@ export default function Home() {
       const raw = localStorage.getItem(recommendationStorageKey);
       if (raw) {
         const session = JSON.parse(raw);
-        if (session?.recommendation) {
+        if (session?.recommendation && !isPlaceholderPick(session.recommendation)) {
           setPick(session.recommendation);
           setHasGenerated(true);
         }
@@ -342,6 +360,7 @@ export default function Home() {
       },
     ];
   }, [pick.whereToWatch]);
+  const hasPickPoster = Boolean(pick.omdbPosterUrl);
 
   const activeLanguages = onboarding?.languagePreferences?.length ? onboarding.languagePreferences : ["No preference"];
   const languageOptions = onboarding ? languageOptionsForCountry(onboarding.countryCode) : ["No preference"];
@@ -809,12 +828,12 @@ export default function Home() {
                 posterUrl={pick.omdbPosterUrl}
                 title={pick.title}
                 year={pick.year}
-                className="absolute inset-y-0 left-0 h-full w-[48%] opacity-92"
+                className={`absolute inset-y-0 left-0 h-full opacity-92 ${hasPickPoster ? "w-[48%]" : "w-full"}`}
                 objectPosition="top"
               />
-              <div className="absolute inset-0 bg-gradient-to-r from-black/12 via-[#0b0b0d]/72 to-[#0b0b0d]" />
+              <div className={`absolute inset-0 ${hasPickPoster ? "bg-gradient-to-r from-black/12 via-[#0b0b0d]/72 to-[#0b0b0d]" : "bg-gradient-to-r from-[#0b0b0d]/92 via-[#0b0b0d]/82 to-[#0b0b0d]/92"}`} />
               <Bookmark size={22} className="absolute right-5 top-5 text-white/64" />
-              <div className="absolute bottom-5 left-[48%] right-6 top-5">
+              <div className={`absolute bottom-5 right-6 top-5 ${hasPickPoster ? "left-[48%]" : "left-6"}`}>
                 <h3 className="font-serif text-2xl uppercase tracking-[0.14em] text-white">{pick.title}</h3>
                 <p className="mt-2 text-sm text-white/56">
                   {pick.year} <span className="px-2">-</span> {toTitleCase(pick.vibe.split(",")[0] || pick.format)}{" "}
