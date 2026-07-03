@@ -24,6 +24,7 @@ export type AvailabilityResult = {
   note: string;
   verifiedAt?: string;
   source?: string;
+  sourceUrl?: string;
 };
 
 function normalizeCountry(country: string): string {
@@ -76,16 +77,21 @@ export function checkAvailability(title: string, year: string, country: string):
   const note = subscriptionProviders.length > 0
     ? `Verified on ${subscriptionProviders.map((p) => p.name).join(" · ")}`
     : "Verified, but not included with a subscription.";
+  const providerTitleUrl = match.sourceUrl?.includes("/title/") ? match.sourceUrl : undefined;
+  const providers = providerTitleUrl
+    ? match.providers.map((provider) => ({ ...provider, url: providerTitleUrl, urlKind: "title" as const }))
+    : match.providers;
 
   return {
     status: "verified",
     title: match.title,
     year: match.year,
     country: countryCode,
-    providers: match.providers,
+    providers,
     primary,
     note,
     verifiedAt: match.verifiedAt,
     source: match.source,
+    sourceUrl: match.sourceUrl,
   };
 }

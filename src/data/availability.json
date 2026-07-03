@@ -264,5 +264,20 @@
     "source": "Local sample catalogue",
     "sourceUrl": "https://www.netflix.com/pl-en/title/80175722",
     "verifiedAt": "2026-06-29"
+  },
+  {
+    "title": "Daadi Ki Shaadi",
+    "year": "2026",
+    "countries": ["PL"],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "Netflix title page",
+    "sourceUrl": "https://www.netflix.com/pl-en/title/82741941",
+    "verifiedAt": "2026-07-03"
   }
 ]

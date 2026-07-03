@@ -133,6 +133,66 @@ function justWatchUrl(title: string, country?: string): string {
   return `https://www.justwatch.com/${locale}/search?q=${encodeURIComponent(title)}`;
 }
 
+function normalizeProviderName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function providerSearchUrl(provider: WatchProvider, title: string): string | null {
+  const q = encodeURIComponent(title);
+  const name = normalizeProviderName(provider.name);
+  if (name.includes("netflix")) return `https://www.netflix.com/search?q=${q}`;
+  if (name.includes("primevideo") || name.includes("amazon")) return `https://www.primevideo.com/search/ref=atv_nb_sr?phrase=${q}`;
+  if (name.includes("disney") || name.includes("hotstar") || name.includes("jiohotstar")) return `https://www.hotstar.com/in/search?q=${q}`;
+  if (name.includes("max") || name.includes("hbo")) return `https://www.max.com/search?q=${q}`;
+  if (name.includes("appletv")) return `https://tv.apple.com/search?term=${q}`;
+  if (name.includes("youtube")) return `https://www.youtube.com/results?search_query=${q}`;
+  if (name.includes("mubi")) return `https://mubi.com/search?query=${q}`;
+  if (name.includes("zee5")) return `https://www.zee5.com/search?q=${q}`;
+  if (name.includes("sonyliv")) return `https://www.sonyliv.com/search?q=${q}`;
+  return null;
+}
+
+function providerMatchesUserPlatform(provider: WatchProvider, platforms: string[]): boolean {
+  const providerName = normalizeProviderName(provider.name);
+  return platforms.some((platform) => {
+    const selected = normalizeProviderName(platform);
+    return providerName.includes(selected) || selected.includes(providerName);
+  });
+}
+
+function primaryWatchProvider(providers: WatchProvider[], platforms: string[]): WatchProvider | null {
+  const subscription = providers.filter((provider) => provider.access === "subscription" || provider.access === "included");
+  return subscription.find((provider) => providerMatchesUserPlatform(provider, platforms)) ??
+    subscription[0] ??
+    providers[0] ??
+    null;
+}
+
+function watchAction(
+  pick: Recommendation,
+  providers: WatchProvider[],
+  platforms: string[],
+  fallbackUrl: string,
+) {
+  const provider = primaryWatchProvider(providers, platforms);
+  if (pick.whereToWatch.status !== "verified" || !provider) {
+    return { label: "Find where to watch", href: fallbackUrl, kind: "unknown" as const };
+  }
+
+  if (provider.url && provider.urlKind === "title") {
+    return { label: `Watch on ${provider.name}`, href: provider.url, kind: "title" as const };
+  }
+
+  const searchUrl = provider.url && provider.urlKind === "search"
+    ? provider.url
+    : providerSearchUrl(provider, pick.title);
+  if (searchUrl) {
+    return { label: `Search on ${provider.name}`, href: searchUrl, kind: "search" as const };
+  }
+
+  return { label: "Find where to watch", href: fallbackUrl, kind: "unknown" as const };
+}
+
 function titleFontSize(title: string): string {
   const longestWord = Math.max(...title.split(/\s+/).map((w) => w.length));
   const totalLen = title.length;
@@ -345,6 +405,7 @@ export default function RecommendationPage() {
   const subProviders = providers.filter((p) => p.access === "subscription");
   const rentBuyProviders = providers.filter((p) => p.access === "rent" || p.access === "buy");
   const verified = pick.whereToWatch.status === "verified";
+  const primaryAction = watchAction(pick, providers, session?.request?.platforms ?? [], availabilitySearchUrl);
   const subscriptionOnly = session?.request?.platformFilter === "mine";
   const exhaustedSubscriptionBatch = subscriptionOnly && batch.length > 0 && batchIndex >= batch.length - 1;
   const regionLabel = session?.request?.country ?? "Region";
@@ -518,12 +579,12 @@ export default function RecommendationPage() {
 
             <div className="mt-8 flex flex-wrap gap-3">
               <a
-                href={availabilitySearchUrl}
+                href={primaryAction.href}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex h-12 items-center gap-3 rounded-lg bg-gradient-to-b from-red-500 to-red-900 px-6 font-semibold text-white shadow-[0_14px_40px_rgba(127,29,29,0.45)] transition hover:brightness-110"
               >
-                <Play size={18} fill="currentColor" /> Watch now
+                <Play size={18} fill="currentColor" /> {primaryAction.label}
               </a>
               <button
                 type="button"
@@ -663,12 +724,12 @@ export default function RecommendationPage() {
                   </p>
                 </div>
                 <a
-                  href={availabilitySearchUrl}
+                  href={primaryAction.href}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="mt-4 inline-flex items-center gap-2 rounded-lg border border-white/12 px-3 py-2 text-sm text-white/62 transition hover:border-white/24 hover:text-white"
                 >
-                  Check availability <ExternalLink size={14} />
+                  {primaryAction.label} <ExternalLink size={14} />
                 </a>
               </div>
             )}

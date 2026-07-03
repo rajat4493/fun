@@ -34,6 +34,8 @@ export type WatchProvider = {
   price?: string;
   note?: string;
   logoUrl?: string;
+  url?: string;
+  urlKind?: "title" | "search";
 };
 
 export type HiddenLayerTitle = {
