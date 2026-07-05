@@ -1,11 +1,14 @@
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import path from "node:path";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(".");
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  outputFileTracingRoot: __dirname,
+  distDir: process.env.NEXT_DIST_DIR || ".next",
+  outputFileTracingRoot: projectRoot,
+  turbopack: {
+    root: projectRoot,
+  },
 };
 
 export default nextConfig;

@@ -1,5 +1,11 @@
 export type CrazinessLevel = 0 | 1 | 2 | 3; // 0=Safe, 1=Curious, 2=Bold, 3=Unhinged
-export type FeedbackSignal = "perfect" | "wrong-vibe" | "not-on-service" | "already-seen";
+export type FeedbackSignal =
+  | "perfect"
+  | "good-not-perfect"
+  | "wrong-vibe"
+  | "not-on-service"
+  | "already-seen"
+  | "too-much-effort";
 
 export type RecommendationFeedbackContext = {
   lastReason?: FeedbackSignal;
@@ -15,6 +21,8 @@ export type RecommendRequest = {
   wants?: string[];
   avoids?: string[];
   time?: string;
+  energy?: string;
+  viewingContext?: string;
   country?: string;
   languagePreferences?: string[];
   platforms?: string[];
@@ -23,6 +31,7 @@ export type RecommendRequest = {
   seenTitles?: string[];
   recentTitles?: string[];
   platformFilter?: "mine" | "any";
+  discoveryMode?: "standard" | "indie";
   contextHint?: string; // time-of-day, day, season — influences pick tone
   craziness?: CrazinessLevel;
   feedbackContext?: RecommendationFeedbackContext;

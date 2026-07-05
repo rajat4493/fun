@@ -1,30 +1,32 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowRight,
   Ban,
-  Bookmark,
+  CheckCircle2,
   ChevronDown,
   Clock3,
-  Droplet,
-  Film,
+  Compass,
+  Drama,
   Flame,
-  Ghost,
+  Globe2,
   Heart,
-  Layers,
   Lock,
   Monitor,
-  PenLine,
-  Play,
+  PlayCircle,
   Search,
   Shield,
   Smile,
   Sparkles,
   Star,
+  type LucideIcon,
   User,
+  Users,
+  Zap,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import OnboardingFlow, {
   COUNTRIES,
   defaultPlatformsForCountry,
@@ -36,381 +38,314 @@ import OnboardingFlow, {
 } from "@/components/OnboardingFlow";
 import {
   createRecommendationSession,
+  getOrCreateSessionId,
   loadRecommendationFeedbackContext,
   loadRecentRecommendationTitles,
   loadSeenTitles,
   recommendationStorageKey,
   rememberRecommendationTitles,
 } from "@/lib/recommendation-session";
-import { CrazinessLevel, RecommendRequest, Recommendation, WatchProvider } from "@/lib/types";
+import { CrazinessLevel, RecommendRequest, Recommendation } from "@/lib/types";
 
-type IconType = typeof User;
-
-type PickerOption = {
+type Option = {
   label: string;
-  icon: IconType;
+  icon: LucideIcon;
+  helper?: string;
 };
 
-const moodOptions: PickerOption[] = [
+const moods: Option[] = [
   { label: "tired", icon: Smile },
-  { label: "horny", icon: Flame },
   { label: "happy", icon: Smile },
   { label: "lonely", icon: User },
   { label: "nostalgic", icon: Clock3 },
+  { label: "stressed", icon: Zap },
+  { label: "curious", icon: Search },
 ];
 
-const avoidOptions: PickerOption[] = [
+const avoids: Option[] = [
   { label: "violence", icon: Shield },
-  { label: "gore", icon: Droplet },
+  { label: "gore", icon: Flame },
   { label: "heavy drama", icon: Shield },
-  { label: "horror", icon: Ghost },
+  { label: "horror", icon: Drama },
+  { label: "sad ending", icon: Ban },
+  { label: "slow", icon: Clock3 },
 ];
 
-const wantOptions: PickerOption[] = [
+const wants: Option[] = [
   { label: "emotional", icon: Heart },
   { label: "funny", icon: Smile },
-  { label: "sexy", icon: Sparkles },
   { label: "comforting", icon: Heart },
-  { label: "weird", icon: Ghost },
+  { label: "inspiring", icon: Sparkles },
+  { label: "romantic", icon: Heart },
+  { label: "weird", icon: Compass },
 ];
 
-const timeOptions: PickerOption[] = [
-  { label: "90 min", icon: Clock3 },
-  { label: "under 2 hours", icon: Clock3 },
-  { label: "one episode", icon: Monitor },
-  { label: "no preference", icon: Sparkles },
+const timeOptions = ["90 min", "under 2 hours", "one episode", "no preference"];
+const energyOptions = ["Very low", "Low", "Medium", "High"];
+const contextOptions = ["Alone", "Partner", "Friends", "Family"];
+const riskOptions: Array<{ level: CrazinessLevel; label: string; helper: string; icon: LucideIcon }> = [
+  { level: 0, label: "Safe", helper: "Feel-good & familiar", icon: Shield },
+  { level: 1, label: "Curious", helper: "Try something new", icon: Search },
+  { level: 2, label: "Bold", helper: "Deep & challenging", icon: Sparkles },
+  { level: 3, label: "Unhinged", helper: "Wild & unexpected", icon: Star },
 ];
 
 const defaultPick: Recommendation = {
-  title: "Afterglow",
-  year: "2024",
+  title: "The Station Agent",
+  year: "2003",
   format: "Film",
-  runtime: "1h 46m",
-  vibe: "moody, intimate, elegant",
-  confidence: 91,
-  oneLine: "Two strangers. One night. Everything changes.",
+  runtime: "88 min",
+  vibe: "heartwarming, quiet, humane",
+  confidence: 95,
+  oneLine: "A tender story about unexpected friendships and finding your place.",
   whyItFits: [
-    "It has the emotional pull you asked for without turning heavy.",
-    "It fits a short evening window and keeps the choice simple.",
-    "It feels premium and specific instead of algorithmically generic.",
+    "It is warm without being sugary.",
+    "The runtime is lean enough for a tired evening.",
+    "It gives comfort through character chemistry, not noise.",
   ],
   whereToWatch: {
     status: "unverified",
-    primary: "Availability not verified",
-    note: "Generate a pick to see where to watch.",
+    primary: "Generate a pick",
+    note: "F.U.N will check availability for your region.",
   },
   hiddenLayer: {
-    headline: "What your current platforms are missing",
-    insight: "Generate a pick and F.U.N will reveal what your subscriptions aren't showing you.",
-    classyJab: "Your taste may be wider than your current subscriptions.",
+    headline: "Your taste may be wider",
+    insight: "Generate a pick and F.U.N will reveal whether your services fit the mood.",
+    classyJab: "One pick, verified where possible.",
   },
-  alternatives: [],
+  alternatives: ["Chef (2014)", "Once (2007)", "About Time (2013)"],
 };
 
-function toTitleCase(value: string) {
-  return value.split(" ").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+function languageOptionsFor(countryCode: string) {
+  return [...new Set([...(LANGUAGE_OPTIONS[countryCode] ?? LANGUAGE_OPTIONS.default), "No preference"])];
 }
 
-function providerMark(name: string) {
-  if (name.startsWith("+")) return name;
-  if (name.toLowerCase().startsWith("availability")) return "?";
-  return name.charAt(0).toUpperCase();
+function toggle(value: string, current: string[], setter: (next: string[]) => void) {
+  setter(current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
 }
 
-function providerTone(provider: WatchProvider): "blue" | "red" | "teal" | "plain" {
-  if (provider.access === "rent") return "red";
-  if (provider.access === "buy") return "teal";
-  if (provider.access === "included" || provider.access === "subscription") return "blue";
-  return "plain";
-}
-
-function providerDetail(provider: WatchProvider) {
-  if (provider.note) return provider.note;
-  if (provider.price) return provider.price;
-  if (provider.access === "included") return "Included";
-  if (provider.access === "subscription") return "Subscription";
-  if (provider.access === "rent") return "Rent";
-  if (provider.access === "buy") return "Buy";
-  return "Check provider";
-}
-
-function isPlaceholderPick(recommendation?: Recommendation | null) {
-  return !recommendation || (
-    recommendation.title === defaultPick.title &&
-    recommendation.year === defaultPick.year &&
-    recommendation.oneLine === defaultPick.oneLine
+function Logo() {
+  return (
+    <span className="text-3xl font-medium tracking-[0.34em] text-white">
+      F<span className="text-red-500">.</span>U<span className="text-red-500">.</span>N
+    </span>
   );
 }
 
-function MovieImage({
-  posterUrl,
-  title,
-  year,
-  className = "",
-  objectPosition = "center",
-}: {
-  posterUrl?: string;
-  title: string;
-  year?: string;
-  className?: string;
-  objectPosition?: string;
-}) {
-  if (posterUrl) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={posterUrl} alt={title} className={`object-cover ${className}`} style={{ objectPosition }} />;
-  }
-  void year;
-  return <div className={`bg-gradient-to-br from-[#1a1625] via-[#12141c] to-[#0a0b10] ${className}`} />;
-}
-
-function OptionButton({ option, active, onClick }: { option: PickerOption; active: boolean; onClick: () => void }) {
-  const Icon = option.icon;
+function RegionLanguageButton({ onboarding, onClick }: { onboarding: OnboardingData; onClick: () => void }) {
+  const language = onboarding.languagePreferences?.length ? onboarding.languagePreferences.slice(0, 2).join(", ") : "Any language";
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`group flex h-9 min-w-0 items-center gap-2 rounded-lg border px-4 text-sm text-white transition ${
-        active
-          ? "border-red-400/70 bg-red-500/16 shadow-[0_0_28px_rgba(239,68,68,0.26)]"
-          : "border-white/12 bg-white/[0.055] hover:border-white/28 hover:bg-white/[0.09]"
-      }`}
+      className="inline-flex h-10 items-center gap-2 rounded-full border border-white/12 bg-white/[0.05] px-4 text-sm text-white/78 transition hover:border-white/24 hover:bg-white/[0.08]"
     >
-      <Icon size={17} className={active ? "text-red-200" : "text-white/82"} />
-      <span className="truncate">{option.label}</span>
+      <Globe2 size={16} />
+      <span>{onboarding.country} · {language}</span>
+      <ChevronDown size={15} className="text-white/44" />
     </button>
   );
 }
 
-function ProviderCard({ provider }: { provider: WatchProvider }) {
-  const tone = providerTone(provider);
-  const colorClass =
-    tone === "blue" ? "text-blue-300" : tone === "red" ? "text-red-300" : tone === "teal" ? "text-teal-300" : "text-white";
-  const detail = providerDetail(provider);
+function RegionLanguagePanel({
+  onboarding,
+  onChange,
+  onClose,
+}: {
+  onboarding: OnboardingData;
+  onChange: (next: OnboardingData) => void;
+  onClose: () => void;
+}) {
+  const languageOptions = languageOptionsFor(onboarding.countryCode);
 
-  if (provider.access === "unknown") {
-    return (
-      <div className="flex min-h-[132px] min-w-[220px] flex-col justify-center rounded-xl border border-white/12 bg-white/[0.055] px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-        <div className="text-sm font-medium text-white">{provider.name}</div>
-        <div className="mt-2 text-sm leading-5 text-white/54">{detail}</div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex h-[132px] w-[84px] flex-col items-center justify-center rounded-xl border border-white/12 bg-white/[0.055] px-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-      {provider.logoUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={provider.logoUrl} alt={provider.name} className="h-10 w-10 rounded-lg object-contain" />
-      ) : (
-        <div className={`text-4xl font-black ${colorClass}`}>{providerMark(provider.name)}</div>
-      )}
-      <div className="mt-2 text-sm text-white">{provider.name}</div>
-      <div className={tone === "red" ? "mt-1 text-xs text-red-300" : "mt-1 text-xs text-white/54"}>{detail}</div>
-    </div>
-  );
-}
-
-function AlternativeCard({ title, posterUrl, meta }: { title: string; posterUrl?: string; meta: string }) {
-  return (
-    <article className="group relative h-[192px] w-[128px] shrink-0 overflow-hidden rounded-xl border border-white/12 bg-white/[0.055]">
-      <MovieImage
-        posterUrl={posterUrl}
-        title={title}
-        className="absolute inset-0 h-full w-full transition duration-500 group-hover:scale-105"
-      />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/88 via-black/10 to-transparent" />
-      <div className="absolute inset-x-0 bottom-0 p-3">
-        <h4 className="line-clamp-2 font-serif text-sm uppercase leading-tight tracking-[0.08em] text-white">{title}</h4>
-        {meta && <p className="mt-1 text-xs text-white/55">{meta}</p>}
-      </div>
-    </article>
-  );
-}
-
-const CAROUSEL_MOODS = ["exhausted", "nostalgic", "restless", "wired", "lonely", "content", "anxious", "hopeful"];
-const CAROUSEL_VIBES = [
-  "visually stunning",
-  "quietly moving",
-  "darkly funny",
-  "wildly weird",
-  "warmly comforting",
-  "emotionally raw",
-  "like Parasite but lighter",
-  "like Baby Driver but funny",
-  "in the spirit of Her",
-];
-
-function SelfDescribeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [focused, setFocused] = useState(false);
-  const [moodIdx, setMoodIdx] = useState(0);
-  const [vibeIdx, setVibeIdx] = useState(0);
-  const [visible, setVisible] = useState(true);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setVisible(false);
-      setTimeout(() => {
-        setMoodIdx((i) => (i + 1) % CAROUSEL_MOODS.length);
-        setVibeIdx((i) => (i + 1) % CAROUSEL_VIBES.length);
-        setVisible(true);
-      }, 250);
-    }, 2600);
-    return () => clearInterval(id);
-  }, []);
-
-  return (
-    <div className="relative">
-      <textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        rows={4}
-        className="w-full resize-none rounded-xl border border-white/12 bg-black/24 px-4 py-3.5 text-sm text-white outline-none placeholder:text-transparent focus:border-red-300/50"
-      />
-      {!value && !focused && (
-        <div className="pointer-events-none absolute inset-0 flex flex-wrap items-start gap-x-1 px-4 py-3.5 text-sm text-white/36">
-          <span>I'm</span>
-          <span
-            className="text-white/62 transition-opacity duration-300"
-            style={{ opacity: visible ? 1 : 0 }}
-          >
-            {CAROUSEL_MOODS[moodIdx]}
-          </span>
-          <span>— want something</span>
-          <span
-            className="text-white/62 transition-opacity duration-300"
-            style={{ opacity: visible ? 1 : 0 }}
-          >
-            {CAROUSEL_VIBES[vibeIdx]}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function toggleList(value: string, list: string[], setter: (next: string[]) => void) {
-  setter(list.includes(value) ? list.filter((item) => item !== value) : [...list, value]);
-}
-
-function languageOptionsForCountry(countryCode: string) {
-  return [...new Set([...(LANGUAGE_OPTIONS[countryCode] ?? LANGUAGE_OPTIONS.default), "No preference"])];
-}
-
-export default function Home() {
-  const router = useRouter();
-  const resultRef = useRef<HTMLDivElement>(null);
-
-  const [onboarding, setOnboarding] = useState<OnboardingData | null>(null);
-  const [onboardingReady, setOnboardingReady] = useState(false);
-
-  const [mode, setMode] = useState<"choose" | "self">("choose");
-  const [moods, setMoods] = useState(["tired"]);
-  const [avoids, setAvoids] = useState(["violence"]);
-  const [wants, setWants] = useState(["emotional"]);
-  const [time, setTime] = useState(["90 min"]);
-  const [selfText, setSelfText] = useState("");
-  const [reference, setReference] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [pick, setPick] = useState<Recommendation>(defaultPick);
-  const [error, setError] = useState<string | null>(null);
-  const [hasGenerated, setHasGenerated] = useState(false);
-  const [showWhy, setShowWhy] = useState(false);
-  const [platformFilter, setPlatformFilter] = useState<"mine" | "any">("any");
-  const [craziness, setCraziness] = useState<CrazinessLevel>(0);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-
-  useEffect(() => {
-    const saved = loadOnboarding();
-    setOnboarding(saved);
-    setOnboardingReady(true);
-
-    try {
-      const raw = localStorage.getItem(recommendationStorageKey);
-      if (raw) {
-        const session = JSON.parse(raw);
-        if (session?.recommendation && !isPlaceholderPick(session.recommendation)) {
-          setPick(session.recommendation);
-          setHasGenerated(true);
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const promptPreview = useMemo(() => {
-    if (mode === "self" && selfText.trim()) return selfText.trim();
-    return [
-      moods.length ? `I'm ${moods.join(" and ")}` : "I'm open",
-      wants.length ? `I want ${wants.join(", ")}` : "I want something good",
-      avoids.length ? `I don't want ${avoids.join(", ")}` : "",
-      time.length ? `I have ${time.join(" or ")}` : "I have the evening",
-    ].filter(Boolean).join(". ");
-  }, [mode, selfText, moods, wants, avoids, time]);
-
-  const watchProviders = useMemo<WatchProvider[]>(() => {
-    if (pick.whereToWatch.providers?.length) return pick.whereToWatch.providers;
-    return [
-      {
-        name: pick.whereToWatch.status === "verified" ? pick.whereToWatch.primary : "Availability",
-        access: "unknown",
-        note: pick.whereToWatch.status === "verified" ? pick.whereToWatch.note : "Not verified yet",
-      },
-    ];
-  }, [pick.whereToWatch]);
-  const hasPickPoster = Boolean(pick.omdbPosterUrl);
-
-  const activeLanguages = onboarding?.languagePreferences?.length ? onboarding.languagePreferences : ["No preference"];
-  const languageOptions = onboarding ? languageOptionsForCountry(onboarding.countryCode) : ["No preference"];
-
-  function updateOnboardingCountry(countryCode: string) {
-    if (!onboarding) return;
-    const country = COUNTRIES.find((item) => item.code === countryCode);
+  function setCountry(code: string) {
+    const country = COUNTRIES.find((item) => item.code === code);
     if (!country) return;
-    const validPlatforms = platformOptionsForCountry(country.code);
-    const nextPlatforms = onboarding.platforms.filter((platform) => validPlatforms.includes(platform));
-    const next: OnboardingData = {
+    const valid = platformOptionsForCountry(country.code);
+    const platforms = onboarding.platforms.filter((platform) => valid.includes(platform));
+    const next = {
       country: country.name,
       countryCode: country.code,
       languagePreferences: [],
-      platforms: nextPlatforms.length ? nextPlatforms : defaultPlatformsForCountry(country.code),
+      platforms: platforms.length ? platforms : defaultPlatformsForCountry(country.code),
     };
     saveOnboarding(next);
-    setOnboarding(next);
+    onChange(next);
   }
 
-  function updateOnboardingLanguage(language: string) {
-    if (!onboarding) return;
+  function toggleLanguage(language: string) {
     const current = onboarding.languagePreferences ?? [];
     const nextLanguages = language === "No preference"
       ? []
       : current.includes(language)
         ? current.filter((item) => item !== language)
         : [...current, language];
-    const next: OnboardingData = {
-      ...onboarding,
-      languagePreferences: nextLanguages,
-    };
+    const next = { ...onboarding, languagePreferences: nextLanguages };
     saveOnboarding(next);
-    setOnboarding(next);
+    onChange(next);
   }
 
-  async function findPick() {
-    setLoading(true);
-    setError(null);
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 80000);
+  return (
+    <div className="absolute right-0 top-12 z-30 w-[min(92vw,390px)] rounded-2xl border border-white/12 bg-[#111111]/95 p-4 shadow-[0_24px_80px_rgba(0,0,0,0.72)] backdrop-blur-2xl">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-white">Region & language</p>
+          <p className="mt-1 text-xs leading-4 text-white/42">Availability follows your country. Language guides the recommendation.</p>
+        </div>
+        <button type="button" onClick={onClose} className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/58 hover:text-white">
+          Done
+        </button>
+      </div>
+      <div className="mt-4 grid max-h-40 grid-cols-2 gap-2 overflow-y-auto pr-1">
+        {COUNTRIES.map((country) => (
+          <button
+            key={country.code}
+            type="button"
+            onClick={() => setCountry(country.code)}
+            className={`h-9 rounded-lg border px-3 text-left text-sm transition ${
+              onboarding.countryCode === country.code ? "border-red-400/45 bg-red-500/14 text-white" : "border-white/10 bg-white/[0.04] text-white/62 hover:text-white"
+            }`}
+          >
+            {country.name}
+          </button>
+        ))}
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {languageOptions.map((language) => {
+          const active = language === "No preference"
+            ? !(onboarding.languagePreferences?.length)
+            : onboarding.languagePreferences?.includes(language);
+          return (
+            <button
+              key={language}
+              type="button"
+              onClick={() => toggleLanguage(language)}
+              className={`h-8 rounded-full border px-3 text-xs transition ${
+                active ? "border-amber-300/45 bg-amber-400/12 text-white" : "border-white/10 bg-white/[0.04] text-white/58 hover:text-white"
+              }`}
+            >
+              {language}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
-    const now = new Date();
-    const hour = now.getHours();
-    const dayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][now.getDay()];
-    const timeOfDay = hour < 6 ? "late night / early hours" : hour < 12 ? "morning" : hour < 17 ? "afternoon" : hour < 21 ? "evening" : "late night";
-    const month = now.getMonth();
-    const season = month < 3 || month === 11 ? "winter" : month < 6 ? "spring" : month < 9 ? "summer" : "autumn";
-    const isWeekend = now.getDay() === 0 || now.getDay() === 6;
-    const contextHint = `${isWeekend ? "Weekend" : "Weekday"} ${timeOfDay} (${dayName}), ${season}`;
+function ChoiceButton({ option, active, onClick }: { option: Option; active: boolean; onClick: () => void }) {
+  const Icon = option.icon;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex h-14 min-w-0 items-center justify-center gap-3 rounded-xl border px-4 text-base transition ${
+        active
+          ? "border-red-400/70 bg-red-500/12 text-white shadow-[0_0_30px_rgba(239,68,68,0.18)]"
+          : "border-white/12 bg-white/[0.045] text-white/72 hover:border-white/24 hover:text-white"
+      }`}
+    >
+      <Icon size={19} className={active ? "text-red-200" : "text-white/60"} />
+      <span className="truncate">{option.label}</span>
+    </button>
+  );
+}
+
+function PlatformChip({ name }: { name: string }) {
+  const marks: Record<string, string> = {
+    Netflix: "N",
+    "Prime Video": "prime",
+    "Disney+": "D+",
+    "Apple TV+": "tv+",
+    "HBO Max": "max",
+    "JioHotstar": "JH",
+    Zee5: "Z5",
+    SonyLIV: "SL",
+    MUBI: "M",
+  };
+  return (
+    <span className="grid h-11 min-w-16 place-items-center rounded-lg border border-white/10 bg-white/[0.055] px-3 text-sm font-semibold text-white/82">
+      {marks[name] ?? name.slice(0, 3)}
+    </span>
+  );
+}
+
+function pickContextHint() {
+  const now = new Date();
+  const hour = now.getHours();
+  const dayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][now.getDay()];
+  const timeOfDay = hour < 6 ? "late night / early hours" : hour < 12 ? "morning" : hour < 17 ? "afternoon" : hour < 21 ? "evening" : "late night";
+  const month = now.getMonth();
+  const season = month < 3 || month === 11 ? "winter" : month < 6 ? "spring" : month < 9 ? "summer" : "autumn";
+  const isWeekend = now.getDay() === 0 || now.getDay() === 6;
+  return `${isWeekend ? "Weekend" : "Weekday"} ${timeOfDay} (${dayName}), ${season}`;
+}
+
+async function captureEvent(type: string, payload: Record<string, unknown>) {
+  fetch("/api/events", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId: getOrCreateSessionId(), type, payload }),
+  }).catch(() => {});
+}
+
+function isPlaceholderPick(recommendation?: Recommendation | null) {
+  return !recommendation || (
+    recommendation.title === defaultPick.title &&
+    recommendation.year === defaultPick.year
+  );
+}
+
+export default function Home() {
+  const router = useRouter();
+  const [ready, setReady] = useState(false);
+  const [onboarding, setOnboarding] = useState<OnboardingData | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [selectedMoods, setSelectedMoods] = useState(["tired"]);
+  const [selectedAvoids, setSelectedAvoids] = useState(["violence"]);
+  const [selectedWants, setSelectedWants] = useState(["emotional"]);
+  const [time, setTime] = useState("90 min");
+  const [energy, setEnergy] = useState("Low");
+  const [viewingContext, setViewingContext] = useState("Alone");
+  const [risk, setRisk] = useState<CrazinessLevel>(0);
+  const [platformFilter, setPlatformFilter] = useState<"mine" | "any">("mine");
+  const [indieMode, setIndieMode] = useState(false);
+  const [selfText, setSelfText] = useState("");
+  const [reference, setReference] = useState("");
+  const [pick, setPick] = useState<Recommendation>(defaultPick);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const saved = loadOnboarding();
+    setOnboarding(saved);
+    try {
+      const raw = localStorage.getItem(recommendationStorageKey);
+      if (raw) {
+        const session = JSON.parse(raw) as { recommendation?: Recommendation };
+        if (session.recommendation && !isPlaceholderPick(session.recommendation)) {
+          setPick(session.recommendation);
+        }
+      }
+    } catch {
+      // ignore local storage issues
+    }
+    setReady(true);
+  }, []);
+
+  const promptPreview = useMemo(() => {
+    if (selfText.trim()) return selfText.trim();
+    return [
+      selectedMoods.length ? `I feel ${selectedMoods.join(", ")}` : "",
+      selectedWants.length ? `I want ${selectedWants.join(", ")}` : "",
+      selectedAvoids.length ? `avoid ${selectedAvoids.join(", ")}` : "",
+      `${time}, ${energy.toLowerCase()} energy, ${viewingContext.toLowerCase()}`,
+      reference.trim() ? `like ${reference.trim()}` : "",
+    ].filter(Boolean).join(". ");
+  }, [selfText, selectedMoods, selectedWants, selectedAvoids, time, energy, viewingContext, reference]);
+
+  async function findPick() {
+    if (!onboarding || loading) return;
+    setLoading(true);
 
     const recentTitles = (() => {
       try {
@@ -428,30 +363,50 @@ export default function Home() {
     })();
 
     const requestInput: RecommendRequest = {
-      mode,
-      mood: mode === "choose" ? moods : undefined,
-      wants: mode === "choose" ? wants : undefined,
-      avoids: mode === "choose" ? avoids : undefined,
-      time: mode === "choose" && time[0] && time[0] !== "no preference" ? time[0] : undefined,
-      country: onboarding?.country || "Poland",
-      languagePreferences: onboarding?.languagePreferences,
-      platforms: onboarding?.platforms || ["Netflix", "Prime Video"],
-      selfText: mode === "self" ? selfText : undefined,
+      mode: selfText.trim() ? "self" : "choose",
+      mood: selfText.trim() ? undefined : selectedMoods,
+      wants: selfText.trim() ? undefined : selectedWants,
+      avoids: selfText.trim() ? undefined : selectedAvoids,
+      time: time !== "no preference" ? time : undefined,
+      energy,
+      viewingContext,
+      country: onboarding.country,
+      languagePreferences: onboarding.languagePreferences,
+      platforms: onboarding.platforms,
+      selfText: selfText.trim() || undefined,
       reference: reference.trim() || undefined,
       seenTitles: loadSeenTitles(),
       recentTitles,
       platformFilter,
-      contextHint,
-      craziness,
+      discoveryMode: indieMode ? "indie" : "standard",
+      contextHint: pickContextHint(),
+      craziness: risk,
       feedbackContext: loadRecommendationFeedbackContext(),
     };
 
-    // Navigate immediately — recommendation page shows cinematic loading state
     localStorage.setItem("fun:loading", "true");
     localStorage.setItem("fun:loading-started-at", String(Date.now()));
     localStorage.removeItem("fun:recommendation-error");
+    captureEvent("ask", {
+      country: requestInput.country,
+      languagePreferences: requestInput.languagePreferences,
+      platforms: requestInput.platforms,
+      mood: requestInput.mood,
+      wants: requestInput.wants,
+      avoids: requestInput.avoids,
+      time: requestInput.time,
+      energy,
+      viewingContext,
+      platformFilter,
+      discoveryMode: indieMode ? "indie" : "standard",
+      craziness: risk,
+      hasFreeText: Boolean(selfText.trim()),
+      hasReference: Boolean(reference.trim()),
+    });
     router.push("/recommendation");
 
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 85000);
     try {
       const response = await fetch("/api/recommend", {
         method: "POST",
@@ -460,20 +415,24 @@ export default function Home() {
         signal: controller.signal,
       });
       if (!response.ok) throw new Error("Could not generate a pick.");
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data = await response.json() as any;
-      const batch: Recommendation[] = data._batch ?? [data];
+      const data = await response.json() as Recommendation & { _batch?: Recommendation[] };
+      const batch = data._batch ?? [data];
       rememberRecommendationTitles(batch.map((item) => item.title));
-      localStorage.setItem(
-        recommendationStorageKey,
-        JSON.stringify(createRecommendationSession(batch[0], requestInput, batch)),
-      );
-    } catch (unknownError) {
+      localStorage.setItem(recommendationStorageKey, JSON.stringify(createRecommendationSession(batch[0], requestInput, batch)));
+      captureEvent("recommendation", {
+        title: batch[0].title,
+        year: batch[0].year,
+        confidence: batch[0].confidence,
+        batch: batch.map((item) => ({ title: item.title, year: item.year, confidence: item.confidence })),
+        availabilityStatus: batch[0].whereToWatch.status,
+        providerCount: batch[0].whereToWatch.providers?.length ?? 0,
+      });
+    } catch (error) {
       localStorage.setItem(
         "fun:recommendation-error",
-        unknownError instanceof Error && unknownError.name === "AbortError"
+        error instanceof Error && error.name === "AbortError"
           ? "The recommendation took too long. Please try again."
-          : unknownError instanceof Error ? unknownError.message : "Something went wrong.",
+          : error instanceof Error ? error.message : "Something went wrong.",
       );
     } finally {
       window.clearTimeout(timeout);
@@ -483,493 +442,244 @@ export default function Home() {
     }
   }
 
-  if (!onboardingReady) {
+  if (!ready) {
     return (
       <main className="grid min-h-screen place-items-center bg-[#030303] text-white">
-        <div className="text-center">
-          <div className="text-3xl font-medium tracking-[0.34em]">
-            F<span className="text-red-500">.</span>U<span className="text-red-500">.</span>N
-          </div>
-          <p className="mt-4 text-sm text-white/45">Preparing your one pick.</p>
-        </div>
+        <Logo />
       </main>
     );
   }
-  if (!onboarding) return <OnboardingFlow onComplete={(data) => setOnboarding(data)} />;
 
-  const hiddenTitles = pick.hiddenLayer.titles ?? [];
+  if (!onboarding) return <OnboardingFlow onComplete={(data) => setOnboarding(data)} />;
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#030303] text-white">
-      <div
-        className="absolute inset-x-0 top-0 h-[63vh] min-h-[500px] bg-cover bg-center opacity-88"
-        style={{ backgroundImage: "url('/fun/hero-cinematic.png')" }}
-      />
-      <div className="absolute inset-x-0 top-0 h-[63vh] min-h-[500px] bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.05),rgba(0,0,0,0.52)_58%,rgba(0,0,0,0.92)_100%)]" />
-      <div className="absolute inset-x-0 top-0 h-[63vh] min-h-[500px] bg-gradient-to-b from-black/30 via-black/18 to-[#030303]" />
-      <div className="absolute inset-0 bg-[linear-gradient(90deg,#030303_0%,rgba(3,3,3,0.25)_26%,rgba(3,3,3,0.18)_62%,#030303_100%)]" />
-
-      <section className="relative mx-auto flex min-h-screen w-full max-w-[1780px] flex-col px-5 pb-5 pt-4 sm:px-8 lg:px-12">
-        <header className="flex h-12 items-center justify-between border-b border-white/[0.07]">
-          <div className="text-3xl font-medium tracking-[0.34em] text-white">
-            F<span className="text-red-500">.</span>U<span className="text-red-500">.</span>N
-          </div>
-
-          <nav className="hidden items-center gap-9 text-base text-white/76 md:flex">
-            <span className="relative text-red-400">
-              Home
-              <span className="absolute -bottom-4 left-1/2 h-0.5 w-6 -translate-x-1/2 rounded-full bg-red-500" />
-            </span>
+      <div className="fixed inset-0 bg-[radial-gradient(circle_at_78%_20%,rgba(65,92,111,0.22),transparent_30%),radial-gradient(circle_at_18%_62%,rgba(185,28,28,0.16),transparent_32%),#030303]" />
+      <section className="relative mx-auto w-full max-w-[1760px] px-5 py-5 sm:px-8 lg:px-12">
+        <header className="relative flex h-12 items-center justify-between">
+          <Logo />
+          <nav className="hidden items-center gap-10 text-sm text-white/68 lg:flex">
+            <a href="#how" className="hover:text-white">How it works</a>
+            <Link href="/streaming-fit" className="hover:text-white">Streaming Fit</Link>
+            <Link href="/memory" className="hover:text-white">Memory</Link>
+            <Link href="/privacy" className="hover:text-white">Privacy</Link>
+            <a href="mailto:feedback@findurnext.com" className="hover:text-white">Give feedback</a>
           </nav>
-
-          <div className="flex items-center gap-5">
-            <Search size={24} className="text-white" />
-            <div className="hidden h-8 w-px bg-white/12 sm:block" />
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setSettingsOpen((open) => !open)}
-                className="flex h-9 items-center gap-3 rounded-full border border-white/12 bg-white/[0.055] pl-1.5 pr-3 text-white transition hover:border-white/24 hover:bg-white/[0.08]"
-                aria-expanded={settingsOpen}
-                aria-label="Change region and language"
-              >
-                <span className="grid h-6 w-6 place-items-center rounded-full bg-white/10 text-[10px] font-semibold">
-                  {onboarding.countryCode}
-                </span>
-                <span className="hidden text-sm text-white/82 sm:inline">
-                  {onboarding.country}
-                  {activeLanguages[0] !== "No preference" && (
-                    <span className="text-white/38"> · {activeLanguages.slice(0, 2).join(", ")}</span>
-                  )}
-                </span>
-                <ChevronDown size={14} className={`text-white/54 transition ${settingsOpen ? "rotate-180" : ""}`} />
-              </button>
-
-              {settingsOpen && (
-                <div className="absolute right-0 z-30 mt-3 w-[min(88vw,360px)] rounded-2xl border border-white/12 bg-[#111315]/96 p-4 text-left shadow-[0_24px_80px_rgba(0,0,0,0.7)] backdrop-blur-2xl">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-sm font-medium text-white">Region & language</p>
-                      <p className="mt-1 text-xs leading-4 text-white/42">Region affects availability. Language guides the mood lane.</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSettingsOpen(false)}
-                      className="rounded-full border border-white/10 px-2 py-1 text-xs text-white/52 transition hover:text-white"
-                    >
-                      Done
-                    </button>
-                  </div>
-
-                  <div className="mt-4">
-                    <p className="mb-2 text-xs uppercase tracking-widest text-white/30">Watching from</p>
-                    <div className="grid max-h-44 grid-cols-2 gap-2 overflow-y-auto pr-1">
-                      {COUNTRIES.map((country) => (
-                        <button
-                          key={country.code}
-                          type="button"
-                          onClick={() => updateOnboardingCountry(country.code)}
-                          className={`h-9 rounded-lg border px-3 text-left text-sm transition ${
-                            onboarding.countryCode === country.code
-                              ? "border-red-400/45 bg-red-500/14 text-white"
-                              : "border-white/10 bg-white/[0.04] text-white/62 hover:border-white/22 hover:text-white"
-                          }`}
-                        >
-                          {country.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="mt-4">
-                    <p className="mb-2 text-xs uppercase tracking-widest text-white/30">Prefer language</p>
-                    <div className="flex flex-wrap gap-2">
-                      {languageOptions.map((language) => {
-                        const active = language === "No preference"
-                          ? activeLanguages[0] === "No preference"
-                          : activeLanguages.includes(language);
-                        return (
-                          <button
-                            key={language}
-                            type="button"
-                            onClick={() => updateOnboardingLanguage(language)}
-                            className={`h-8 rounded-full border px-3 text-xs transition ${
-                              active
-                                ? "border-red-300/45 bg-red-500/14 text-white"
-                                : "border-white/10 bg-white/[0.04] text-white/56 hover:border-white/22 hover:text-white"
-                            }`}
-                          >
-                            {language}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
+          <div className="relative">
+            <RegionLanguageButton onboarding={onboarding} onClick={() => setSettingsOpen((open) => !open)} />
+            {settingsOpen && (
+              <RegionLanguagePanel
+                onboarding={onboarding}
+                onChange={setOnboarding}
+                onClose={() => setSettingsOpen(false)}
+              />
+            )}
           </div>
         </header>
 
-        <section className="mx-auto mt-11 w-full max-w-5xl text-center">
-          <h1 className="font-serif text-[clamp(3rem,5.6vw,5.95rem)] font-normal leading-[0.95] tracking-normal text-white">
-            One perfect pick.
-            <br />
-            No more scrolling.
-          </h1>
-          <p className="mx-auto mt-5 max-w-xl text-lg leading-6 text-white/72">
-            Mood-based recommendations. Streaming intelligence.
-            <br className="hidden sm:block" />
-            One perfect match, just for you.
-          </p>
-        </section>
-
-        <section className="mx-auto mt-5 w-full max-w-[1040px] rounded-2xl border border-white/18 bg-[#111315]/78 p-3 shadow-[0_22px_90px_rgba(0,0,0,0.62),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl">
-          <div className="mx-auto grid max-w-[420px] grid-cols-2 rounded-xl border border-white/12 bg-white/[0.055] p-1">
-            <button
-              type="button"
-              onClick={() => setMode("choose")}
-              className={`flex h-9 items-center justify-center gap-2 rounded-lg text-sm transition ${
-                mode === "choose"
-                  ? "bg-red-500/28 text-white shadow-[0_0_24px_rgba(239,68,68,0.32)] ring-1 ring-red-400/45"
-                  : "text-white/72"
-              }`}
-            >
-              <Star size={16} className="text-red-300" />
-              Choose
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("self")}
-              className={`flex h-9 items-center justify-center gap-2 rounded-lg text-sm transition ${
-                mode === "self"
-                  ? "bg-red-500/28 text-white shadow-[0_0_24px_rgba(239,68,68,0.32)] ring-1 ring-red-400/45"
-                  : "text-white/72"
-              }`}
-            >
-              <PenLine size={16} />
-              Self-describe
-            </button>
-          </div>
-
-          {mode === "choose" ? (
-            <div className="mt-4 grid gap-3 px-2 pb-1 sm:grid-cols-[104px_1fr] sm:items-start">
-              <div className="flex h-9 items-center gap-3 text-sm text-white">
-                <User size={19} />
-                <span>I'm</span>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-5">
-                {moodOptions.map((option) => (
-                  <OptionButton key={option.label} option={option} active={moods.includes(option.label)} onClick={() => toggleList(option.label, moods, setMoods)} />
-                ))}
-              </div>
-
-              <div className="flex h-9 items-center gap-3 text-sm text-white">
-                <Ban size={19} />
-                <span>I don't want</span>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-4">
-                {avoidOptions.map((option) => (
-                  <OptionButton key={option.label} option={option} active={avoids.includes(option.label)} onClick={() => toggleList(option.label, avoids, setAvoids)} />
-                ))}
-              </div>
-
-              <div className="flex h-9 items-center gap-3 text-sm text-white">
-                <Heart size={19} />
-                <span>I want</span>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-5">
-                {wantOptions.map((option) => (
-                  <OptionButton key={option.label} option={option} active={wants.includes(option.label)} onClick={() => toggleList(option.label, wants, setWants)} />
-                ))}
-              </div>
-
-              <div className="flex h-9 items-center gap-3 text-sm text-white">
-                <Clock3 size={19} />
-                <span>Time</span>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-4">
-                {timeOptions.map((option) => (
-                  <OptionButton key={option.label} option={option} active={time.includes(option.label)} onClick={() => setTime([option.label])} />
-                ))}
-              </div>
-
-              <div className="flex h-9 items-center gap-3 text-sm text-white/70">
-                <Film size={19} />
-                <span className="whitespace-nowrap">In the spirit of</span>
-              </div>
-              <div className="relative">
-                <input
-                  value={reference}
-                  onChange={(e) => setReference(e.target.value)}
-                  placeholder="e.g. Baby Driver, Parasite, Her… (optional)"
-                  className="h-9 w-full rounded-lg border border-white/10 bg-black/20 px-3 text-sm text-white outline-none placeholder:text-white/28 focus:border-white/22"
-                />
-              </div>
+        <section className="grid min-h-[620px] items-center gap-8 py-12 lg:grid-cols-[0.95fr_1.05fr]">
+          <div className="max-w-3xl">
+            <h1 className="font-serif text-[clamp(4rem,7.8vw,7.8rem)] leading-[0.9] tracking-normal">
+              One perfect pick.
+              <br />
+              <span className="text-amber-200">No more scrolling.</span>
+            </h1>
+            <p className="mt-7 max-w-xl text-xl leading-8 text-white/68">
+              F.U.N gives you one movie based on your mood, avoidances, time, and what is on your subscriptions.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-4">
+              <a href="#mood" className="inline-flex h-16 min-w-[250px] items-center justify-center gap-4 rounded-xl bg-gradient-to-b from-red-400 to-red-800 px-7 text-lg font-semibold text-white shadow-[0_18px_54px_rgba(127,29,29,0.4)] transition hover:brightness-110">
+                Find my pick <ArrowRight size={22} />
+              </a>
+              <a href="#how" className="inline-flex h-16 min-w-[190px] items-center justify-center gap-3 rounded-xl border border-white/16 bg-white/[0.045] px-7 text-lg text-white/86 transition hover:border-white/28 hover:bg-white/[0.08]">
+                <PlayCircle size={22} className="text-amber-200" /> How it works
+              </a>
             </div>
-          ) : (
-            <div className="mt-4 px-2 pb-1">
-              <SelfDescribeInput value={selfText} onChange={setSelfText} />
-            </div>
-          )}
-
-          <div className="mt-4 grid gap-4 px-2 sm:grid-cols-2">
-            <div>
-              <p className="mb-2 text-xs uppercase tracking-widest text-white/28">Search within</p>
-              <div className="flex w-fit rounded-xl border border-white/[0.1] bg-black/30 p-1">
-                <button
-                  type="button"
-                  onClick={() => setPlatformFilter("any")}
-                  className={`rounded-lg px-5 py-2 text-sm font-medium transition ${
-                    platformFilter === "any"
-                      ? "bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
-                      : "text-white/38 hover:text-white/60"
-                  }`}
-                >
-                  All cinema
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPlatformFilter("mine")}
-                  className={`rounded-lg px-5 py-2 text-sm font-medium transition ${
-                    platformFilter === "mine"
-                      ? "bg-emerald-500/18 text-emerald-100 shadow-[inset_0_1px_0_rgba(52,211,153,0.1)]"
-                      : "text-white/38 hover:text-white/60"
-                  }`}
-                >
-                  My subscriptions
-                </button>
-              </div>
-              <p className="mt-1.5 text-xs text-white/28">
-                {platformFilter === "mine"
-                  ? `Picks from: ${(onboarding?.platforms ?? []).slice(0, 3).join(" · ")}`
-                  : "Includes films outside your current apps"}
-              </p>
-            </div>
-
-            <div>
-              <p className="mb-2 text-xs uppercase tracking-widest text-white/28">Taste Risk</p>
-              <div className="flex rounded-xl border border-white/[0.1] bg-black/30 p-1">
-                {(
-                  [
-                    { level: 0 as CrazinessLevel, label: "Safe", activeClass: "bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]" },
-                    { level: 1 as CrazinessLevel, label: "Curious", activeClass: "bg-amber-500/18 text-amber-100 shadow-[inset_0_1px_0_rgba(251,191,36,0.1)]" },
-                    { level: 2 as CrazinessLevel, label: "Bold", activeClass: "bg-orange-500/18 text-orange-100 shadow-[inset_0_1px_0_rgba(249,115,22,0.12)]" },
-                    { level: 3 as CrazinessLevel, label: "Unhinged", activeClass: "bg-rose-600/22 text-rose-100 shadow-[inset_0_1px_0_rgba(225,29,72,0.18)]" },
-                  ] as const
-                ).map(({ level, label, activeClass }) => (
-                  <button
-                    key={level}
-                    type="button"
-                    onClick={() => setCraziness(level)}
-                    className={`flex-1 rounded-lg py-2 text-xs font-medium transition ${
-                      craziness === level ? activeClass : "text-white/38 hover:text-white/60"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <p className="mt-1.5 text-xs text-white/28">
-                {["Crowd-pleasing and acclaimed", "Off-mainstream, critically loved", "Festival, provocative, challenging", "Cult, extreme, avant-garde, divisive"][craziness]}
-              </p>
+            <div className="mt-7 flex flex-wrap gap-3 text-sm text-white/68">
+              <span className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3"><CheckCircle2 size={16} className="text-amber-200" /> Works with your subscriptions</span>
+              <span className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3"><Shield size={16} className="text-amber-200" /> Respects your mood & avoidances</span>
+              <span className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3"><User size={16} className="text-amber-200" /> No accounts needed</span>
             </div>
           </div>
 
-          <div className="mt-3 grid gap-3 px-2 sm:grid-cols-[1fr_220px]">
-            {mode === "choose" && (
-              <div className="relative">
-                <input
-                  value={promptPreview}
-                  readOnly
-                  className="h-12 w-full rounded-lg border border-white/10 bg-black/16 px-4 pr-11 text-sm text-white/60 outline-none"
-                />
-                <Sparkles size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30" />
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={findPick}
-              disabled={loading}
-              className={`flex h-12 items-center justify-center gap-3 rounded-lg bg-gradient-to-b from-red-500 to-red-900 px-6 font-semibold text-white shadow-[0_12px_30px_rgba(127,29,29,0.45)] transition hover:brightness-110 disabled:cursor-wait disabled:opacity-70 ${mode === "self" ? "col-span-full sm:col-span-1 sm:col-start-2" : ""}`}
-            >
-              {loading ? "Finding..." : "Find my pick"}
-              <ArrowRight size={20} />
-            </button>
-          </div>
-          <div className="min-h-9 px-3 pt-3 text-sm">
-            {loading && (
-              <p className="inline-flex items-center gap-2 text-white/70">
-                <span className="h-2 w-2 rounded-full bg-red-400 shadow-[0_0_16px_rgba(248,113,113,0.85)]" />
-                Finding one match for tonight...
-              </p>
-            )}
-            {!loading && hasGenerated && !error && (
-              <p className="text-white/64">
-                Your pick is ready: <span className="text-white">{pick.title}</span>
-              </p>
-            )}
-            {error && <p className="text-red-200">{error}</p>}
+          <div className="relative hidden min-h-[440px] lg:block">
+            <div className="absolute inset-0 rounded-[2rem] bg-cover bg-center opacity-82 shadow-[inset_0_-140px_90px_rgba(3,3,3,0.92)]" style={{ backgroundImage: "url('/fun/hero-cinematic.png')" }} />
+            <div className="absolute inset-0 rounded-[2rem] bg-gradient-to-r from-[#030303] via-transparent to-transparent" />
           </div>
         </section>
 
-        <section className="mt-auto grid gap-7 pt-8 lg:grid-cols-[1fr_0.72fr_1fr] lg:items-start">
-          <div ref={resultRef} className="min-w-0 scroll-mt-8">
-            <h2 className="mb-3 flex items-center gap-3 text-lg text-white">
-              <Star size={20} className="text-red-400" />
-              {hasGenerated ? "Your One Pick" : "Tonight's Pick"}
-            </h2>
-            <article
-              className={`relative h-[164px] overflow-hidden rounded-xl border bg-white/[0.045] transition ${
-                hasGenerated ? "border-red-300/35 shadow-[0_0_44px_rgba(239,68,68,0.16)]" : "border-white/14"
-              }`}
-            >
-              <MovieImage
-                posterUrl={pick.omdbPosterUrl}
-                title={pick.title}
-                year={pick.year}
-                className={`absolute inset-y-0 left-0 h-full opacity-92 ${hasPickPoster ? "w-[48%]" : "w-full"}`}
-                objectPosition="top"
-              />
-              <div className={`absolute inset-0 ${hasPickPoster ? "bg-gradient-to-r from-black/12 via-[#0b0b0d]/72 to-[#0b0b0d]" : "bg-gradient-to-r from-[#0b0b0d]/92 via-[#0b0b0d]/82 to-[#0b0b0d]/92"}`} />
-              <Bookmark size={22} className="absolute right-5 top-5 text-white/64" />
-              <div className={`absolute bottom-5 right-6 top-5 ${hasPickPoster ? "left-[48%]" : "left-6"}`}>
-                <h3 className="font-serif text-2xl uppercase tracking-[0.14em] text-white">{pick.title}</h3>
-                <p className="mt-2 text-sm text-white/56">
-                  {pick.year} <span className="px-2">-</span> {toTitleCase(pick.vibe.split(",")[0] || pick.format)}{" "}
-                  <span className="px-2">-</span> {pick.runtime}
-                </p>
-                <p className="mt-3 line-clamp-2 text-sm leading-5 text-white/68">{pick.oneLine}</p>
-                <button
-                  type="button"
-                  onClick={() => setShowWhy((open) => !open)}
-                  className="mt-3 inline-flex h-8 items-center gap-2 rounded-md border border-white/12 bg-white/[0.075] px-4 text-sm text-white/88"
-                >
-                  <Play size={15} fill="currentColor" />
-                  {showWhy ? "Hide why" : "Why this pick?"}
-                </button>
+        <section id="mood" className="rounded-2xl border border-white/10 bg-[#090909]/82 p-5 shadow-[0_26px_100px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-xl sm:p-8">
+          <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="font-serif text-[clamp(2.8rem,5vw,5.2rem)] leading-none">How are you feeling tonight?</h2>
+              <p className="mt-3 text-white/56">Pick one or more. We will respect your avoidances first.</p>
+            </div>
+            <button type="button" className="inline-flex h-11 items-center gap-2 rounded-full border border-amber-300/35 bg-amber-400/[0.06] px-5 text-sm text-amber-100">
+              <Heart size={16} /> Save mood
+            </button>
+          </div>
+
+          <div className="space-y-5">
+            <div className="grid gap-4 lg:grid-cols-[140px_1fr] lg:items-center">
+              <div className="border-l-2 border-red-400 pl-5 text-lg">I'm feeling</div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                {moods.map((option) => (
+                  <ChoiceButton key={option.label} option={option} active={selectedMoods.includes(option.label)} onClick={() => toggle(option.label, selectedMoods, setSelectedMoods)} />
+                ))}
               </div>
-            </article>
-            {showWhy && (
-              <div className="mt-3 rounded-xl border border-white/10 bg-black/32 p-4 text-sm leading-5 text-white/70">
-                <div className="mb-2 flex items-center gap-2 text-white">
-                  <Sparkles size={16} className="text-red-300" />
-                  Why it fits tonight
-                </div>
-                <div className="space-y-2">
-                  {pick.whyItFits.slice(0, 3).map((reason) => (
-                    <p key={reason}>{reason}</p>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-[140px_1fr] lg:items-center">
+              <div className="border-l-2 border-red-400 pl-5 text-lg">I don't want</div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                {avoids.map((option) => (
+                  <ChoiceButton key={option.label} option={option} active={selectedAvoids.includes(option.label)} onClick={() => toggle(option.label, selectedAvoids, setSelectedAvoids)} />
+                ))}
+              </div>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-[140px_1fr] lg:items-center">
+              <div className="border-l-2 border-red-400 pl-5 text-lg">I want</div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                {wants.map((option) => (
+                  <ChoiceButton key={option.label} option={option} active={selectedWants.includes(option.label)} onClick={() => toggle(option.label, selectedWants, setSelectedWants)} />
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-6 border-t border-white/8 pt-5 lg:grid-cols-[160px_1fr_1.1fr]">
+              <label className="block">
+                <span className="mb-3 flex items-center gap-2 text-lg"><Clock3 size={18} /> Time</span>
+                <select value={time} onChange={(event) => setTime(event.target.value)} className="h-14 w-full rounded-xl border border-white/12 bg-black/32 px-4 text-white outline-none">
+                  {timeOptions.map((option) => <option key={option}>{option}</option>)}
+                </select>
+              </label>
+              <div>
+                <span className="mb-3 flex items-center gap-2 text-lg"><Zap size={18} /> Energy</span>
+                <div className="grid grid-cols-4 rounded-xl border border-white/10 bg-black/26 p-1">
+                  {energyOptions.map((option) => (
+                    <button key={option} type="button" onClick={() => setEnergy(option)} className={`h-12 rounded-lg text-sm transition ${energy === option ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/48 hover:text-white"}`}>
+                      {option}
+                    </button>
                   ))}
                 </div>
               </div>
-            )}
-          </div>
-
-          <div className="border-white/12 lg:border-x lg:px-6">
-            <h2 className="mb-3 flex items-center gap-3 text-lg text-white">
-              <Sparkles size={20} className="text-red-400" />
-              Where to Watch
-            </h2>
-            <div className="flex gap-4 overflow-x-auto pb-1">
-              {watchProviders.slice(0, 3).map((provider) => (
-                <ProviderCard
-                  key={`${provider.name}-${provider.access}-${provider.price || provider.note || ""}`}
-                  provider={provider}
-                />
-              ))}
-              {watchProviders.length > 3 && (
-                <div className="flex h-[132px] w-[84px] flex-col items-center justify-center rounded-xl border border-white/12 bg-white/[0.055] px-2 text-center">
-                  <div className="text-2xl font-black text-white">{`+${watchProviders.length - 3}`}</div>
-                  <div className="mt-2 text-sm text-white">More</div>
+              <div>
+                <span className="mb-3 flex items-center gap-2 text-lg"><Users size={18} /> Context</span>
+                <div className="grid grid-cols-4 rounded-xl border border-white/10 bg-black/26 p-1">
+                  {contextOptions.map((option) => (
+                    <button key={option} type="button" onClick={() => setViewingContext(option)} className={`h-12 rounded-lg text-sm transition ${viewingContext === option ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/48 hover:text-white"}`}>
+                      {option}
+                    </button>
+                  ))}
                 </div>
-              )}
-            </div>
-          </div>
-
-          {/* Hidden Layer — distinct amber treatment, the emotional hook + share trigger */}
-          <div className="min-w-0">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="flex items-center gap-3 text-lg text-white">
-                <Flame size={20} className="text-amber-400" />
-                {pick.hiddenLayer.headline}
-              </h2>
-              {hasGenerated && (
-                <span className="rounded-full border border-amber-400/30 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-200">
-                  not on your apps
-                </span>
-              )}
-            </div>
-            <p className="mb-3 text-sm text-white/58">{pick.hiddenLayer.insight}</p>
-
-            {hiddenTitles.length > 0 ? (
-              <div className="flex gap-3 overflow-x-auto pb-1">
-                {hiddenTitles.map((ht) => (
-                  <article
-                    key={`${ht.title}-${ht.year}`}
-                    className="relative min-w-[120px] overflow-hidden rounded-xl border border-amber-400/20 bg-amber-500/[0.06] shadow-[0_0_24px_rgba(251,191,36,0.06)]"
-                  >
-                    <div className="relative h-[140px] w-[120px] overflow-hidden">
-                      <MovieImage
-                        posterUrl={ht.posterUrl}
-                        title={ht.title}
-                        year={ht.year}
-                        className="absolute inset-0 h-full w-full opacity-90"
-                      />
-                    </div>
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/88 via-black/12 to-transparent" />
-                    <div className="absolute inset-x-0 bottom-0 p-3">
-                      <h4 className="font-serif text-sm uppercase leading-tight tracking-[0.1em] text-white">{ht.title}</h4>
-                      {ht.platform && <p className="mt-0.5 text-xs text-amber-300/80">{ht.platform}</p>}
-                    </div>
-                  </article>
-                ))}
               </div>
-            ) : (
-              <p className="rounded-xl border border-amber-400/15 bg-amber-500/[0.05] px-4 py-3 text-sm italic text-amber-200/60">
-                {pick.hiddenLayer.classyJab}
-              </p>
-            )}
+            </div>
+
+            <div className="border-t border-white/8 pt-5">
+              <span className="mb-3 flex items-center gap-2 text-lg"><Sparkles size={18} /> Taste Risk</span>
+              <div className="grid gap-2 rounded-xl border border-white/10 bg-black/26 p-1 sm:grid-cols-4">
+                {riskOptions.map((option) => {
+                  const Icon = option.icon;
+                  return (
+                    <button key={option.level} type="button" onClick={() => setRisk(option.level)} className={`min-h-20 rounded-lg border px-4 py-3 text-center transition ${risk === option.level ? "border-red-400/70 bg-red-500/12 text-white" : "border-transparent text-white/54 hover:bg-white/[0.04] hover:text-white"}`}>
+                      <span className="flex items-center justify-center gap-2"><Icon size={17} /> {option.label}</span>
+                      <span className="mt-1 block text-sm text-white/42">{option.helper}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="grid gap-6 border-t border-white/8 pt-5 lg:grid-cols-[1fr_1fr]">
+              <label>
+                <span className="mb-3 flex items-center gap-2 text-lg"><Search size={18} /> Describe it your way</span>
+                <textarea value={selfText} onChange={(event) => setSelfText(event.target.value)} rows={4} placeholder="Optional: I want a hidden gem thriller, or something like Friends but in Hindi..." className="w-full resize-none rounded-xl border border-white/12 bg-black/28 px-4 py-3 text-white outline-none placeholder:text-white/28 focus:border-red-300/45" />
+              </label>
+              <div>
+                <label>
+                  <span className="mb-3 flex items-center gap-2 text-lg"><FilmIcon /> Reference title</span>
+                  <input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="Optional: Shameless, Parasite, Fleabag..." className="h-14 w-full rounded-xl border border-white/12 bg-black/28 px-4 text-white outline-none placeholder:text-white/28 focus:border-red-300/45" />
+                </label>
+                  <div className="mt-4">
+                    <span className="mb-3 block text-sm uppercase tracking-widest text-white/36">Where to search</span>
+                  <div className="grid grid-cols-2 rounded-xl border border-white/10 bg-black/26 p-1">
+                    <button type="button" onClick={() => setPlatformFilter("mine")} className={`h-14 rounded-lg text-base transition ${platformFilter === "mine" ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/50 hover:text-white"}`}>My subscriptions</button>
+                    <button type="button" onClick={() => setPlatformFilter("any")} className={`h-14 rounded-lg text-base transition ${platformFilter === "any" ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/50 hover:text-white"}`}>All cinema</button>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {onboarding.platforms.slice(0, 7).map((platform) => <PlatformChip key={platform} name={platform} />)}
+                    {onboarding.platforms.length > 7 && <span className="grid h-11 min-w-14 place-items-center rounded-lg border border-dashed border-white/20 text-white/58">+{onboarding.platforms.length - 7}</span>}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIndieMode((value) => !value)}
+                    className={`mt-4 flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition ${
+                      indieMode
+                        ? "border-amber-300/45 bg-amber-400/[0.09] text-amber-100"
+                        : "border-white/10 bg-white/[0.04] text-white/60 hover:border-white/22 hover:text-white"
+                    }`}
+                  >
+                    <span>
+                      <span className="block font-medium">Go indie</span>
+                      <span className="mt-1 block text-sm text-white/42">Prefer smaller, under-marketed, discovery-first picks.</span>
+                    </span>
+                    <span className={`h-6 w-11 rounded-full border p-0.5 transition ${indieMode ? "border-amber-300/45 bg-amber-300/25" : "border-white/16 bg-black/30"}`}>
+                      <span className={`block h-4 w-4 rounded-full bg-white transition ${indieMode ? "translate-x-5" : ""}`} />
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="mx-auto max-w-4xl pt-2">
+              <button type="button" onClick={findPick} disabled={loading} className="inline-flex h-16 w-full items-center justify-center gap-4 rounded-xl bg-gradient-to-b from-amber-200 to-amber-500 text-xl font-semibold text-black shadow-[0_18px_58px_rgba(251,191,36,0.18)] transition hover:brightness-105 disabled:cursor-wait disabled:opacity-70">
+                {loading ? "Finding your pick..." : "Find my pick"} <ArrowRight size={24} />
+              </button>
+              <p className="mt-3 text-center text-sm text-white/38"><Lock size={14} className="mr-2 inline text-amber-200" /> We will respect your mood and avoidances.</p>
+            </div>
           </div>
         </section>
 
-        {pick.alternatives.length > 0 && (
-          <section className="pt-3">
-            <h2 className="mb-3 flex items-center gap-2 text-lg text-white">
-              More picks you'll love
-            </h2>
-            <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: "none" }}>
-              {pick.alternatives.map((alt, i) => {
-                const [titlePart] = alt.split(" (");
-                const yearMatch = alt.match(/\((\d{4})\)/);
-                const year = yearMatch?.[1] ?? "";
-                return (
-                  <AlternativeCard
-                    key={`${alt}-${i}`}
-                    title={titlePart}
-                    posterUrl={pick.alternativePosterUrls?.[i]}
-                    meta={year}
-                  />
-                );
-              })}
+        <section id="how" className="mt-10 rounded-2xl border border-white/10 bg-white/[0.035] p-6 sm:p-8">
+          <div className="mb-7 flex items-center justify-center gap-6 text-center text-xl text-amber-200">
+            <span className="hidden h-px flex-1 bg-white/10 md:block" />
+            It's simple. Three steps to stop scrolling.
+            <span className="hidden h-px flex-1 bg-white/10 md:block" />
+          </div>
+          <div className="grid gap-8 lg:grid-cols-3">
+            <div>
+              <div className="mb-4 grid h-8 w-8 place-items-center rounded-full border border-red-400/50 text-amber-200">1</div>
+              <h3 className="text-xl">Tell us the mood</h3>
+              <p className="mt-2 text-white/56">Share how you feel, what you do not want, your time, and your subscriptions.</p>
             </div>
-          </section>
-        )}
-
-        <footer className="grid gap-4 border-t border-white/[0.08] py-3 text-sm text-white/45 sm:grid-cols-4">
-          <span className="flex items-center justify-center gap-3">
-            <Layers size={18} /> All your services in one place
-          </span>
-          <span className="flex items-center justify-center gap-3">
-            <Heart size={18} /> Personalized to your mood
-          </span>
-          <span className="flex items-center justify-center gap-3">
-            <Clock3 size={18} /> Saves you time, every time
-          </span>
-          <span className="flex items-center justify-center gap-3">
-            <Lock size={18} /> Privacy-first by design
-          </span>
-        </footer>
+            <div>
+              <div className="mb-4 grid h-8 w-8 place-items-center rounded-full border border-red-400/50 text-amber-200">2</div>
+              <h3 className="text-xl">Get one pick</h3>
+              <p className="mt-2 text-white/56">F.U.N searches for one match that fits the emotional job, not a list of twenty.</p>
+              <div className="mt-5 flex overflow-hidden rounded-xl border border-white/10 bg-black/30">
+                <div className="h-28 w-24 bg-cover bg-center" style={{ backgroundImage: `url('${pick.omdbPosterUrl ?? "/fun/story-stills-sheet.png"}')` }} />
+                <div className="min-w-0 p-4">
+                  <p className="font-serif text-xl text-white">{pick.title}</p>
+                  <p className="mt-1 text-sm text-white/46">{pick.year} · {pick.runtime} · {pick.vibe.split(",")[0]}</p>
+                  <p className="mt-2 line-clamp-2 text-sm text-white/58">{pick.oneLine}</p>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div className="mb-4 grid h-8 w-8 place-items-center rounded-full border border-red-400/50 text-amber-200">3</div>
+              <h3 className="text-xl">Watch on the right app</h3>
+              <p className="mt-2 text-white/56">We tell you where it is available when we can verify it, so you can watch now.</p>
+              <div className="mt-5 flex gap-2 rounded-xl border border-white/10 bg-black/30 p-3">
+                {["Netflix", "Prime Video", "Disney+", "Apple TV+", "HBO Max"].map((platform) => <PlatformChip key={platform} name={platform} />)}
+              </div>
+            </div>
+          </div>
+          <p className="mt-8 text-center text-white/46">One pick, verified where possible. No logins. No endless lists.</p>
+        </section>
       </section>
     </main>
   );
+}
+
+function FilmIcon() {
+  return <Monitor size={18} />;
 }

@@ -136,21 +136,22 @@ export async function enrichRecommendation(
   const hiddenRaw = raw.hiddenTitles ?? [];
   const countryCode = toCountryCode(country);
 
-  // Wave 1 — all TMDB title searches in parallel
-  const [mainMovie, ...restMovies] = await Promise.all([
+  const posterAltTitles = altTitles.slice(0, 4);
+  const posterHiddenTitles = hiddenRaw.slice(0, 3);
+
+  // Wave 1 — title searches in parallel, capped so secondary cards get posters without making the main pick slow.
+  const [mainMovie, altMovies, hiddenMovies] = await Promise.all([
     tmdbSearch(raw.title, raw.year),
-    ...altTitles.map((alt) => tmdbSearch(alt.title, alt.year)),
-    ...hiddenRaw.map((hidden) => tmdbSearch(hidden.title, hidden.year)),
+    Promise.all(posterAltTitles.map((alt) => tmdbSearch(alt.title, alt.year))),
+    Promise.all(posterHiddenTitles.map((hidden) => tmdbSearch(hidden.title, hidden.year))),
   ]);
 
-  const altMovies = restMovies.slice(0, altTitles.length);
-  const hiddenMovies = restMovies.slice(altTitles.length);
-
-  // Wave 2 — providers for main + hidden titles + OMDB poster fallback
-  const [providerSet, omdbMain, ...hiddenProviderSets] = await Promise.all([
+  // Wave 2 — providers for the main title and OMDB poster fallback.
+  // Hidden-card provider labels are intentionally skipped here; they add several
+  // network calls while the visible recommendation only needs their title/poster.
+  const [providerSet, omdbMain] = await Promise.all([
     mainMovie ? tmdbProviders(mainMovie.id, mainMovie.media_type, countryCode) : Promise.resolve(null),
     !mainMovie?.poster_path ? omdbFetch(raw.title, raw.year) : Promise.resolve(null),
-    ...hiddenMovies.map((m) => (m ? tmdbProviders(m.id, m.media_type, countryCode) : Promise.resolve(null))),
   ]);
 
   const providers: NonNullable<Recommendation["whereToWatch"]["providers"]> = providerSet ? (mapProviders(providerSet) ?? []) : [];
@@ -191,20 +192,17 @@ export async function enrichRecommendation(
   const tmdbPoster = mainMovie?.poster_path ? `https://image.tmdb.org/t/p/w500${mainMovie.poster_path}` : undefined;
   const omdbPoster = omdbMain?.Response === "True" && omdbMain.Poster && omdbMain.Poster !== "N/A" ? omdbMain.Poster : undefined;
 
-  const alternativePosterUrls = altMovies.map((m) =>
-    m?.poster_path ? `https://image.tmdb.org/t/p/w342${m.poster_path}` : "",
-  );
+  const alternativePosterUrls = altTitles.map((_, i) => {
+    const m = altMovies[i];
+    return m?.poster_path ? `https://image.tmdb.org/t/p/w342${m.poster_path}` : "";
+  });
 
-  // Restore platform info on hidden layer cards
   const hiddenLayerTitles: HiddenLayerTitle[] = hiddenRaw.map((hidden, i) => {
     const m = hiddenMovies[i];
-    const set = hiddenProviderSets[i];
-    const platform = set ? (mapProviders(set) ?? []).filter((p) => p.access === "subscription")[0]?.name : undefined;
     return {
       title: hidden.title,
       year: hidden.year,
       posterUrl: m?.poster_path ? `https://image.tmdb.org/t/p/w342${m.poster_path}` : undefined,
-      platform,
     };
   });
 

@@ -39,19 +39,20 @@ function llmTemperature(input: RecommendRequest): number {
 
 async function getRecommendations(input: RecommendRequest, prompt: string): Promise<RawRecommendation[]> {
   const temperature = llmTemperature(input);
-  if (process.env.ANTHROPIC_API_KEY) {
-    try {
-      return await recommendWithAnthropic(prompt, temperature);
-    } catch (error) {
-      console.warn("Anthropic failed, trying OpenAI:", error instanceof Error ? error.message : String(error));
-    }
-  }
 
   if (process.env.OPENAI_API_KEY) {
     try {
       return await recommendWithOpenAI(prompt, temperature);
     } catch (error) {
-      console.warn("OpenAI failed, using local fallback:", error instanceof Error ? error.message : String(error));
+      console.warn("OpenAI failed, trying Anthropic:", error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (process.env.ANTHROPIC_API_KEY) {
+    try {
+      return await recommendWithAnthropic(prompt, temperature);
+    } catch (error) {
+      console.warn("Anthropic failed, using local fallback:", error instanceof Error ? error.message : String(error));
     }
   }
 

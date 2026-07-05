@@ -7,7 +7,6 @@
   },
   "include": [
     "next-env.d.ts",
-    "tailwind.config.ts",
     "src/**/*.ts",
     "src/**/*.tsx"
   ],

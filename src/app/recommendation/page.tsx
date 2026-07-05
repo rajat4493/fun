@@ -1,24 +1,32 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  ArrowRight,
   BadgeCheck,
   Bookmark,
   Calendar,
-  ChevronRight,
+  ChevronDown,
   Clock3,
   ExternalLink,
   Film,
+  Globe2,
   Heart,
   Layers,
-  MapPin,
   Monitor,
   Play,
   RefreshCw,
+  Search,
+  Share2,
+  Shield,
+  SlidersHorizontal,
   Sparkles,
   Star,
+  ThumbsUp,
+  type LucideIcon,
+  Zap,
 } from "lucide-react";
 import {
   addSeenTitle,
@@ -43,97 +51,78 @@ const LOADING_TIMEOUT_MS = 85000;
 
 const SEARCH_TITLES = [
   "Parasite for the perfect trap",
-  "Moonlight for quiet ache",
-  "Her for lonely circuitry",
+  "The Bear for pressure",
+  "Fleabag for bite",
   "Past Lives for impossible timing",
   "The Godfather for family pressure",
-  "Portrait of a Lady on Fire for restraint",
-  "Lost in Translation for beautiful drift",
-  "Aftersun for memory bruises",
-  "Carol for elegant longing",
-  "All About Eve for sharp ambition",
-  "Mulholland Drive for dream logic",
+  "Moonlight for quiet ache",
   "Before Sunrise for one-night magic",
+  "The Handmaiden for elegant danger",
+  "Super Deluxe for beautiful chaos",
+  "A Separation for moral tension",
 ];
 
-const FEEDBACK_OPTIONS: Array<{ reason: FeedbackReason; label: string }> = [
-  { reason: "perfect", label: "Perfect" },
-  { reason: "wrong-vibe", label: "Wrong vibe" },
-  { reason: "not-on-service", label: "Not on my service" },
-  { reason: "already-seen", label: "Already seen" },
+const FEEDBACK_OPTIONS: Array<{ reason: FeedbackReason; label: string; icon: LucideIcon; tone: string }> = [
+  { reason: "perfect", label: "Perfect", icon: Heart, tone: "green" },
+  { reason: "good-not-perfect", label: "Good but not perfect", icon: ThumbsUp, tone: "amber" },
+  { reason: "wrong-vibe", label: "Wrong vibe", icon: Star, tone: "red" },
+  { reason: "already-seen", label: "Already seen", icon: RefreshCw, tone: "plain" },
+  { reason: "too-much-effort", label: "Too much effort", icon: Zap, tone: "purple" },
 ];
 
-function MovieImage({
-  posterUrl,
-  title,
-  year,
-  artworkPosition,
-  className = "",
-  objectPosition = "center",
-}: {
-  posterUrl?: string;
-  title: string;
-  year?: string;
-  artworkPosition?: string;
-  className?: string;
-  objectPosition?: string;
-}) {
-  if (posterUrl) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={posterUrl} alt={title} className={`object-cover ${className}`} style={{ objectPosition }} />;
+const justWatchLocale: Record<string, string> = {
+  Poland: "pl",
+  "United States": "us",
+  "United Kingdom": "gb",
+  Germany: "de",
+  France: "fr",
+  Spain: "es",
+  Italy: "it",
+  Netherlands: "nl",
+  Sweden: "se",
+  Denmark: "dk",
+  Belgium: "be",
+  Austria: "at",
+  Ireland: "ie",
+  Portugal: "pt",
+  India: "in",
+  Canada: "ca",
+  Australia: "au",
+  Brazil: "br",
+  Mexico: "mx",
+};
+
+function captureEvent(type: string, payload: Record<string, unknown>) {
+  fetch("/api/events", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId: getOrCreateSessionId(), type, payload }),
+  }).catch(() => {});
+}
+
+function loadSession(): RecommendationSession | null {
+  try {
+    const raw = localStorage.getItem(recommendationStorageKey);
+    return raw ? JSON.parse(raw) as RecommendationSession : null;
+  } catch {
+    return null;
   }
-  // Clean gradient fallback — no sprite sheet
-  void year; void artworkPosition;
-  return <div className={`bg-gradient-to-br from-[#1a1625] via-[#12141c] to-[#0a0b10] ${className}`} />;
 }
 
-function ProviderCard({ provider }: { provider: WatchProvider }) {
-  const isRent = provider.access === "rent";
-  const isBuy = provider.access === "buy";
-
+function logo() {
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.05] p-3">
-      {provider.logoUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={provider.logoUrl} alt={provider.name} className="h-9 w-9 shrink-0 rounded-lg object-contain" />
-      ) : (
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-black/40 text-lg font-black text-white">
-          {provider.name.charAt(0)}
-        </div>
-      )}
-      <div className="min-w-0">
-        <p className="truncate text-sm text-white">{provider.name}</p>
-        <p className={`text-xs ${isRent ? "text-red-300" : isBuy ? "text-teal-300" : "text-white/48"}`}>
-          {provider.note ?? (isRent ? "Rent" : isBuy ? "Buy" : "Subscription")}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function InfoPill({ icon: Icon, label }: { icon: typeof Film; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.07] px-3 py-1.5 text-sm text-white/72">
-      <Icon size={15} />
-      {label}
+    <span className="text-3xl font-medium tracking-[0.34em] text-white">
+      F<span className="text-red-500">.</span>U<span className="text-red-500">.</span>N
     </span>
   );
 }
 
-const justWatchLocale: Record<string, string> = {
-  "Poland": "pl", "United States": "us", "United Kingdom": "gb",
-  "Germany": "de", "France": "fr", "Spain": "es", "Italy": "it",
-  "Netherlands": "nl", "Sweden": "se", "Denmark": "dk", "Belgium": "be",
-  "Austria": "at", "Ireland": "ie", "Portugal": "pt", "India": "in",
-  "Canada": "ca", "Australia": "au", "Brazil": "br", "Mexico": "mx",
-};
-
-function justWatchUrl(title: string, country?: string): string {
+function justWatchUrl(title: string, country?: string) {
   const locale = justWatchLocale[country ?? ""] ?? "us";
   return `https://www.justwatch.com/${locale}/search?q=${encodeURIComponent(title)}`;
 }
 
-function normalizeProviderName(value: string): string {
+function normalizeProviderName(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
@@ -152,7 +141,7 @@ function providerSearchUrl(provider: WatchProvider, title: string): string | nul
   return null;
 }
 
-function providerMatchesUserPlatform(provider: WatchProvider, platforms: string[]): boolean {
+function providerMatchesUserPlatform(provider: WatchProvider, platforms: string[]) {
   const providerName = normalizeProviderName(provider.name);
   return platforms.some((platform) => {
     const selected = normalizeProviderName(platform);
@@ -160,58 +149,73 @@ function providerMatchesUserPlatform(provider: WatchProvider, platforms: string[
   });
 }
 
-function primaryWatchProvider(providers: WatchProvider[], platforms: string[]): WatchProvider | null {
+function primaryWatchProvider(providers: WatchProvider[], platforms: string[]) {
   const subscription = providers.filter((provider) => provider.access === "subscription" || provider.access === "included");
-  return subscription.find((provider) => providerMatchesUserPlatform(provider, platforms)) ??
-    subscription[0] ??
-    providers[0] ??
-    null;
+  return subscription.find((provider) => providerMatchesUserPlatform(provider, platforms)) ?? subscription[0] ?? providers[0] ?? null;
 }
 
-function watchAction(
-  pick: Recommendation,
-  providers: WatchProvider[],
-  platforms: string[],
-  fallbackUrl: string,
-) {
+function watchAction(pick: Recommendation, providers: WatchProvider[], platforms: string[], fallbackUrl: string) {
   const provider = primaryWatchProvider(providers, platforms);
   if (pick.whereToWatch.status !== "verified" || !provider) {
-    return { label: "Find where to watch", href: fallbackUrl, kind: "unknown" as const };
+    return { label: "Find where to watch", href: fallbackUrl, verified: false };
   }
-
   if (provider.url && provider.urlKind === "title") {
-    return { label: `Watch on ${provider.name}`, href: provider.url, kind: "title" as const };
+    return { label: `Watch on ${provider.name}`, href: provider.url, verified: true };
   }
-
-  const searchUrl = provider.url && provider.urlKind === "search"
-    ? provider.url
-    : providerSearchUrl(provider, pick.title);
-  if (searchUrl) {
-    return { label: `Search on ${provider.name}`, href: searchUrl, kind: "search" as const };
-  }
-
-  return { label: "Find where to watch", href: fallbackUrl, kind: "unknown" as const };
+  const searchUrl = provider.url && provider.urlKind === "search" ? provider.url : providerSearchUrl(provider, pick.title);
+  if (searchUrl) return { label: `Watch on ${provider.name}`, href: searchUrl, verified: true };
+  return { label: "Find where to watch", href: fallbackUrl, verified: false };
 }
 
-function titleFontSize(title: string): string {
-  const longestWord = Math.max(...title.split(/\s+/).map((w) => w.length));
-  const totalLen = title.length;
-  // A single long word (e.g. "Chhichhore", "Interstellar") can't wrap — shrink proactively
-  if (longestWord > 10) return "clamp(2.4rem,4.8vw,5.2rem)";
-  // Long multi-word titles (e.g. "Portrait of a Lady on Fire") wrap but need tighter tracking
-  if (longestWord > 9 || totalLen > 18) return "clamp(3rem,6vw,6.4rem)";
-  // Default — the cinematic size that works for most titles
-  return "clamp(4rem,8vw,8.4rem)";
+function MovieImage({ posterUrl, title, className = "", objectPosition = "center" }: { posterUrl?: string; title: string; className?: string; objectPosition?: string }) {
+  if (posterUrl) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={posterUrl} alt={title} className={`object-cover ${className}`} style={{ objectPosition }} />;
+  }
+  return <div className={`bg-gradient-to-br from-[#1a1625] via-[#12141c] to-[#0a0b10] ${className}`} />;
 }
 
-function loadSession(): RecommendationSession | null {
-  try {
-    const raw = localStorage.getItem(recommendationStorageKey);
-    if (!raw) return null;
-    return JSON.parse(raw) as RecommendationSession;
-  } catch {
-    return null;
+function ProviderLogo({ provider }: { provider: WatchProvider }) {
+  if (provider.logoUrl) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={provider.logoUrl} alt={provider.name} className="h-10 w-10 rounded-lg object-contain" />;
   }
+  return <span className="grid h-10 w-10 place-items-center rounded-lg bg-black/55 text-lg font-black text-white">{provider.name.charAt(0)}</span>;
+}
+
+function ProviderCard({ provider }: { provider: WatchProvider }) {
+  const detail = provider.note ?? provider.price ?? (provider.access === "rent" ? "Rent" : provider.access === "buy" ? "Buy" : "Included");
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.05] p-3">
+      <ProviderLogo provider={provider} />
+      <div className="min-w-0">
+        <p className="truncate text-sm text-white">{provider.name}</p>
+        <p className="truncate text-xs text-white/48">{detail}</p>
+      </div>
+    </div>
+  );
+}
+
+function InfoPill({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.065] px-3 py-1.5 text-sm text-white/72">
+      <Icon size={15} />
+      {label}
+    </span>
+  );
+}
+
+function titleSize(title: string) {
+  const longest = Math.max(...title.split(/\s+/).map((word) => word.length));
+  if (longest > 12 || title.length > 30) return "clamp(3.1rem,6.2vw,6.4rem)";
+  if (title.length > 18) return "clamp(3.6rem,7vw,7.3rem)";
+  return "clamp(4.6rem,8.6vw,9rem)";
+}
+
+function scoreClass(score: number) {
+  if (score >= 85) return "text-emerald-300 border-emerald-400/45";
+  if (score >= 70) return "text-amber-200 border-amber-300/45";
+  return "text-red-200 border-red-300/45";
 }
 
 export default function RecommendationPage() {
@@ -219,21 +223,21 @@ export default function RecommendationPage() {
   const [batchIndex, setBatchIndex] = useState(0);
   const [ready, setReady] = useState(false);
   const [noSession, setNoSession] = useState(false);
-  const [rerolling, setRerolling] = useState(false);
   const [fetchLoading, setFetchLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [searchIdx, setSearchIdx] = useState(0);
+  const [rerolling, setRerolling] = useState(false);
   const [feedbackReason, setFeedbackReason] = useState<FeedbackReason | null>(null);
+  const [searchIdx, setSearchIdx] = useState(0);
+  const [shareState, setShareState] = useState<"idle" | "copied">("idle");
 
   useEffect(() => {
     if (!fetchLoading) return;
-    const t = setInterval(() => setSearchIdx((i) => (i + 1) % SEARCH_TITLES.length), 1500);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setSearchIdx((index) => (index + 1) % SEARCH_TITLES.length), 1500);
+    return () => clearInterval(timer);
   }, [fetchLoading]);
 
   useEffect(() => {
     const isLoading = localStorage.getItem(LOADING_KEY) === "true";
-
     if (isLoading) {
       setFetchLoading(true);
       const interval = setInterval(() => {
@@ -247,23 +251,20 @@ export default function RecommendationPage() {
           setReady(true);
           return;
         }
-
         if (localStorage.getItem(LOADING_KEY) !== "true") {
           clearInterval(interval);
-          const err = localStorage.getItem(ERROR_KEY);
-          if (err) {
+          const error = localStorage.getItem(ERROR_KEY);
+          if (error) {
             localStorage.removeItem(ERROR_KEY);
-            setFetchError(err);
-            setFetchLoading(false);
-            setReady(true);
-            return;
-          }
-          const s = loadSession();
-          if (s) {
-            setSession(s);
-            setBatchIndex(s.batchIndex ?? 0);
+            setFetchError(error);
           } else {
-            setNoSession(true);
+            const loaded = loadSession();
+            if (loaded) {
+              setSession(loaded);
+              setBatchIndex(loaded.batchIndex ?? 0);
+            } else {
+              setNoSession(true);
+            }
           }
           setFetchLoading(false);
           setReady(true);
@@ -271,55 +272,60 @@ export default function RecommendationPage() {
       }, 400);
       return () => clearInterval(interval);
     }
-
-    const s = loadSession();
-    if (!s) setNoSession(true);
+    const loaded = loadSession();
+    if (!loaded) setNoSession(true);
     else {
-      setSession(s);
-      setBatchIndex(s.batchIndex ?? 0);
+      setSession(loaded);
+      setBatchIndex(loaded.batchIndex ?? 0);
     }
     setReady(true);
   }, []);
 
+  async function replaceWithBatch(request: RecommendationSession["request"]) {
+    const response = await fetch("/api/recommend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) throw new Error("failed");
+    const data = await response.json() as Recommendation & { _batch?: Recommendation[] };
+    const batch = data._batch ?? [data];
+    rememberRecommendationTitles(batch.map((item) => item.title));
+    const next = createRecommendationSession(batch[0], request, batch);
+    localStorage.setItem(recommendationStorageKey, JSON.stringify(next));
+    setSession(next);
+    setBatchIndex(0);
+    setFeedbackReason(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    captureEvent("recommendation", {
+      title: batch[0].title,
+      year: batch[0].year,
+      confidence: batch[0].confidence,
+      source: "reroll",
+    });
+  }
+
   async function handleSeenIt() {
-    if (!session || !session.batch) return;
+    if (!session) return;
     setRerolling(true);
     try {
       const seen = addSeenTitle(session.recommendation.title);
-      const batch = session.batch;
+      const batch = session.batch ?? [session.recommendation];
       const nextIndex = batchIndex + 1;
-
       if (nextIndex < batch.length) {
-        const nextPick = batch[nextIndex];
-        const updatedSession = { ...session, recommendation: nextPick, batchIndex: nextIndex };
-        localStorage.setItem(recommendationStorageKey, JSON.stringify(updatedSession));
-        setSession(updatedSession);
+        const next = { ...session, recommendation: batch[nextIndex], batchIndex: nextIndex };
+        localStorage.setItem(recommendationStorageKey, JSON.stringify(next));
+        setSession(next);
         setBatchIndex(nextIndex);
         setFeedbackReason(null);
       } else {
-        const request = {
+        await replaceWithBatch({
           ...session.request,
           seenTitles: seen,
           recentTitles: [...loadRecentRecommendationTitles(), ...batch.map((item) => item.title)].slice(0, 24),
           feedbackContext: loadRecommendationFeedbackContext(),
-        };
-        const response = await fetch("/api/recommend", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(request),
         });
-        if (!response.ok) throw new Error("failed");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const data = await response.json() as any;
-        const newBatch: Recommendation[] = data._batch ?? [data];
-        rememberRecommendationTitles(newBatch.map((item) => item.title));
-        const newSession = createRecommendationSession(newBatch[0], request, newBatch);
-        localStorage.setItem(recommendationStorageKey, JSON.stringify(newSession));
-        setSession(newSession);
-        setBatchIndex(0);
-        setFeedbackReason(null);
       }
-      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch {
       setFetchError("Could not find another pick. Please try a new mood.");
     } finally {
@@ -331,63 +337,64 @@ export default function RecommendationPage() {
     if (!session) return;
     saveRecommendationFeedback(reason, session);
     setFeedbackReason(reason);
+    const request = session.request;
+    const payload = {
+      reason,
+      title: session.recommendation.title,
+      year: session.recommendation.year,
+      format: session.recommendation.format,
+      confidence: session.recommendation.confidence,
+      country: request.country,
+      mood: request.mood,
+      wants: request.wants,
+      avoids: request.avoids,
+      languagePreferences: request.languagePreferences,
+      craziness: request.craziness,
+      platformFilter: request.platformFilter,
+      energy: request.energy,
+      viewingContext: request.viewingContext,
+      batchIndex: session.batchIndex ?? 0,
+      batchSize: session.batch?.length ?? 1,
+    };
 
-    // Fire-and-forget server-side collection — never blocks UI, never surfaces errors
-    const req = session.request;
     fetch("/api/feedback", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: getOrCreateSessionId(),
-        reason,
-        title: session.recommendation.title,
-        year: session.recommendation.year,
-        format: session.recommendation.format,
-        confidence: session.recommendation.confidence,
-        country: req.country,
-        mood: req.mood,
-        wants: req.wants,
-        avoids: req.avoids,
-        languagePreferences: req.languagePreferences,
-        craziness: req.craziness,
-        platformFilter: req.platformFilter,
-        contextHint: req.contextHint,
-        batchIndex: session.batchIndex ?? 0,
-        batchSize: session.batch?.length ?? 1,
-        // selfText deliberately excluded — free text, could contain personal info
-      }),
+      body: JSON.stringify({ sessionId: getOrCreateSessionId(), ...payload }),
     }).catch(() => {});
+    captureEvent("feedback", payload);
+  }
+
+  async function handleShare() {
+    const text = `Tonight's F.U.N pick: ${pick.title} (${pick.year}) — ${pick.oneLine}`;
+    const url = typeof window !== "undefined" ? window.location.href : "";
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "Tonight's F.U.N pick", text, url });
+      } else {
+        await navigator.clipboard.writeText(`${text}\n${url}`);
+        setShareState("copied");
+        window.setTimeout(() => setShareState("idle"), 1800);
+      }
+      captureEvent("share", { title: pick.title, year: pick.year });
+    } catch {
+      // Share cancellation is normal; do not show an error.
+    }
   }
 
   async function handleSearchBeyondSubscriptions() {
     if (!session) return;
     setRerolling(true);
     try {
-      const request = {
+      await replaceWithBatch({
         ...session.request,
-        platformFilter: "any" as const,
+        platformFilter: "any",
         recentTitles: [
           ...loadRecentRecommendationTitles(),
           ...(session.batch ?? [session.recommendation]).map((item) => item.title),
         ].slice(0, 24),
         feedbackContext: loadRecommendationFeedbackContext(),
-      };
-      const response = await fetch("/api/recommend", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request),
       });
-      if (!response.ok) throw new Error("failed");
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data = await response.json() as any;
-      const newBatch: Recommendation[] = data._batch ?? [data];
-      rememberRecommendationTitles(newBatch.map((item) => item.title));
-      const newSession = createRecommendationSession(newBatch[0], request, newBatch);
-      localStorage.setItem(recommendationStorageKey, JSON.stringify(newSession));
-      setSession(newSession);
-      setBatchIndex(0);
-      setFeedbackReason(null);
-      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch {
       setFetchError("Could not search beyond your subscriptions. Try again.");
     } finally {
@@ -395,88 +402,45 @@ export default function RecommendationPage() {
     }
   }
 
-  const pick: Recommendation = session?.recommendation ?? defaultRecommendation;
+  const pick = session?.recommendation ?? defaultRecommendation;
   const batch = session?.batch ?? [pick];
-  const availabilitySearchUrl = justWatchUrl(pick.title, session?.request?.country);
+  const region = session?.request.country ?? "Poland";
+  const language = session?.request.languagePreferences?.length ? session.request.languagePreferences.slice(0, 2).join(", ") : "Any language";
+  const providers = pick.whereToWatch.providers ?? [];
+  const subProviders = providers.filter((provider) => provider.access === "subscription" || provider.access === "included");
+  const rentBuyProviders = providers.filter((provider) => provider.access === "rent" || provider.access === "buy");
+  const fallbackUrl = justWatchUrl(pick.title, region);
+  const primaryAction = watchAction(pick, providers, session?.request.platforms ?? [], fallbackUrl);
+  const verified = pick.whereToWatch.status === "verified";
+  const subscriptionOnly = session?.request.platformFilter === "mine";
+  const exhaustedSubscriptionBatch = subscriptionOnly && batch.length > 0 && batchIndex >= batch.length - 1;
   const primaryVibe = toTitleCase(pick.vibe.split(",")[0] || pick.format);
   const hiddenTitles = pick.hiddenLayer.titles ?? [];
-  const notOnUserPlatforms = pick.whereToWatch.notOnUserPlatforms ?? false;
-  const providers = pick.whereToWatch.providers ?? [];
-  const subProviders = providers.filter((p) => p.access === "subscription");
-  const rentBuyProviders = providers.filter((p) => p.access === "rent" || p.access === "buy");
-  const verified = pick.whereToWatch.status === "verified";
-  const primaryAction = watchAction(pick, providers, session?.request?.platforms ?? [], availabilitySearchUrl);
-  const subscriptionOnly = session?.request?.platformFilter === "mine";
-  const exhaustedSubscriptionBatch = subscriptionOnly && batch.length > 0 && batchIndex >= batch.length - 1;
-  const regionLabel = session?.request?.country ?? "Region";
-  const languageLabel = session?.request?.languagePreferences?.length
-    ? session.request.languagePreferences.slice(0, 2).join(", ")
-    : "Any language";
-
-  const isSeries = pick.format === "Series" || pick.format === "Episode";
-  const isDoc = pick.format === "Documentary";
+  const similar = pick.alternatives.slice(0, 4).map((item, index) => {
+    const [titlePart] = item.split(" (");
+    const year = item.match(/\((\d{4})\)/)?.[1] ?? "";
+    return { title: titlePart, year, posterUrl: pick.alternativePosterUrls?.[index] };
+  });
 
   const artworkPosition = useMemo(() => {
-    const seed = `${pick.title}-${pick.year || ""}`.split("").reduce((s, c) => s + c.charCodeAt(0), 0);
-    const slot = seed % 8;
-    const col = slot % 4;
-    const row = Math.floor(slot / 4);
-    const x = col === 0 ? 0 : col === 3 ? 100 : col * 33.333;
-    const y = row === 0 ? 0 : 100;
-    return `${x}% ${y}%`;
+    const seed = `${pick.title}-${pick.year}`.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
+    return `${seed % 2 === 0 ? "center" : "top"}`;
   }, [pick.title, pick.year]);
 
-  // ── Loading screen ────────────────────────────────────────────────────────
   if (fetchLoading) {
     return (
       <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-[#030303] text-white">
-        {/* Background */}
         <div className="absolute inset-0 bg-cover bg-center opacity-18" style={{ backgroundImage: "url('/fun/hero-cinematic.png')" }} />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-[#030303]" />
-
-        {/* Film strip at top edge */}
-        <div className="absolute top-0 left-0 right-0 flex h-8 items-center gap-1.5 overflow-hidden px-3 opacity-20">
-          {Array.from({ length: 24 }).map((_, i) => (
-            <div key={i} className="h-5 w-7 shrink-0 rounded-sm border border-white/30 bg-white/10" />
-          ))}
-        </div>
-
-        {/* Center content */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-[#030303]" />
         <div className="relative z-10 text-center">
-          <div className="mb-10 text-5xl font-medium tracking-[0.34em]">
-            F<span className="text-red-500">.</span>U<span className="text-red-500">.</span>N
-          </div>
-
+          <div className="mb-10">{logo()}</div>
           <div className="flex items-center justify-center gap-3 text-lg text-white/80">
             <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-400 shadow-[0_0_16px_rgba(248,113,113,0.85)]" />
-            Finding your perfect pick…
+            Finding your perfect pick...
           </div>
-
           <p className="mt-3 h-5 text-sm text-white/36">
-            Searching{" "}
-            <span key={searchIdx} className="text-white/60 transition-opacity duration-700">
-              {SEARCH_TITLES[searchIdx]}
-            </span>
-            …
+            Searching <span className="text-white/60">{SEARCH_TITLES[searchIdx]}</span>...
           </p>
-
-          {/* Mini film strip */}
-          <div className="mx-auto mt-12 flex w-fit gap-1.5 opacity-25">
-            {Array.from({ length: 7 }).map((_, i) => (
-              <div
-                key={i}
-                className="h-12 w-8 shrink-0 animate-pulse rounded bg-white/15"
-                style={{ animationDelay: `${i * 0.15}s`, animationDuration: "2s" }}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* Film strip at bottom edge */}
-        <div className="absolute bottom-0 left-0 right-0 flex h-8 items-center gap-1.5 overflow-hidden px-3 opacity-20">
-          {Array.from({ length: 24 }).map((_, i) => (
-            <div key={i} className="h-5 w-7 shrink-0 rounded-sm border border-white/30 bg-white/10" />
-          ))}
         </div>
       </main>
     );
@@ -484,32 +448,15 @@ export default function RecommendationPage() {
 
   if (!ready) return null;
 
-  // ── Error screen ──────────────────────────────────────────────────────────
-  if (fetchError) {
+  if (fetchError || noSession) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#030303] text-white">
-        <div className="text-center">
-          <div className="mb-4 text-5xl font-medium tracking-[0.34em]">F<span className="text-red-500">.</span>U<span className="text-red-500">.</span>N</div>
-          <h1 className="font-serif text-3xl text-white/80">Something went wrong</h1>
-          <p className="mt-3 text-base text-white/46">{fetchError}</p>
-          <Link href="/" className="mt-8 inline-flex items-center gap-3 rounded-xl bg-gradient-to-b from-red-500 to-red-900 px-6 py-3 font-semibold text-white shadow-[0_12px_30px_rgba(127,29,29,0.45)] transition hover:brightness-110">
-            <Star size={18} /> Try again
-          </Link>
-        </div>
-      </main>
-    );
-  }
-
-  // ── No session screen ─────────────────────────────────────────────────────
-  if (noSession) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#030303] text-white">
-        <div className="text-center">
-          <div className="mb-4 text-5xl font-medium tracking-[0.34em]">F<span className="text-red-500">.</span>U<span className="text-red-500">.</span>N</div>
-          <h1 className="font-serif text-3xl text-white/80">No recommendation yet</h1>
-          <p className="mt-3 text-base text-white/46">Pick your mood first and we'll find your one perfect match.</p>
-          <Link href="/" className="mt-8 inline-flex items-center gap-3 rounded-xl bg-gradient-to-b from-red-500 to-red-900 px-6 py-3 font-semibold text-white shadow-[0_12px_30px_rgba(127,29,29,0.45)] transition hover:brightness-110">
-            <Star size={18} /> Pick your mood
+      <main className="grid min-h-screen place-items-center bg-[#030303] px-6 text-center text-white">
+        <div>
+          <div className="mb-5">{logo()}</div>
+          <h1 className="font-serif text-4xl">{fetchError ? "Something went wrong" : "No recommendation yet"}</h1>
+          <p className="mt-3 text-white/50">{fetchError ?? "Pick your mood first and F.U.N will find your one match."}</p>
+          <Link href="/" className="mt-8 inline-flex h-12 items-center gap-3 rounded-xl bg-gradient-to-b from-red-500 to-red-900 px-6 font-semibold text-white">
+            <Star size={18} /> Pick a mood
           </Link>
         </div>
       </main>
@@ -519,306 +466,224 @@ export default function RecommendationPage() {
   return (
     <main className="min-h-screen bg-[#030303] text-white">
       {pick.omdbPosterUrl ? (
-        <div className="fixed inset-0 scale-110 bg-cover bg-center opacity-20 blur-2xl" style={{ backgroundImage: `url('${pick.omdbPosterUrl}')` }} />
+        <div className="fixed inset-0 scale-110 bg-cover bg-center opacity-14 blur-2xl" style={{ backgroundImage: `url('${pick.omdbPosterUrl}')` }} />
       ) : (
-        <div className="fixed inset-0 bg-gradient-to-br from-[#1a1625] via-[#12141c] to-[#0a0b10] opacity-80" />
+        <div className="fixed inset-0 bg-[radial-gradient(circle_at_74%_24%,rgba(239,68,68,0.18),transparent_26%),#030303]" />
       )}
-      <div className="fixed inset-0 bg-[radial-gradient(circle_at_74%_24%,rgba(239,68,68,0.2),transparent_25%),linear-gradient(90deg,#030303_0%,rgba(3,3,3,0.78)_44%,rgba(3,3,3,0.9)_100%)]" />
-      <div className="fixed inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-[#030303] to-transparent" />
+      <div className="fixed inset-0 bg-[linear-gradient(90deg,#030303_0%,rgba(3,3,3,0.82)_52%,rgba(3,3,3,0.95)_100%)]" />
 
-      <section className="relative mx-auto flex min-h-screen w-full max-w-[1760px] flex-col px-5 pb-8 pt-4 sm:px-8 lg:px-12">
-        <header className="flex h-12 items-center justify-between border-b border-white/[0.07]">
-          <Link href="/" className="flex items-center gap-4 text-white">
-            <span className="text-3xl font-medium tracking-[0.34em]">F<span className="text-red-500">.</span>U<span className="text-red-500">.</span>N</span>
+      <section className="relative mx-auto w-full max-w-[1720px] px-5 pb-8 pt-5 sm:px-8 lg:px-12">
+        <header className="flex h-14 items-center justify-between border-b border-white/[0.08] pb-4">
+          <Link href="/" className="inline-flex items-center gap-5 text-white">
+            <ArrowLeft size={23} className="text-white/76" />
+            {logo()}
           </Link>
-          <div className="flex items-center gap-2">
-            <Link href="/" className="hidden h-9 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 text-sm text-white/54 transition hover:border-white/22 hover:text-white/78 sm:inline-flex">
-              <MapPin size={14} /> {regionLabel} · {languageLabel}
-            </Link>
-            <Link href="/" className="inline-flex h-9 items-center gap-2 rounded-full border border-white/14 bg-white/[0.06] px-4 text-sm text-white/78 transition hover:border-white/28 hover:text-white">
-              <ArrowLeft size={16} /> New mood
+          <div className="flex items-center gap-3">
+            <span className="hidden h-10 items-center gap-2 rounded-full border border-white/10 bg-white/[0.045] px-4 text-sm text-white/64 sm:inline-flex">
+              <Globe2 size={15} /> {region} · {language}
+            </span>
+            <button
+              type="button"
+              onClick={handleShare}
+              className="hidden h-10 items-center gap-2 rounded-full border border-white/10 bg-white/[0.045] px-4 text-sm text-white/64 transition hover:border-white/24 hover:text-white sm:inline-flex"
+            >
+              <Share2 size={15} /> {shareState === "copied" ? "Copied" : "Share"}
+            </button>
+            <Link href="/" className="inline-flex h-10 items-center gap-2 rounded-full border border-amber-300/35 bg-amber-400/[0.055] px-5 text-sm text-amber-100 transition hover:bg-amber-400/[0.1]">
+              <Sparkles size={16} /> New mood
             </Link>
           </div>
         </header>
 
-        <section className="grid flex-1 items-center gap-10 py-10 lg:grid-cols-[1.05fr_0.95fr]">
-          <div className="max-w-3xl">
-            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-red-300/25 bg-red-500/12 px-3 py-1.5 text-sm text-red-100">
-              <Star size={15} className="text-red-300" />
-              Your one pick for tonight {batch.length > 1 && `(${batchIndex + 1} of ${batch.length})`}
+        <section className="grid min-h-[620px] items-center gap-9 py-8 lg:grid-cols-[1.1fr_0.9fr]">
+          <div>
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-400/[0.07] px-3 py-1.5 text-sm text-amber-100">
+              <Sparkles size={15} />
+              Your one pick for tonight
+              <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-white/68">{batchIndex + 1} of {batch.length}</span>
             </div>
-
-            {/* Format badge — Film / TV Series / Documentary */}
-            <div className="mb-4">
-              <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium ${
-                isSeries
-                  ? "border-blue-400/30 bg-blue-500/12 text-blue-200"
-                  : isDoc
-                  ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-200"
-                  : "border-white/14 bg-white/[0.07] text-white/72"
-              }`}>
-                {isSeries ? <Monitor size={13} /> : <Film size={13} />}
-                {isSeries ? "TV Series" : isDoc ? "Documentary" : "Film"}
-              </span>
-            </div>
-
-            <h1
-              className="font-serif font-normal uppercase leading-[0.86] tracking-normal text-white"
-              style={{ fontSize: titleFontSize(pick.title) }}
-            >
+            <h1 className="font-serif font-normal leading-[0.88] tracking-normal text-white" style={{ fontSize: titleSize(pick.title) }}>
               {pick.title}
             </h1>
-
-            <p className="mt-6 max-w-2xl text-2xl leading-8 text-white/78">{pick.oneLine}</p>
-
+            <p className="mt-6 max-w-3xl text-2xl leading-9 text-white/78">{pick.oneLine}</p>
             <div className="mt-7 flex flex-wrap gap-3">
               <InfoPill icon={Calendar} label={pick.year} />
               <InfoPill icon={Clock3} label={pick.runtime} />
               <InfoPill icon={Heart} label={primaryVibe} />
+              <InfoPill icon={pick.format === "Series" || pick.format === "Episode" ? Monitor : Film} label={pick.format} />
             </div>
 
-            <div className="mt-8 flex flex-wrap gap-3">
+            <div className="mt-8 flex flex-wrap items-center gap-4">
               <a
                 href={primaryAction.href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex h-12 items-center gap-3 rounded-lg bg-gradient-to-b from-red-500 to-red-900 px-6 font-semibold text-white shadow-[0_14px_40px_rgba(127,29,29,0.45)] transition hover:brightness-110"
+                onClick={() => captureEvent("watch-click", { title: pick.title, label: primaryAction.label, href: primaryAction.href, verified: primaryAction.verified })}
+                className="inline-flex h-16 min-w-[280px] items-center justify-center gap-3 rounded-xl bg-gradient-to-b from-red-400 to-red-800 px-7 text-lg font-semibold text-white shadow-[0_18px_52px_rgba(127,29,29,0.44)] transition hover:brightness-110"
               >
-                <Play size={18} fill="currentColor" /> {primaryAction.label}
+                <Play size={20} fill="currentColor" /> {primaryAction.label}
+                {primaryAction.verified && <BadgeCheck size={18} />}
               </a>
               <button
                 type="button"
                 onClick={handleSeenIt}
                 disabled={rerolling}
-                className="inline-flex h-12 items-center gap-3 rounded-lg border border-white/10 bg-white/[0.04] px-6 font-semibold text-white/60 transition hover:border-white/22 hover:text-white/88 disabled:cursor-wait disabled:opacity-50"
+                className="inline-flex h-16 min-w-[250px] items-center justify-center gap-3 rounded-xl border border-white/12 bg-white/[0.045] px-6 text-lg font-semibold text-white/72 transition hover:border-white/24 hover:text-white disabled:cursor-wait disabled:opacity-50"
               >
-                <RefreshCw size={18} className={rerolling ? "animate-spin" : ""} />
-                {rerolling ? "Finding another…" : "Seen it"}
+                <RefreshCw size={19} className={rerolling ? "animate-spin" : ""} />
+                {rerolling ? "Finding another..." : "More watch options"}
+                <ChevronDown size={16} />
               </button>
-              {exhaustedSubscriptionBatch && (
-                <button
-                  type="button"
-                  onClick={handleSearchBeyondSubscriptions}
-                  disabled={rerolling}
-                  className="inline-flex h-12 items-center gap-3 rounded-lg border border-amber-300/25 bg-amber-400/[0.08] px-6 font-semibold text-amber-100 transition hover:border-amber-300/45 hover:bg-amber-400/[0.13] disabled:cursor-wait disabled:opacity-50"
-                >
-                  <ExternalLink size={17} />
-                  Search beyond my subscriptions
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleShare}
+                className="inline-flex h-16 min-w-[180px] items-center justify-center gap-3 rounded-xl border border-white/12 bg-white/[0.045] px-6 text-lg font-semibold text-white/72 transition hover:border-white/24 hover:text-white"
+              >
+                <Share2 size={19} /> {shareState === "copied" ? "Copied" : "Share"}
+              </button>
             </div>
 
-            <div className="mt-5 max-w-2xl rounded-2xl border border-white/10 bg-black/28 p-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="mr-1 text-sm text-white/46">How was this pick?</span>
+            <p className="mt-4 flex items-center gap-2 text-sm text-white/54">
+              <Shield size={16} className={verified ? "text-amber-200" : "text-white/36"} />
+              {verified ? `${pick.whereToWatch.note}` : "Availability not verified yet for your region."}
+            </p>
+          </div>
+
+          <div className="grid gap-7 lg:grid-cols-[0.62fr_0.38fr] lg:items-center">
+            <div className={`mx-auto grid h-36 w-36 place-items-center rounded-full border-4 bg-black/30 ${scoreClass(pick.confidence)}`}>
+              <div className="text-center">
+                <p className="text-sm text-white/64">Mood match</p>
+                <p className="text-4xl font-semibold">{pick.confidence}%</p>
+                <p className="text-sm text-white/44">Great match</p>
+              </div>
+            </div>
+            <div className="relative mx-auto h-[520px] w-full max-w-[330px] overflow-hidden rounded-2xl border border-white/14 bg-white/[0.05] shadow-[0_28px_100px_rgba(0,0,0,0.56),inset_0_1px_0_rgba(255,255,255,0.08)]">
+              <MovieImage posterUrl={pick.omdbPosterUrl} title={pick.title} className="absolute inset-0 h-full w-full" objectPosition={artworkPosition} />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/46 via-transparent to-transparent" />
+              <Bookmark size={23} className="absolute right-5 top-5 text-white/72" />
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-black/38 p-6">
+          <div className="grid gap-7 lg:grid-cols-[1.05fr_1.05fr_0.7fr]">
+            <article>
+              <h2 className="mb-5 flex items-center gap-3 text-xl text-amber-100"><Heart size={20} /> Why it fits tonight</h2>
+              <div className="space-y-4">
+                {pick.whyItFits.slice(0, 3).map((reason, index) => (
+                  <div key={`${index}-${reason}`} className="flex gap-4">
+                    <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full border border-white/14 bg-white/[0.055] text-sm text-white/70">{index + 1}</span>
+                    <p className="leading-6 text-white/72">{reason}</p>
+                  </div>
+                ))}
+              </div>
+            </article>
+
+            <article className="border-white/10 lg:border-l lg:pl-8">
+              <h2 className="mb-5 text-xl text-white">How was this pick?</h2>
+              <div className="flex flex-wrap gap-3">
                 {FEEDBACK_OPTIONS.map((option) => {
+                  const Icon = option.icon;
                   const active = feedbackReason === option.reason;
                   return (
                     <button
                       key={option.reason}
                       type="button"
                       onClick={() => handleFeedback(option.reason)}
-                      className={`rounded-full border px-3 py-1.5 text-sm transition ${
-                        active
-                          ? "border-red-300/40 bg-red-500/18 text-red-100"
-                          : "border-white/10 bg-white/[0.04] text-white/58 hover:border-white/22 hover:text-white/84"
+                      className={`inline-flex h-11 items-center gap-2 rounded-xl border px-4 text-sm transition ${
+                        active ? "border-amber-300/50 bg-amber-400/14 text-amber-100" : "border-white/12 bg-white/[0.045] text-white/68 hover:border-white/24 hover:text-white"
                       }`}
                     >
-                      {option.label}
+                      <Icon size={17} /> {option.label}
                     </button>
                   );
                 })}
               </div>
-              <p className="mt-2 text-xs text-white/30">
-                {feedbackReason ? "Saved. This helps tune your taste profile and spot app-wide misses." : "Your feedback stays local for this MVP."}
-              </p>
-            </div>
-          </div>
+              <p className="mt-4 text-sm text-white/38">{feedbackReason ? "Saved. This improves your next pick and the overall product signal." : "No account needed. Feedback helps F.U.N learn what actually works."}</p>
+            </article>
 
-          <div className="relative min-h-[520px]">
-            <div className="absolute -inset-6 rounded-[2rem] bg-red-500/10 blur-3xl" />
-            <div className="relative h-full min-h-[520px] overflow-hidden rounded-2xl border border-white/14 bg-white/[0.055] shadow-[0_28px_100px_rgba(0,0,0,0.58),inset_0_1px_0_rgba(255,255,255,0.08)]">
-              <MovieImage
-                posterUrl={pick.omdbPosterUrl}
-                title={pick.title}
-                year={pick.year}
-                artworkPosition={artworkPosition}
-                className="absolute inset-0 h-full w-full"
-                objectPosition="top"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/12 to-transparent" />
-              <div className="absolute left-5 top-5 rounded-full border border-white/14 bg-black/42 px-3 py-1.5 text-xs uppercase tracking-[0.18em] text-white/72">
-                {pick.omdbPosterUrl ? "Poster" : "Mood artwork"}
-              </div>
-              <Bookmark size={24} className="absolute right-5 top-5 text-white/70" />
-              <div className="absolute inset-x-0 bottom-0 p-6">
-                <span className="rounded-full border border-white/14 bg-black/44 px-3 py-1.5 text-sm text-white/76">
-                  {pick.confidence}% match
-                </span>
-              </div>
-            </div>
+            <article className="rounded-xl border border-amber-300/18 bg-amber-400/[0.055] p-5">
+              <h2 className="flex items-center gap-3 text-xl text-amber-100"><SlidersHorizontal size={20} /> Refine this mood</h2>
+              <p className="mt-4 text-white/58">Tweak your preferences to get a sharper match.</p>
+              <Link href="/" className="mt-7 inline-flex items-center gap-2 text-amber-100 hover:text-white">
+                Refine mood <ArrowRight size={17} />
+              </Link>
+            </article>
           </div>
         </section>
 
-        <section className="grid gap-5 border-t border-white/[0.08] pt-7 lg:grid-cols-[1fr_0.85fr_1fr]">
-          {/* Why it fits */}
-          <article id="why" className="rounded-2xl border border-white/10 bg-black/38 p-5">
-            <h2 className="flex items-center gap-3 text-xl text-white">
-              <Sparkles size={20} className="text-red-300" /> Why it fits tonight
-            </h2>
-            <div className="mt-5 space-y-4">
-              {pick.whyItFits.slice(0, 3).map((reason, index) => (
-                <div key={`${index}-${reason.slice(0, 20)}`} className="flex gap-4">
-                  <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-white/12 bg-white/[0.07] text-sm text-white/74">
-                    {index + 1}
-                  </div>
-                  <p className="text-base leading-6 text-white/72">{reason}</p>
-                </div>
-              ))}
-            </div>
-          </article>
-
-          {/* Where to watch */}
-          <article id="watch" className="rounded-2xl border border-white/10 bg-black/38 p-5">
-            <h2 className="flex items-center gap-3 text-xl text-white">
-              <BadgeCheck size={20} className={verified ? "text-emerald-300" : "text-white/40"} />
-              Where to watch
-            </h2>
-
-            {verified && (
-              <div className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
-                notOnUserPlatforms
-                  ? "border-amber-400/30 bg-amber-500/12 text-amber-100"
-                  : "border-emerald-400/25 bg-emerald-500/10 text-emerald-200"
-              }`}>
-                {notOnUserPlatforms ? "Not on your current apps — but available here:" : "✓ Available on your apps"}
-              </div>
-            )}
-
+        <section className="mt-5 grid gap-5 lg:grid-cols-[0.75fr_1fr]">
+          <article className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
+            <h2 className="mb-4 flex items-center gap-3 text-xl text-white"><BadgeCheck size={20} className={verified ? "text-emerald-300" : "text-white/38"} /> Available now</h2>
             {providers.length > 0 ? (
-              <div className="mt-4 space-y-3">
-                {subProviders.length > 0 && (
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
-                    {subProviders.slice(0, 3).map((p, index) => (
-                      <ProviderCard key={`${p.name}-${p.access}-${p.logoUrl ?? "no-logo"}-${index}`} provider={p} />
-                    ))}
-                  </div>
-                )}
-                {rentBuyProviders.length > 0 && (
-                  <div>
-                    <p className="mb-2 text-xs uppercase tracking-wider text-white/36">Rent or buy</p>
-                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
-                      {rentBuyProviders.slice(0, 2).map((p, index) => (
-                        <ProviderCard key={`${p.name}-${p.access}-${p.logoUrl ?? "no-logo"}-${index}`} provider={p} />
-                      ))}
-                    </div>
-                  </div>
-                )}
+              <div className="grid gap-3 sm:grid-cols-2">
+                {[...subProviders, ...rentBuyProviders].slice(0, 4).map((provider, index) => (
+                  <ProviderCard key={`${provider.name}-${provider.access}-${index}`} provider={provider} />
+                ))}
               </div>
             ) : (
-              <div className="mt-4 rounded-xl border border-white/14 bg-white/[0.05] p-4">
-                <div>
-                  <p className="font-medium text-white">{pick.whereToWatch.primary || "Availability not verified yet"}</p>
-                  <p className="mt-0.5 text-sm text-white/46">
-                    {pick.whereToWatch.note || `Not verified for ${session?.request?.country ?? "your region"} yet.`}
-                  </p>
-                </div>
-                <a
-                  href={primaryAction.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-4 inline-flex items-center gap-2 rounded-lg border border-white/12 px-3 py-2 text-sm text-white/62 transition hover:border-white/24 hover:text-white"
-                >
-                  {primaryAction.label} <ExternalLink size={14} />
+              <div className="rounded-xl border border-white/12 bg-white/[0.045] p-4">
+                <p className="font-medium text-white">{pick.whereToWatch.primary}</p>
+                <p className="mt-1 text-sm text-white/48">{pick.whereToWatch.note}</p>
+                <a href={fallbackUrl} target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex items-center gap-2 rounded-lg border border-white/12 px-3 py-2 text-sm text-white/62 hover:text-white">
+                  Check availability <ExternalLink size={14} />
                 </a>
               </div>
             )}
-
-            <a
-              href={availabilitySearchUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-4 inline-flex items-center gap-2 text-xs text-white/36 hover:text-white/60"
-            >
-              <ExternalLink size={12} /> More availability options
-            </a>
+            {exhaustedSubscriptionBatch && (
+              <button type="button" onClick={handleSearchBeyondSubscriptions} disabled={rerolling} className="mt-4 inline-flex h-11 items-center gap-2 rounded-lg border border-amber-300/28 bg-amber-400/[0.075] px-4 text-sm text-amber-100">
+                Search beyond my subscriptions <ExternalLink size={14} />
+              </button>
+            )}
           </article>
 
-          {/* Hidden Layer */}
-          <article className="rounded-2xl border border-amber-400/20 bg-amber-500/[0.05] p-5 shadow-[0_0_40px_rgba(251,191,36,0.06)]">
-            <div className="mb-2 text-xs uppercase tracking-widest text-amber-300/50">Films your taste actually craves</div>
-            <h2 className="flex items-start gap-3 text-lg font-medium leading-snug text-white">
-              <Layers size={18} className="mt-0.5 shrink-0 text-amber-300" /> {pick.hiddenLayer.headline}
-            </h2>
-            <p className="mt-3 text-sm leading-5 text-white/60">{pick.hiddenLayer.insight}</p>
-            {hiddenTitles.length > 0 ? (
-              <div className="mt-4 grid grid-cols-3 gap-2">
-                {hiddenTitles.slice(0, 3).map((ht) => (
-                  <a
-                    key={`${ht.title}-${ht.year}`}
-                    href={justWatchUrl(ht.title, session?.request?.country)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="relative h-[140px] overflow-hidden rounded-xl border border-amber-400/20 transition hover:border-amber-400/40"
-                  >
-                    <MovieImage posterUrl={ht.posterUrl} title={ht.title} year={ht.year} className="absolute inset-0 h-full w-full" objectPosition="top" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/88 via-black/10 to-transparent" />
-                    <div className="absolute inset-x-0 bottom-0 p-2">
-                      <p className="line-clamp-2 text-xs font-medium leading-tight text-white">{ht.title}</p>
-                      {ht.platform && <p className="mt-0.5 truncate text-xs text-amber-300/80">{ht.platform}</p>}
+          <article className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
+            <h2 className="mb-4 flex items-center gap-3 text-xl text-amber-100"><Layers size={20} /> {pick.hiddenLayer.headline}</h2>
+            <p className="text-white/58">{pick.hiddenLayer.insight}</p>
+            {hiddenTitles.length > 0 && (
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                {hiddenTitles.slice(0, 3).map((title) => (
+                  <a key={`${title.title}-${title.year}`} href={justWatchUrl(title.title, region)} target="_blank" rel="noopener noreferrer" className="relative h-40 overflow-hidden rounded-xl border border-amber-300/18 bg-amber-400/[0.05]">
+                    <MovieImage posterUrl={title.posterUrl} title={title.title} className="absolute inset-0 h-full w-full opacity-82" objectPosition="top" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/16 to-transparent" />
+                    <div className="absolute inset-x-0 bottom-0 p-3">
+                      <p className="line-clamp-2 text-sm font-medium text-white">{title.title}</p>
+                      <p className="text-xs text-amber-200/72">{title.platform ?? title.year}</p>
                     </div>
                   </a>
                 ))}
               </div>
-            ) : (
-              <p className="mt-4 rounded-xl border border-amber-400/15 bg-black/28 p-4 text-sm leading-5 text-amber-200/60">
-                {pick.hiddenLayer.classyJab}
-              </p>
             )}
           </article>
         </section>
 
-        {/* Alternatives */}
-        {pick.alternatives.length > 0 && (
-          <section className="pt-6">
-            <h2 className="mb-3 text-xl text-white">If you want a nearby mood</h2>
-            <div className="grid gap-3 sm:grid-cols-3">
-              {pick.alternatives.slice(0, 3).map((alternative, i) => {
-                const [titlePart] = alternative.split(" (");
-                const yearMatch = alternative.match(/\((\d{4})\)/);
-                const year = yearMatch?.[1] ?? "";
-                const posterUrl = pick.alternativePosterUrls?.[i];
-                return (
-                  <a
-                    key={`${alternative}-${i}`}
-                    href={justWatchUrl(titlePart, session?.request?.country)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.05] transition hover:border-white/22 hover:bg-white/[0.08]"
-                  >
-                    {posterUrl && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={posterUrl} alt={titlePart} className="absolute inset-0 h-full w-full object-cover opacity-28" />
-                    )}
-                    <div className="relative flex items-center justify-between p-4 text-white/72">
-                      <div>
-                        <p className="text-white">{titlePart}</p>
-                        {year && <p className="text-sm text-white/46">{year}</p>}
-                      </div>
-                      <ExternalLink size={16} className="text-white/36" />
+        {similar.length > 0 && (
+          <section className="mt-5 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
+            <div className="grid gap-5 lg:grid-cols-[220px_1fr]">
+              <div>
+                <h2 className="text-xl text-amber-100">Similar vibe</h2>
+                <p className="mt-2 text-white/52">More like this, if you want alternatives.</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {similar.map((item, index) => (
+                  <a key={`${item.title}-${index}`} href={justWatchUrl(item.title, region)} target="_blank" rel="noopener noreferrer" className="flex min-h-28 overflow-hidden rounded-xl border border-white/10 bg-white/[0.045] transition hover:border-white/24">
+                    <div className="relative w-20 shrink-0">
+                      <MovieImage posterUrl={item.posterUrl} title={item.title} className="absolute inset-0 h-full w-full" objectPosition="top" />
+                    </div>
+                    <div className="min-w-0 p-4">
+                      <p className="truncate text-white">{item.title}</p>
+                      <p className="mt-1 text-sm text-white/42">{item.year}</p>
+                      <p className="mt-3 inline-flex rounded-full border border-emerald-400/25 px-2 py-1 text-xs text-emerald-200">{Math.max(78, pick.confidence - 2 - index)}% match</p>
                     </div>
                   </a>
-                );
-              })}
+                ))}
+              </div>
             </div>
           </section>
         )}
 
-        <footer className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] pt-4 text-sm text-white/42">
-          <span>One pick, verified where possible, no accounts.</span>
-          <Link href="/" className="inline-flex items-center gap-2 text-white/68 hover:text-white">
-            Refine mood <ChevronRight size={16} />
-          </Link>
+        <footer className="mt-7 rounded-xl border border-white/10 bg-white/[0.03] px-5 py-4 text-sm text-white/44">
+          F.U.N gives one pick, verified where possible. We choose the best match for your mood so you can stop searching and start watching.
         </footer>
       </section>
     </main>

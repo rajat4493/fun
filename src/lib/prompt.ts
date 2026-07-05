@@ -109,6 +109,8 @@ export function buildRecommendationPrompt(input: RecommendRequest) {
         input.wants?.length ? `I want: ${input.wants.join(", ")}` : "",
         input.avoids?.length ? `I do not want: ${input.avoids.join(", ")}` : "",
         input.time ? `Time available: ${input.time}` : "",
+        input.energy ? `Energy level: ${input.energy}` : "",
+        input.viewingContext ? `Watching context: ${input.viewingContext}` : "",
         input.reference?.trim() ? `Reference title (use as taste anchor, do NOT recommend this exact title): "${input.reference.trim()}"` : "",
       ].filter(Boolean).join(". ");
 
@@ -116,6 +118,7 @@ export function buildRecommendationPrompt(input: RecommendRequest) {
   const languagePreferences = input.languagePreferences?.length ? input.languagePreferences.join(", ") : "no preference";
   const platforms = input.platforms?.length ? input.platforms.join(", ") : "not specified";
   const mineMode = input.platformFilter === "mine";
+  const indieMode = input.discoveryMode === "indie";
   const detectedLanguage = detectRequestedLanguage(userContext);
 
   const seenClause = input.seenTitles?.length
@@ -127,6 +130,9 @@ export function buildRecommendationPrompt(input: RecommendRequest) {
 
   const hiddenGemClause = /hidden\s+gem|underrated|overlooked|buried|less\s+obvious/i.test(userContext)
     ? "\n- Hidden-gem intent: Prefer a quieter, less obvious high-quality title over the most famous prestige answer. It can still be acclaimed, but it should feel like a discovery."
+    : "";
+  const indieClause = indieMode
+    ? "\n- Indie/discovery mode is ON: prefer smaller, independent, festival, regional, under-marketed, or platform-buried titles that still strongly fit the emotional job. Do not choose obscure for obscurity's sake. If the best pick is on YouTube, MUBI, public broadcaster catalogues, or a smaller local service, that is acceptable when it fits."
     : "";
   const explicitLanguageRequest = detectedLanguage !== null;
 
@@ -216,7 +222,10 @@ User context:
 - Language preference: ${languagePreferences}
 - Current streaming subscriptions: ${platforms}
 - Time context: ${input.contextHint ?? "not provided"}
+- Energy level: ${input.energy ?? "not provided"}
+- Viewing context: ${input.viewingContext ?? "not provided"}
 - Mood/request: ${userContext}${seenClause}${recentClause}${hiddenGemClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${crazinessClause}${feedbackRepairClause}${emotionalJobProtocol}${signalPriorityProtocol}${contextAmplifier}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
+- Discovery mode: ${indieMode ? "Indie / hidden cinema" : "Standard"}${indieClause}
 
 Return an array of exactly THREE JSON objects (not a wrapper object) with this schema, no markdown:
 [

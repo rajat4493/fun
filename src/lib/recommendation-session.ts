@@ -19,7 +19,13 @@ export function getOrCreateSessionId(): string {
   }
 }
 
-export type FeedbackReason = "perfect" | "wrong-vibe" | "not-on-service" | "already-seen";
+export type FeedbackReason =
+  | "perfect"
+  | "good-not-perfect"
+  | "wrong-vibe"
+  | "not-on-service"
+  | "already-seen"
+  | "too-much-effort";
 
 export type RecommendationFeedback = {
   id: string;

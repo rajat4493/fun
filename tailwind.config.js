@@ -1,7 +1,9 @@
-import type { Config } from "tailwindcss";
-
-const config: Config = {
-  content: ["./src/**/*.{js,ts,jsx,tsx,mdx}"],
+/** @type {import('tailwindcss').Config} */
+const config = {
+  content: [
+    "./src/app/**/*.{jsx,tsx,mdx}",
+    "./src/components/**/*.{jsx,tsx,mdx}",
+  ],
   theme: {
     extend: {
       boxShadow: {
@@ -14,4 +16,5 @@ const config: Config = {
   },
   plugins: [],
 };
-export default config;
+
+module.exports = config;
