@@ -6,7 +6,6 @@
     "tsBuildInfoFile": "/tmp/fun-mvp-tsconfig-lint.tsbuildinfo"
   },
   "include": [
-    "next-env.d.ts",
     "src/**/*.ts",
     "src/**/*.tsx"
   ],

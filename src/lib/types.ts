@@ -5,7 +5,10 @@ export type FeedbackSignal =
   | "wrong-vibe"
   | "not-on-service"
   | "already-seen"
-  | "too-much-effort";
+  | "too-much-effort"
+  | "not-for-me"
+  | "quit-halfway"
+  | "could-not-find";
 
 export type RecommendationFeedbackContext = {
   lastReason?: FeedbackSignal;
@@ -13,6 +16,9 @@ export type RecommendationFeedbackContext = {
   notOnServiceTitles?: string[];
   alreadySeenTitles?: string[];
   perfectTitles?: string[];
+  goodButNotPerfectTitles?: string[];
+  notForMeTitles?: string[];
+  quitHalfwayTitles?: string[];
 };
 
 export type RecommendRequest = {

@@ -746,7 +746,15 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
   }
 
   const avoids = new Set((input.avoids ?? []).map((avoid) => avoid.toLowerCase()));
+  const negated = /\b(no|not|avoid|without|don't want|do not want|less|skip|hate)\b/i.test(text);
+  if (negated && /\bgore|gory|blood|bloody|splatter|body horror\b/i.test(text)) avoids.add("gore");
+  if (negated && /\bviolence|violent|brutal|action\b/i.test(text)) avoids.add("violence");
+  if (negated && /\bhorror|scary|ghost|haunted|supernatural\b/i.test(text)) avoids.add("horror");
+  if (negated && /\bheavy drama|heavy|trauma|depressing|bleak\b/i.test(text)) avoids.add("heavy drama");
+  if (negated && /\bslow|slow burn|slow-burn\b/i.test(text)) avoids.add("slow");
   const light = avoids.has("violence") || avoids.has("gore") || avoids.has("heavy drama") || wantsComedy || wantsRomance;
+  const strictNoDarkness = avoids.has("violence") || avoids.has("gore") || avoids.has("horror");
+  const wantsWeird = /\b(weird|strange|unusual|offbeat|quirky|absurd|surreal|unhinged)\b/i.test(text) || (input.craziness ?? 0) >= 2;
   const baseRec = {
     format: "Film" as const,
     whereToWatch: {
@@ -760,6 +768,71 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
       classyJab: "Your taste deserves a better map.",
     },
   };
+
+  if (strictNoDarkness && (wantsComedy || wantsWeird)) {
+    return [
+      {
+        title: "Hundreds of Beavers",
+        year: "2022",
+        runtime: "108 min",
+        vibe: "absurd, slapstick, wildly inventive",
+        confidence: 82,
+        oneLine: "Watch Hundreds of Beavers when you want something genuinely strange without crossing into gore or horror.",
+        whyItFits: [
+          "It gives Taste Risk a wild formal shape while staying closer to slapstick than darkness.",
+          "The energy is group-reactive and funny, so it works better for friends than a quiet prestige pick.",
+          "It respects the no-gore/no-horror boundary while still feeling like a discovery.",
+        ],
+        hiddenTitles: [
+          { title: "Marcel the Shell with Shoes On", year: "2021" },
+          { title: "Dave Made a Maze", year: "2017" },
+          { title: "Brigsby Bear", year: "2017" },
+        ],
+        alternatives: ["Marcel the Shell with Shoes On (2021)", "Dave Made a Maze (2017)", "Brigsby Bear (2017)"],
+        ...baseRec,
+      },
+      {
+        title: "Marcel the Shell with Shoes On",
+        year: "2021",
+        runtime: "90 min",
+        vibe: "odd, tender, low-effort",
+        confidence: 80,
+        oneLine: "Watch Marcel the Shell with Shoes On for a tiny, strange comfort film that does not punish the mood.",
+        whyItFits: [
+          "It is unusual without becoming violent, gory, or horror-coded.",
+          "The emotional payoff is gentle and easy to receive when energy is low.",
+          "It feels specific enough to avoid the generic comfort-pick trap.",
+        ],
+        hiddenTitles: [
+          { title: "Brigsby Bear", year: "2017" },
+          { title: "Hundreds of Beavers", year: "2022" },
+          { title: "Brian and Charles", year: "2022" },
+        ],
+        alternatives: ["Brigsby Bear (2017)", "Brian and Charles (2022)", "Hundreds of Beavers (2022)"],
+        ...baseRec,
+      },
+      {
+        title: "Brigsby Bear",
+        year: "2017",
+        runtime: "97 min",
+        vibe: "offbeat, sweet, creative",
+        confidence: 77,
+        oneLine: "Watch Brigsby Bear for offbeat sweetness when you want weirdness with a human center.",
+        whyItFits: [
+          "It channels strangeness through imagination rather than shock.",
+          "It keeps the experience emotionally safe without becoming bland.",
+          "The runtime and tone make it easier to say yes tonight.",
+        ],
+        hiddenTitles: [
+          { title: "Marcel the Shell with Shoes On", year: "2021" },
+          { title: "Brian and Charles", year: "2022" },
+          { title: "Dave Made a Maze", year: "2017" },
+        ],
+        alternatives: ["Marcel the Shell with Shoes On (2021)", "Brian and Charles (2022)", "Dave Made a Maze (2017)"],
+        ...baseRec,
+      },
+    ];
+  }
 
   if (wantsThriller) {
     return [

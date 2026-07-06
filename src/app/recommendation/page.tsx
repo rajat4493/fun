@@ -24,7 +24,6 @@ import {
   SlidersHorizontal,
   Sparkles,
   Star,
-  ThumbsUp,
   type LucideIcon,
   Zap,
 } from "lucide-react";
@@ -38,6 +37,7 @@ import {
   loadRecentRecommendationTitles,
   RecommendationSession,
   recommendationStorageKey,
+  rememberRecommendationHistory,
   rememberRecommendationTitles,
   saveRecommendationFeedback,
   toTitleCase,
@@ -63,10 +63,9 @@ const SEARCH_TITLES = [
 ];
 
 const FEEDBACK_OPTIONS: Array<{ reason: FeedbackReason; label: string; icon: LucideIcon; tone: string }> = [
-  { reason: "perfect", label: "Perfect", icon: Heart, tone: "green" },
-  { reason: "good-not-perfect", label: "Good but not perfect", icon: ThumbsUp, tone: "amber" },
   { reason: "wrong-vibe", label: "Wrong vibe", icon: Star, tone: "red" },
   { reason: "already-seen", label: "Already seen", icon: RefreshCw, tone: "plain" },
+  { reason: "not-on-service", label: "Not on my service", icon: Monitor, tone: "plain" },
   { reason: "too-much-effort", label: "Too much effort", icon: Zap, tone: "purple" },
 ];
 
@@ -162,8 +161,6 @@ function watchAction(pick: Recommendation, providers: WatchProvider[], platforms
   if (provider.url && provider.urlKind === "title") {
     return { label: `Watch on ${provider.name}`, href: provider.url, verified: true };
   }
-  const searchUrl = provider.url && provider.urlKind === "search" ? provider.url : providerSearchUrl(provider, pick.title);
-  if (searchUrl) return { label: `Watch on ${provider.name}`, href: searchUrl, verified: true };
   return { label: "Find where to watch", href: fallbackUrl, verified: false };
 }
 
@@ -185,13 +182,29 @@ function ProviderLogo({ provider }: { provider: WatchProvider }) {
 
 function ProviderCard({ provider }: { provider: WatchProvider }) {
   const detail = provider.note ?? provider.price ?? (provider.access === "rent" ? "Rent" : provider.access === "buy" ? "Buy" : "Included");
-  return (
-    <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.05] p-3">
+  const href = provider.url && provider.urlKind === "title" ? provider.url : undefined;
+  const content = (
+    <>
       <ProviderLogo provider={provider} />
       <div className="min-w-0">
         <p className="truncate text-sm text-white">{provider.name}</p>
         <p className="truncate text-xs text-white/48">{detail}</p>
       </div>
+      {href && <ExternalLink size={14} className="ml-auto shrink-0 text-white/42" />}
+    </>
+  );
+
+  if (href) {
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.05] p-3 transition hover:border-white/24 hover:bg-white/[0.075]">
+        {content}
+      </a>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.05] p-3">
+      {content}
     </div>
   );
 }
@@ -291,6 +304,7 @@ export default function RecommendationPage() {
     const data = await response.json() as Recommendation & { _batch?: Recommendation[] };
     const batch = data._batch ?? [data];
     rememberRecommendationTitles(batch.map((item) => item.title));
+    rememberRecommendationHistory(batch, request);
     const next = createRecommendationSession(batch[0], request, batch);
     localStorage.setItem(recommendationStorageKey, JSON.stringify(next));
     setSession(next);
@@ -335,7 +349,8 @@ export default function RecommendationPage() {
 
   function handleFeedback(reason: FeedbackReason) {
     if (!session) return;
-    saveRecommendationFeedback(reason, session);
+    if (reason === "already-seen") addSeenTitle(session.recommendation.title);
+    saveRecommendationFeedback(reason, session, "pre-watch");
     setFeedbackReason(reason);
     const request = session.request;
     const payload = {
@@ -580,7 +595,8 @@ export default function RecommendationPage() {
             </article>
 
             <article className="border-white/10 lg:border-l lg:pl-8">
-              <h2 className="mb-5 text-xl text-white">How was this pick?</h2>
+              <h2 className="mb-2 text-xl text-white">Before watching</h2>
+              <p className="mb-5 text-sm text-white/42">Only correct what you can already tell. Rate it after you watch.</p>
               <div className="flex flex-wrap gap-3">
                 {FEEDBACK_OPTIONS.map((option) => {
                   const Icon = option.icon;
@@ -599,7 +615,7 @@ export default function RecommendationPage() {
                   );
                 })}
               </div>
-              <p className="mt-4 text-sm text-white/38">{feedbackReason ? "Saved. This improves your next pick and the overall product signal." : "No account needed. Feedback helps F.U.N learn what actually works."}</p>
+              <p className="mt-4 text-sm text-white/38">{feedbackReason ? "Saved. This improves your next pick." : "No account needed. Actual watch feedback can be added later in Memory."}</p>
             </article>
 
             <article className="rounded-xl border border-amber-300/18 bg-amber-400/[0.055] p-5">
@@ -638,7 +654,8 @@ export default function RecommendationPage() {
           </article>
 
           <article className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
-            <h2 className="mb-4 flex items-center gap-3 text-xl text-amber-100"><Layers size={20} /> {pick.hiddenLayer.headline}</h2>
+            <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-amber-200/70"><Layers size={16} /> Related discoveries</p>
+            <h2 className="mb-3 text-xl text-amber-100">{pick.hiddenLayer.headline}</h2>
             <p className="text-white/58">{pick.hiddenLayer.insight}</p>
             {hiddenTitles.length > 0 && (
               <div className="mt-4 grid gap-3 sm:grid-cols-3">

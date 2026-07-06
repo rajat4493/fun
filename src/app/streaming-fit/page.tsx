@@ -18,20 +18,23 @@ import {
   Shield,
   Sparkles,
 } from "lucide-react";
-import { loadOnboarding, OnboardingData } from "@/components/OnboardingFlow";
+import { loadOnboarding, OnboardingData, platformOptionsForCountry } from "@/components/OnboardingFlow";
 import {
   loadRecommendationFeedback,
   RecommendationFeedback,
   RecommendationSession,
   recommendationStorageKey,
 } from "@/lib/recommendation-session";
-import { WatchProvider } from "@/lib/types";
+import { Recommendation, WatchProvider } from "@/lib/types";
 
 type PlatformFit = {
   name: string;
   score: number;
   status: "Keep" | "Pause" | "Try";
   note: string;
+  includedCount: number;
+  transactionalCount: number;
+  isSelected: boolean;
 };
 
 function Logo() {
@@ -46,35 +49,108 @@ function normalize(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function providerMatches(platform: string, providers: WatchProvider[]) {
-  const platformKey = normalize(platform);
-  return providers.some((provider) => {
-    const providerKey = normalize(provider.name);
-    return providerKey.includes(platformKey) || platformKey.includes(providerKey);
+function pickText(pick: Recommendation) {
+  return [
+    pick.title,
+    pick.format,
+    pick.runtime,
+    pick.vibe,
+    pick.oneLine,
+    ...pick.whyItFits,
+    pick.hiddenLayer.headline,
+    pick.hiddenLayer.insight,
+  ].join(" ");
+}
+
+function violatesAvoidance(avoids: string[] = [], pick: Recommendation) {
+  const text = pickText(pick);
+  return avoids.some((avoid) => {
+    if (avoid === "gore") return /\b(gore|gory|bloody|splatter|body horror|graphic violence)\b/i.test(text);
+    if (avoid === "violence") return /\b(violent|violence|brutal|killer|murder|revenge|war|torture|blood)\b/i.test(text);
+    if (avoid === "horror") return /\b(horror|scary|haunted|ghost|supernatural|slasher|zombie|nightmare)\b/i.test(text);
+    if (avoid === "heavy drama") return /\b(heavy drama|harrowing|bleak|trauma|depressing|devastating)\b/i.test(text);
+    if (avoid === "sad ending") return /\b(sad ending|tragic ending|devastating ending|tragedy)\b/i.test(text);
+    if (avoid === "slow") return /\b(slow|slow-burn|meditative|contemplative|glacial)\b/i.test(text);
+    return false;
   });
 }
 
-function scorePlatform(platform: string, session: RecommendationSession | null, feedback: RecommendationFeedback[]) {
+function providerMatches(platform: string, provider: WatchProvider) {
+  const platformKey = normalize(platform);
+  const providerKey = normalize(provider.name);
+
+  if (platformKey === "appletv" || platformKey === "appletvplus") {
+    return providerKey === "appletv" || providerKey === "appletvplus";
+  }
+  if (platformKey === "jiohotstar") {
+    return providerKey.includes("hotstar") || providerKey.includes("jiocinema");
+  }
+  if (platformKey === "hbomax") {
+    return providerKey === "hbomax" || providerKey === "max";
+  }
+  return providerKey.includes(platformKey) || platformKey.includes(providerKey);
+}
+
+function matchingProviders(platform: string, providers: WatchProvider[]) {
+  return providers.filter((provider) => providerMatches(platform, provider));
+}
+
+function isIncluded(provider: WatchProvider) {
+  return provider.access === "included" || provider.access === "subscription";
+}
+
+function platformEvidence(platform: string, session: RecommendationSession | null) {
   const picks = session?.batch ?? (session?.recommendation ? [session.recommendation] : []);
-  const availableCount = picks.filter((pick) => providerMatches(platform, pick.whereToWatch.providers ?? [])).length;
-  const base = picks.length ? Math.round((availableCount / picks.length) * 72) : 34;
+  let includedCount = 0;
+  let transactionalCount = 0;
+
+  for (const pick of picks) {
+    const matched = matchingProviders(platform, pick.whereToWatch.providers ?? []);
+    if (matched.some(isIncluded)) includedCount += 1;
+    else if (matched.some((provider) => provider.access === "rent" || provider.access === "buy" || provider.access === "unknown")) transactionalCount += 1;
+  }
+
+  return { picks, includedCount, transactionalCount };
+}
+
+function scorePlatform(platform: string, session: RecommendationSession | null, feedback: RecommendationFeedback[], selectedPlatforms: string[]) {
+  const { picks, includedCount, transactionalCount } = platformEvidence(platform, session);
+  const selected = selectedPlatforms.some((item) => normalize(item) === normalize(platform));
+  const base = picks.length
+    ? Math.round(((includedCount / picks.length) * 82) + ((transactionalCount / picks.length) * 34))
+    : selected ? 34 : 22;
   const positive = feedback.filter((item) => item.reason === "perfect" || item.reason === "good-not-perfect").length;
   const notOnService = feedback.filter((item) => item.reason === "not-on-service").length;
   const modifier = Math.min(12, positive * 2) - Math.min(16, notOnService * 3);
-  const knownBoost = ["Netflix", "Prime Video", "JioHotstar", "Disney+", "HBO Max", "Apple TV+"].includes(platform) ? 10 : 2;
-  return Math.max(12, Math.min(92, base + modifier + knownBoost));
+  const selectedNudge = selected && includedCount > 0 ? 4 : 0;
+  return Math.max(8, Math.min(94, base + modifier + selectedNudge));
 }
 
-function platformFits(onboarding: OnboardingData | null, session: RecommendationSession | null, feedback: RecommendationFeedback[]): PlatformFit[] {
-  const platforms = onboarding?.platforms?.length ? onboarding.platforms : ["Netflix", "Prime Video", "Apple TV+"];
+function platformFits(onboarding: OnboardingData | null, session: RecommendationSession | null, feedback: RecommendationFeedback[], compareAll: boolean): PlatformFit[] {
+  const selectedPlatforms = onboarding?.platforms?.length ? onboarding.platforms : ["Netflix", "Prime Video", "Apple TV+"];
+  const providerNames = (session?.batch ?? (session?.recommendation ? [session.recommendation] : []))
+    .flatMap((pick) => pick.whereToWatch.providers ?? [])
+    .map((provider) => provider.name);
+  const countryOptions = onboarding ? platformOptionsForCountry(onboarding.countryCode) : [];
+  const platforms = compareAll
+    ? [...new Set([...selectedPlatforms, ...countryOptions, ...providerNames])].slice(0, 14)
+    : selectedPlatforms;
   return platforms.map((platform) => {
-    const score = scorePlatform(platform, session, feedback);
+    const { includedCount, transactionalCount } = platformEvidence(platform, session);
+    const score = scorePlatform(platform, session, feedback, selectedPlatforms);
     const status: PlatformFit["status"] = score >= 70 ? "Keep" : score >= 42 ? "Pause" : "Try";
     return {
       name: platform,
       score,
       status,
-      note: score >= 70 ? "Great fit for this mood" : score >= 42 ? "Some matches, but not ideal" : "Better matches may exist elsewhere",
+      note: includedCount > 0
+        ? "Available in your fit data"
+        : transactionalCount > 0
+          ? "Rent/buy option, not subscription fit"
+          : score >= 42 ? "Some signal, but not verified" : "Weak fit for this session",
+      includedCount,
+      transactionalCount,
+      isSelected: selectedPlatforms.some((item) => normalize(item) === normalize(platform)),
     };
   }).sort((a, b) => b.score - a.score);
 }
@@ -83,7 +159,7 @@ function ScoreBar({ fit }: { fit: PlatformFit }) {
   const color = fit.score >= 70 ? "bg-emerald-400" : fit.score >= 42 ? "bg-amber-400" : "bg-red-400";
   const text = fit.score >= 70 ? "text-emerald-300" : fit.score >= 42 ? "text-amber-300" : "text-red-300";
   return (
-    <div className="grid grid-cols-[150px_1fr_54px] items-center gap-4">
+    <div className="grid grid-cols-[minmax(120px,170px)_1fr_54px] items-center gap-4">
       <div className="flex min-w-0 items-center gap-3">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.055] font-semibold text-white">
           {fit.name.charAt(0)}
@@ -102,18 +178,18 @@ function RecommendationRow({ fit }: { fit: PlatformFit }) {
   const Icon = fit.status === "Keep" ? CheckCircle2 : fit.status === "Pause" ? PauseCircle : Sparkles;
   const tone = fit.status === "Keep" ? "text-emerald-300" : fit.status === "Pause" ? "text-amber-300" : "text-red-300";
   return (
-    <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.045] p-4">
-      <div className="flex items-center gap-4">
+    <div className="grid gap-4 rounded-xl border border-white/10 bg-white/[0.045] p-4 sm:grid-cols-[1fr_auto] sm:items-center">
+      <div className="flex min-w-0 items-center gap-4">
         <Icon size={24} className={tone} />
-        <div>
+        <div className="min-w-0">
           <p className={`font-medium ${tone}`}>{fit.status}</p>
           <p className="text-sm text-white/46">{fit.note}</p>
         </div>
       </div>
-      <div className="flex items-center gap-4">
+      <div className="flex min-w-0 items-center gap-4">
         <span className="grid h-10 w-10 place-items-center rounded-lg border border-white/10 bg-black/34 font-semibold">{fit.name.charAt(0)}</span>
-        <span className="min-w-28 text-white">{fit.name}</span>
-        <span className={tone}>{fit.score}%</span>
+        <span className="min-w-0 max-w-36 truncate text-white">{fit.name}</span>
+        <span className={`min-w-12 text-right ${tone}`}>{fit.score}%</span>
       </div>
     </div>
   );
@@ -124,6 +200,7 @@ export default function StreamingFitPage() {
   const [session, setSession] = useState<RecommendationSession | null>(null);
   const [feedback, setFeedback] = useState<RecommendationFeedback[]>([]);
   const [moodOpen, setMoodOpen] = useState(false);
+  const [compareAll, setCompareAll] = useState(false);
 
   useEffect(() => {
     setOnboarding(loadOnboarding());
@@ -136,17 +213,33 @@ export default function StreamingFitPage() {
     }
   }, []);
 
-  const fits = useMemo(() => platformFits(onboarding, session, feedback), [onboarding, session, feedback]);
+  const fits = useMemo(() => platformFits(onboarding, session, feedback, compareAll), [onboarding, session, feedback, compareAll]);
   const picks = session?.batch ?? (session?.recommendation ? [session.recommendation] : []);
   const availableOnApps = picks.filter((pick) => {
     const providers = pick.whereToWatch.providers ?? [];
-    return onboarding?.platforms.some((platform) => providerMatches(platform, providers));
+    return onboarding?.platforms.some((platform) => matchingProviders(platform, providers).some(isIncluded));
   }).length;
-  const betterOutside = Math.max(0, picks.length - availableOnApps);
+  const selectedPlatforms = onboarding?.platforms ?? [];
+  const betterOutside = picks.filter((pick) => {
+    const providers = pick.whereToWatch.providers ?? [];
+    const onUserApps = selectedPlatforms.some((platform) => matchingProviders(platform, providers).some(isIncluded));
+    const onOtherApps = providers.some((provider) => isIncluded(provider) && !selectedPlatforms.some((platform) => providerMatches(platform, provider)));
+    return !onUserApps && onOtherApps;
+  }).length;
+  const selectedFits = fits.filter((fit) => fit.isSelected);
+  const outsideFits = fits.filter((fit) => !fit.isSelected);
+  const bestSelectedScore = selectedFits[0]?.score ?? 0;
+  const bestOutsideFit = outsideFits[0];
+  const tasteGapFound = betterOutside > 0 || Boolean(compareAll && bestOutsideFit && bestOutsideFit.score >= bestSelectedScore + 10);
   const moodLabel = [
     ...(session?.request.mood ?? []),
     ...(session?.request.wants ?? []),
   ].slice(0, 3).join(", ") || "latest mood";
+  const trustViolationCount = session
+    ? picks.filter((pick) => violatesAvoidance(session.request.avoids, pick)).length
+    : 0;
+  const wrongVibeCount = feedback.filter((item) => item.reason === "wrong-vibe" || item.reason === "too-much-effort").length;
+  const avoidanceScore = trustViolationCount > 0 ? "Low" : wrongVibeCount > 0 ? "Learning" : "High";
 
   return (
     <main className="min-h-screen bg-[#030303] text-white">
@@ -208,16 +301,24 @@ export default function StreamingFitPage() {
               </div>
               <div>
                 <p className="font-serif text-6xl">{betterOutside}</p>
-                <p className="mt-1 text-white/56">better matches outside your apps</p>
+                <p className="mt-1 text-white/56">subscription matches outside your apps</p>
               </div>
             </div>
             <p className="mt-6 text-sm text-white/42">Based on availability in {onboarding?.country ?? "your region"} · {session?.request.languagePreferences?.[0] ?? "Any language"}</p>
+            <p className="mt-2 inline-flex items-center gap-2 rounded-full border border-amber-300/18 bg-amber-400/[0.06] px-3 py-1 text-xs text-amber-100">
+              <Lock size={13} /> Streaming Fit is a member-preview insight.
+            </p>
           </div>
         </section>
 
         <section className="grid gap-7 lg:grid-cols-[1.05fr_0.95fr]">
           <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
-            <h2 className="mb-6 flex items-center gap-2 font-serif text-2xl">How your apps fit this mood <Info size={16} className="text-white/38" /></h2>
+            <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 font-serif text-2xl">How apps fit this mood <Info size={16} className="text-white/38" /></h2>
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-white/46">
+                {compareAll ? "Comparing regional services" : "Your subscriptions"}
+              </span>
+            </div>
             <div className="space-y-5">
               {fits.map((fit) => <ScoreBar key={fit.name} fit={fit} />)}
             </div>
@@ -236,20 +337,40 @@ export default function StreamingFitPage() {
             <div className="space-y-3">
               {fits.slice(0, 4).map((fit) => <RecommendationRow key={fit.name} fit={fit} />)}
             </div>
-            <button type="button" className="mt-5 inline-flex items-center gap-2 text-sm text-white/42 hover:text-white">
-              <RefreshCw size={15} /> Update my apps
-            </button>
+            <Link href="/memory" className="mt-5 inline-flex items-center gap-2 text-sm text-white/42 hover:text-white">
+              <RefreshCw size={15} /> Manage remembered apps and signals
+            </Link>
           </article>
 
-          <article className="rounded-2xl border border-amber-300/28 bg-amber-400/[0.06] p-6">
+          <article className={`rounded-2xl border p-6 ${tasteGapFound ? "border-amber-300/28 bg-amber-400/[0.06]" : "border-white/10 bg-white/[0.04]"}`}>
             <div className="grid gap-6 sm:grid-cols-[1fr_220px] sm:items-center">
               <div>
-                <h2 className="flex items-center gap-3 font-serif text-3xl text-amber-100"><Flame size={30} /> Taste gap found</h2>
-                <p className="mt-5 text-lg leading-7 text-white/68">Your current apps are weaker for this mood cluster. Better matches may be available on other services.</p>
+                <h2 className="flex items-center gap-3 font-serif text-3xl text-amber-100">
+                  <Flame size={30} /> {tasteGapFound ? "Taste gap found" : "No clear taste gap yet"}
+                </h2>
+                <p className="mt-5 text-lg leading-7 text-white/68">
+                  {tasteGapFound
+                    ? bestOutsideFit
+                      ? `${bestOutsideFit.name} looks stronger for this mood than your current app mix.`
+                      : "Your current apps are weaker for this mood cluster. Better matches may be available on other services."
+                    : "We need more picks or verified availability before recommending a platform change."}
+                </p>
               </div>
-              <div className="relative h-36">
-                <div className="absolute left-6 top-4 grid h-28 w-28 place-items-center rounded-full border border-red-400/60 bg-red-500/10 text-sm text-white/78">Your apps</div>
-                <div className="absolute right-6 top-4 grid h-28 w-28 place-items-center rounded-full border border-emerald-400/60 bg-emerald-500/10 text-sm text-emerald-100">Best matches</div>
+              <div className="grid gap-3 rounded-2xl border border-white/10 bg-black/22 p-4">
+                <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+                  <span className="text-sm text-white/56">Your apps</span>
+                  <span className="w-20 rounded-full bg-white/10 px-3 py-1 text-center text-sm text-white">{bestSelectedScore ? `${bestSelectedScore}%` : "Learning"}</span>
+                </div>
+                <div className="h-2 rounded-full bg-white/10">
+                  <div className="h-2 rounded-full bg-red-300" style={{ width: `${Math.max(8, bestSelectedScore)}%` }} />
+                </div>
+                <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+                  <span className="truncate text-sm text-white/56">{bestOutsideFit?.name ?? "Other services"}</span>
+                  <span className="w-20 rounded-full bg-emerald-400/12 px-3 py-1 text-center text-sm text-emerald-100">{bestOutsideFit?.score ? `${bestOutsideFit.score}%` : "Learning"}</span>
+                </div>
+                <div className="h-2 rounded-full bg-white/10">
+                  <div className="h-2 rounded-full bg-emerald-300" style={{ width: `${Math.max(8, bestOutsideFit?.score ?? 0)}%` }} />
+                </div>
               </div>
             </div>
           </article>
@@ -259,7 +380,7 @@ export default function StreamingFitPage() {
             <div className="space-y-4">
               {[
                 ["Mood matches", "Content aligns with the mood signal", "High"],
-                ["Avoidances respected", "We avoid what you do not want", "High"],
+                ["Avoidances respected", trustViolationCount > 0 ? "A recent pick crossed a hard boundary" : "We avoid what you do not want", avoidanceScore],
                 ["Availability rate", "How much is actually on the service", availableOnApps >= 2 ? "High" : "Medium"],
                 ["Watch clicks", "How often you click when we suggest", feedback.length ? "Medium" : "Learning"],
               ].map(([title, body, score]) => (
@@ -276,12 +397,16 @@ export default function StreamingFitPage() {
         </section>
 
         <section className="mt-7 flex flex-wrap items-center justify-between gap-5">
-          <div className="flex flex-wrap gap-4">
+            <div className="flex flex-wrap gap-4">
             <Link href="/recommendation" className="inline-flex h-14 items-center gap-3 rounded-xl bg-gradient-to-b from-red-400 to-red-800 px-7 font-semibold text-white shadow-[0_18px_52px_rgba(127,29,29,0.34)]">
               See picks for this mood <ArrowRight size={20} />
             </Link>
-            <button type="button" className="inline-flex h-14 items-center gap-3 rounded-xl border border-white/12 bg-white/[0.045] px-7 text-white/62">
-              <BarChart3 size={20} /> Compare all platforms
+            <button
+              type="button"
+              onClick={() => setCompareAll((value) => !value)}
+              className="inline-flex h-14 items-center gap-3 rounded-xl border border-white/12 bg-white/[0.045] px-7 text-white/72 transition hover:border-white/24 hover:text-white"
+            >
+              <BarChart3 size={20} /> {compareAll ? "Show my subscriptions" : "Compare all platforms"}
             </button>
           </div>
           <p className="inline-flex items-center gap-2 text-sm text-white/36"><Lock size={15} /> Your data stays private. We do not sell or share it.</p>

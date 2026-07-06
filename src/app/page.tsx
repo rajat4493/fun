@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowRight,
@@ -16,6 +16,7 @@ import {
   Heart,
   Lock,
   Monitor,
+  PenLine,
   PlayCircle,
   Search,
   Shield,
@@ -38,12 +39,20 @@ import OnboardingFlow, {
 } from "@/components/OnboardingFlow";
 import {
   createRecommendationSession,
+  dismissPostWatchPrompt,
+  FeedbackReason,
   getOrCreateSessionId,
+  hasDismissedPostWatchPrompt,
+  hasPostWatchFeedback,
   loadRecommendationFeedbackContext,
   loadRecentRecommendationTitles,
+  RecommendationHistoryItem,
+  RecommendationSession,
   loadSeenTitles,
   recommendationStorageKey,
+  rememberRecommendationHistory,
   rememberRecommendationTitles,
+  savePostWatchFeedback,
 } from "@/lib/recommendation-session";
 import { CrazinessLevel, RecommendRequest, Recommendation } from "@/lib/types";
 
@@ -301,6 +310,7 @@ export default function Home() {
   const [ready, setReady] = useState(false);
   const [onboarding, setOnboarding] = useState<OnboardingData | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [inputMode, setInputMode] = useState<"choose" | "describe">("choose");
   const [selectedMoods, setSelectedMoods] = useState(["tired"]);
   const [selectedAvoids, setSelectedAvoids] = useState(["violence"]);
   const [selectedWants, setSelectedWants] = useState(["emotional"]);
@@ -313,6 +323,7 @@ export default function Home() {
   const [selfText, setSelfText] = useState("");
   const [reference, setReference] = useState("");
   const [pick, setPick] = useState<Recommendation>(defaultPick);
+  const [postWatchCandidate, setPostWatchCandidate] = useState<RecommendationHistoryItem | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -321,9 +332,29 @@ export default function Home() {
     try {
       const raw = localStorage.getItem(recommendationStorageKey);
       if (raw) {
-        const session = JSON.parse(raw) as { recommendation?: Recommendation };
+        const session = JSON.parse(raw) as Partial<RecommendationSession>;
         if (session.recommendation && !isPlaceholderPick(session.recommendation)) {
           setPick(session.recommendation);
+          const generatedAt = session.generatedAt ?? "";
+          const oldEnough = generatedAt ? Date.now() - new Date(generatedAt).getTime() > 20 * 60 * 1000 : true;
+          if (
+            oldEnough &&
+            !hasPostWatchFeedback(session.recommendation.title, session.recommendation.year) &&
+            !hasDismissedPostWatchPrompt(session.recommendation.title, session.recommendation.year)
+          ) {
+            setPostWatchCandidate({
+              id: `${session.recommendation.title}-${session.recommendation.year}`.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+              title: session.recommendation.title,
+              year: session.recommendation.year,
+              format: session.recommendation.format,
+              confidence: session.recommendation.confidence,
+              oneLine: session.recommendation.oneLine,
+              posterUrl: session.recommendation.omdbPosterUrl,
+              request: session.request ?? { mode: "choose" },
+              whereToWatch: session.recommendation.whereToWatch,
+              createdAt: generatedAt || new Date().toISOString(),
+            });
+          }
         }
       }
     } catch {
@@ -332,19 +363,57 @@ export default function Home() {
     setReady(true);
   }, []);
 
-  const promptPreview = useMemo(() => {
-    if (selfText.trim()) return selfText.trim();
-    return [
-      selectedMoods.length ? `I feel ${selectedMoods.join(", ")}` : "",
-      selectedWants.length ? `I want ${selectedWants.join(", ")}` : "",
-      selectedAvoids.length ? `avoid ${selectedAvoids.join(", ")}` : "",
-      `${time}, ${energy.toLowerCase()} energy, ${viewingContext.toLowerCase()}`,
-      reference.trim() ? `like ${reference.trim()}` : "",
-    ].filter(Boolean).join(". ");
-  }, [selfText, selectedMoods, selectedWants, selectedAvoids, time, energy, viewingContext, reference]);
+  function saveReturnFeedback(reason: FeedbackReason) {
+    if (!postWatchCandidate) return;
+    savePostWatchFeedback(reason, postWatchCandidate);
+    dismissPostWatchPrompt(postWatchCandidate.title, postWatchCandidate.year);
+    captureEvent("feedback", {
+      phase: "post-watch",
+      reason,
+      title: postWatchCandidate.title,
+      year: postWatchCandidate.year,
+      format: postWatchCandidate.format,
+      confidence: postWatchCandidate.confidence,
+      country: postWatchCandidate.request.country,
+      mood: postWatchCandidate.request.mood,
+      wants: postWatchCandidate.request.wants,
+      avoids: postWatchCandidate.request.avoids,
+      languagePreferences: postWatchCandidate.request.languagePreferences,
+      craziness: postWatchCandidate.request.craziness,
+      platformFilter: postWatchCandidate.request.platformFilter,
+    });
+    fetch("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: getOrCreateSessionId(),
+        phase: "post-watch",
+        reason,
+        title: postWatchCandidate.title,
+        year: postWatchCandidate.year,
+        format: postWatchCandidate.format,
+        confidence: postWatchCandidate.confidence,
+        country: postWatchCandidate.request.country,
+        mood: postWatchCandidate.request.mood,
+        wants: postWatchCandidate.request.wants,
+        avoids: postWatchCandidate.request.avoids,
+        languagePreferences: postWatchCandidate.request.languagePreferences,
+        craziness: postWatchCandidate.request.craziness,
+        platformFilter: postWatchCandidate.request.platformFilter,
+      }),
+    }).catch(() => {});
+    setPostWatchCandidate(null);
+  }
+
+  function dismissReturnFeedback() {
+    if (!postWatchCandidate) return;
+    dismissPostWatchPrompt(postWatchCandidate.title, postWatchCandidate.year);
+    setPostWatchCandidate(null);
+  }
 
   async function findPick() {
     if (!onboarding || loading) return;
+    if (inputMode === "describe" && !selfText.trim() && !reference.trim()) return;
     setLoading(true);
 
     const recentTitles = (() => {
@@ -363,18 +432,18 @@ export default function Home() {
     })();
 
     const requestInput: RecommendRequest = {
-      mode: selfText.trim() ? "self" : "choose",
-      mood: selfText.trim() ? undefined : selectedMoods,
-      wants: selfText.trim() ? undefined : selectedWants,
-      avoids: selfText.trim() ? undefined : selectedAvoids,
+      mode: inputMode === "describe" ? "self" : "choose",
+      mood: inputMode === "describe" ? undefined : selectedMoods,
+      wants: inputMode === "describe" ? undefined : selectedWants,
+      avoids: inputMode === "describe" ? undefined : selectedAvoids,
       time: time !== "no preference" ? time : undefined,
       energy,
       viewingContext,
       country: onboarding.country,
       languagePreferences: onboarding.languagePreferences,
       platforms: onboarding.platforms,
-      selfText: selfText.trim() || undefined,
-      reference: reference.trim() || undefined,
+      selfText: inputMode === "describe" ? selfText.trim() || undefined : undefined,
+      reference: inputMode === "describe" ? reference.trim() || undefined : undefined,
       seenTitles: loadSeenTitles(),
       recentTitles,
       platformFilter,
@@ -400,7 +469,7 @@ export default function Home() {
       platformFilter,
       discoveryMode: indieMode ? "indie" : "standard",
       craziness: risk,
-      hasFreeText: Boolean(selfText.trim()),
+      hasFreeText: inputMode === "describe" && Boolean(selfText.trim()),
       hasReference: Boolean(reference.trim()),
     });
     router.push("/recommendation");
@@ -418,6 +487,7 @@ export default function Home() {
       const data = await response.json() as Recommendation & { _batch?: Recommendation[] };
       const batch = data._batch ?? [data];
       rememberRecommendationTitles(batch.map((item) => item.title));
+      rememberRecommendationHistory(batch, requestInput);
       localStorage.setItem(recommendationStorageKey, JSON.stringify(createRecommendationSession(batch[0], requestInput, batch)));
       captureEvent("recommendation", {
         title: batch[0].title,
@@ -451,6 +521,8 @@ export default function Home() {
   }
 
   if (!onboarding) return <OnboardingFlow onComplete={(data) => setOnboarding(data)} />;
+
+  const canFindPick = inputMode === "choose" || Boolean(selfText.trim() || reference.trim());
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#030303] text-white">
@@ -508,6 +580,32 @@ export default function Home() {
           </div>
         </section>
 
+        {postWatchCandidate && (
+          <section className="mb-8 rounded-2xl border border-white/10 bg-white/[0.045] p-5 shadow-[0_18px_70px_rgba(0,0,0,0.35)]">
+            <div className="flex flex-wrap items-center justify-between gap-5">
+              <div className="min-w-0">
+                <p className="text-sm uppercase tracking-[0.2em] text-amber-200/70">Last pick</p>
+                <h2 className="mt-2 text-2xl text-white">Did you watch {postWatchCandidate.title}?</h2>
+                <p className="mt-1 text-white/48">One tap helps F.U.N learn after the movie, not before it.</p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button type="button" onClick={() => saveReturnFeedback("perfect")} className="inline-flex h-11 items-center gap-2 rounded-xl border border-emerald-300/35 bg-emerald-400/[0.08] px-4 text-sm text-emerald-100">
+                  <Heart size={16} /> Loved it
+                </button>
+                <button type="button" onClick={() => saveReturnFeedback("good-not-perfect")} className="inline-flex h-11 items-center gap-2 rounded-xl border border-amber-300/30 bg-amber-400/[0.07] px-4 text-sm text-amber-100">
+                  <CheckCircle2 size={16} /> Good
+                </button>
+                <button type="button" onClick={() => saveReturnFeedback("not-for-me")} className="inline-flex h-11 items-center gap-2 rounded-xl border border-white/12 bg-white/[0.045] px-4 text-sm text-white/68 hover:text-white">
+                  <Ban size={16} /> Not for me
+                </button>
+                <button type="button" onClick={dismissReturnFeedback} className="inline-flex h-11 items-center rounded-xl border border-white/10 px-4 text-sm text-white/42 hover:text-white">
+                  Not now
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
         <section id="mood" className="rounded-2xl border border-white/10 bg-[#090909]/82 p-5 shadow-[0_26px_100px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-xl sm:p-8">
           <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
             <div>
@@ -520,30 +618,66 @@ export default function Home() {
           </div>
 
           <div className="space-y-5">
-            <div className="grid gap-4 lg:grid-cols-[140px_1fr] lg:items-center">
-              <div className="border-l-2 border-red-400 pl-5 text-lg">I'm feeling</div>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-                {moods.map((option) => (
-                  <ChoiceButton key={option.label} option={option} active={selectedMoods.includes(option.label)} onClick={() => toggle(option.label, selectedMoods, setSelectedMoods)} />
-                ))}
+            <div className="max-w-xl rounded-xl border border-white/10 bg-black/24 p-1">
+              <div className="grid grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setInputMode("choose")}
+                  className={`h-12 rounded-lg text-sm transition ${inputMode === "choose" ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/50 hover:text-white"}`}
+                >
+                  <Sparkles size={16} className="mr-2 inline" /> Choose
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInputMode("describe")}
+                  className={`h-12 rounded-lg text-sm transition ${inputMode === "describe" ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/50 hover:text-white"}`}
+                >
+                  <PenLine size={16} className="mr-2 inline" /> Describe
+                </button>
               </div>
             </div>
-            <div className="grid gap-4 lg:grid-cols-[140px_1fr] lg:items-center">
-              <div className="border-l-2 border-red-400 pl-5 text-lg">I don't want</div>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-                {avoids.map((option) => (
-                  <ChoiceButton key={option.label} option={option} active={selectedAvoids.includes(option.label)} onClick={() => toggle(option.label, selectedAvoids, setSelectedAvoids)} />
-                ))}
+
+            {inputMode === "choose" ? (
+              <>
+                <div className="grid gap-4 lg:grid-cols-[140px_1fr] lg:items-center">
+                  <div className="border-l-2 border-red-400 pl-5 text-lg">I'm feeling</div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                    {moods.map((option) => (
+                      <ChoiceButton key={option.label} option={option} active={selectedMoods.includes(option.label)} onClick={() => toggle(option.label, selectedMoods, setSelectedMoods)} />
+                    ))}
+                  </div>
+                </div>
+                <div className="grid gap-4 lg:grid-cols-[140px_1fr] lg:items-center">
+                  <div className="border-l-2 border-red-400 pl-5 text-lg">I don't want</div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                    {avoids.map((option) => (
+                      <ChoiceButton key={option.label} option={option} active={selectedAvoids.includes(option.label)} onClick={() => toggle(option.label, selectedAvoids, setSelectedAvoids)} />
+                    ))}
+                  </div>
+                </div>
+                <div className="grid gap-4 lg:grid-cols-[140px_1fr] lg:items-center">
+                  <div className="border-l-2 border-red-400 pl-5 text-lg">I want</div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                    {wants.map((option) => (
+                      <ChoiceButton key={option.label} option={option} active={selectedWants.includes(option.label)} onClick={() => toggle(option.label, selectedWants, setSelectedWants)} />
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="grid gap-5 rounded-2xl border border-white/10 bg-white/[0.035] p-5 lg:grid-cols-[1.2fr_0.8fr]">
+                <label>
+                  <span className="mb-3 flex items-center gap-2 text-lg"><PenLine size={18} /> Describe it your way</span>
+                  <textarea value={selfText} onChange={(event) => setSelfText(event.target.value)} rows={5} placeholder="I want a hidden gem thriller, or something like Friends but in Hindi..." className="w-full resize-none rounded-xl border border-white/12 bg-black/28 px-4 py-3 text-white outline-none placeholder:text-white/28 focus:border-red-300/45" />
+                  <span className="mt-2 block text-sm text-white/42">Describe mode ignores the mood buttons and uses your words directly.</span>
+                </label>
+                <label>
+                  <span className="mb-3 flex items-center gap-2 text-lg"><FilmIcon /> Reference title</span>
+                  <input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="Optional: Shameless, Parasite, Fleabag..." className="h-14 w-full rounded-xl border border-white/12 bg-black/28 px-4 text-white outline-none placeholder:text-white/28 focus:border-red-300/45" />
+                  <span className="mt-2 block text-sm text-white/42">Use this when you want the feeling of one title translated into another region or language.</span>
+                </label>
               </div>
-            </div>
-            <div className="grid gap-4 lg:grid-cols-[140px_1fr] lg:items-center">
-              <div className="border-l-2 border-red-400 pl-5 text-lg">I want</div>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-                {wants.map((option) => (
-                  <ChoiceButton key={option.label} option={option} active={selectedWants.includes(option.label)} onClick={() => toggle(option.label, selectedWants, setSelectedWants)} />
-                ))}
-              </div>
-            </div>
+            )}
 
             <div className="grid gap-6 border-t border-white/8 pt-5 lg:grid-cols-[160px_1fr_1.1fr]">
               <label className="block">
@@ -589,18 +723,9 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="grid gap-6 border-t border-white/8 pt-5 lg:grid-cols-[1fr_1fr]">
-              <label>
-                <span className="mb-3 flex items-center gap-2 text-lg"><Search size={18} /> Describe it your way</span>
-                <textarea value={selfText} onChange={(event) => setSelfText(event.target.value)} rows={4} placeholder="Optional: I want a hidden gem thriller, or something like Friends but in Hindi..." className="w-full resize-none rounded-xl border border-white/12 bg-black/28 px-4 py-3 text-white outline-none placeholder:text-white/28 focus:border-red-300/45" />
-              </label>
-              <div>
-                <label>
-                  <span className="mb-3 flex items-center gap-2 text-lg"><FilmIcon /> Reference title</span>
-                  <input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="Optional: Shameless, Parasite, Fleabag..." className="h-14 w-full rounded-xl border border-white/12 bg-black/28 px-4 text-white outline-none placeholder:text-white/28 focus:border-red-300/45" />
-                </label>
-                  <div className="mt-4">
-                    <span className="mb-3 block text-sm uppercase tracking-widest text-white/36">Where to search</span>
+            <div className="border-t border-white/8 pt-5">
+              <div className="max-w-3xl">
+                <span className="mb-3 block text-sm uppercase tracking-widest text-white/36">Where to search</span>
                   <div className="grid grid-cols-2 rounded-xl border border-white/10 bg-black/26 p-1">
                     <button type="button" onClick={() => setPlatformFilter("mine")} className={`h-14 rounded-lg text-base transition ${platformFilter === "mine" ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/50 hover:text-white"}`}>My subscriptions</button>
                     <button type="button" onClick={() => setPlatformFilter("any")} className={`h-14 rounded-lg text-base transition ${platformFilter === "any" ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/50 hover:text-white"}`}>All cinema</button>
@@ -626,12 +751,11 @@ export default function Home() {
                       <span className={`block h-4 w-4 rounded-full bg-white transition ${indieMode ? "translate-x-5" : ""}`} />
                     </span>
                   </button>
-                </div>
               </div>
             </div>
 
             <div className="mx-auto max-w-4xl pt-2">
-              <button type="button" onClick={findPick} disabled={loading} className="inline-flex h-16 w-full items-center justify-center gap-4 rounded-xl bg-gradient-to-b from-amber-200 to-amber-500 text-xl font-semibold text-black shadow-[0_18px_58px_rgba(251,191,36,0.18)] transition hover:brightness-105 disabled:cursor-wait disabled:opacity-70">
+              <button type="button" onClick={findPick} disabled={loading || !canFindPick} className="inline-flex h-16 w-full items-center justify-center gap-4 rounded-xl bg-gradient-to-b from-amber-200 to-amber-500 text-xl font-semibold text-black shadow-[0_18px_58px_rgba(251,191,36,0.18)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-55">
                 {loading ? "Finding your pick..." : "Find my pick"} <ArrowRight size={24} />
               </button>
               <p className="mt-3 text-center text-sm text-white/38"><Lock size={14} className="mr-2 inline text-amber-200" /> We will respect your mood and avoidances.</p>

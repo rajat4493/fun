@@ -3,6 +3,7 @@ import { filterFalsePositiveRecommendations, localFallback } from "@/lib/fallbac
 import { recommendWithAnthropic, recommendWithOpenAI } from "@/lib/llm";
 import { enrichRecommendation } from "@/lib/metadata";
 import { buildRecommendationPrompt } from "@/lib/prompt";
+import { applyTrustFilter, rejectionPrompt, safeFallback, TrustRejection } from "@/lib/recommendation-trust";
 import { RawRecommendation, RecommendRequest, Recommendation } from "@/lib/types";
 
 function hasSubscriptionProvider(recommendation: Recommendation): boolean {
@@ -37,6 +38,8 @@ function llmTemperature(input: RecommendRequest): number {
   return input.craziness === 3 ? 1 : 0.85;
 }
 
+// CHANGED: OpenAI is now primary, Anthropic is fallback. Anthropic key is optional — add it
+// to .env.local when budget allows for better recommendation quality.
 async function getRecommendations(input: RecommendRequest, prompt: string): Promise<RawRecommendation[]> {
   const temperature = llmTemperature(input);
 
@@ -62,6 +65,42 @@ async function getRecommendations(input: RecommendRequest, prompt: string): Prom
 function filteredLocalFallback(input: RecommendRequest): RawRecommendation[] {
   const filtered = filterFalsePositiveRecommendations(input, localFallback(input));
   return filtered.length > 0 ? filtered : [];
+}
+
+// NEW: Trust filter with retry loop. If all picks are rejected (wrong language, seen titles, etc.)
+// the prompt is extended with a rejection note and the LLM gets one more attempt before
+// falling back to local curated picks.
+async function trustedRawBatch(input: RecommendRequest, basePrompt: string): Promise<{
+  batch: RawRecommendation[];
+  rejections: TrustRejection[];
+}> {
+  const allRejections: TrustRejection[] = [];
+  let prompt = basePrompt;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const rawBatch = await getRecommendations(input, prompt);
+    let normalizedBatch = filterFalsePositiveRecommendations(input, rawBatch).slice(0, 3);
+
+    if (shouldUseCuratedReferenceFallback(input)) {
+      normalizedBatch = filteredLocalFallback(input).slice(0, 3);
+    }
+
+    const trusted = applyTrustFilter(input, normalizedBatch);
+    allRejections.push(...trusted.rejected);
+    if (trusted.accepted.length > 0) {
+      return { batch: trusted.accepted.slice(0, 3), rejections: allRejections };
+    }
+
+    prompt = `${basePrompt}${rejectionPrompt(allRejections)}`;
+  }
+
+  const localTrusted = applyTrustFilter(input, filteredLocalFallback(input));
+  allRejections.push(...localTrusted.rejected);
+  if (localTrusted.accepted.length > 0) {
+    return { batch: localTrusted.accepted.slice(0, 3), rejections: allRejections };
+  }
+
+  return { batch: [safeFallback(input)], rejections: allRejections };
 }
 
 async function enrichBatch(
@@ -109,22 +148,18 @@ export async function POST(req: Request) {
     const country = input.country || "Poland";
     const platforms = input.platforms ?? [];
     const prompt = buildRecommendationPrompt(input);
-    const rawBatch = await getRecommendations(input, prompt);
-
-    let normalizedBatch = filterFalsePositiveRecommendations(input, rawBatch).slice(0, 3);
-    if (normalizedBatch.length < 3) {
-      console.warn(`Expected 3 recommendations, got ${normalizedBatch.length}`);
-    }
-    if (normalizedBatch.length === 0) {
-      normalizedBatch = filteredLocalFallback(input).slice(0, 3);
-    }
-    if (shouldUseCuratedReferenceFallback(input)) {
-      normalizedBatch = filteredLocalFallback(input).slice(0, 3);
-    }
+    const trustedRaw = await trustedRawBatch(input, prompt);
+    let normalizedBatch = trustedRaw.batch;
 
     let enrichedBatch = input.platformFilter === "mine"
       ? await verifiedSubscriptionBatch(normalizedBatch, input, country)
       : await enrichBatch(normalizedBatch, country, platforms);
+
+    const trustedEnriched = applyTrustFilter(input, enrichedBatch);
+    if (trustedEnriched.rejected.length > 0) {
+      console.warn("[FUN trust filter rejected enriched picks]", JSON.stringify(trustedEnriched.rejected));
+    }
+    enrichedBatch = trustedEnriched.accepted;
 
     const languageMatchedBatch = enrichedBatch.filter((recommendation) => matchesLanguageRequest(input, recommendation));
     if (languageMatchedBatch.length > 0) {
@@ -135,16 +170,12 @@ export async function POST(req: Request) {
       enrichedBatch = filteredFallback.length > 0 ? filteredFallback : fallback;
     }
 
-    if (enrichedBatch.length === 0 && normalizedBatch[0]) {
-      const fallback = await enrichRecommendation(normalizedBatch[0], country, platforms);
-      enrichedBatch = [unavailableSubscriptionFallback(fallback, country)];
-    }
-
     if (enrichedBatch.length === 0) {
-      return NextResponse.json(
-        { error: "No fresh recommendation found. Try a different mood or clear seen titles." },
-        { status: 409 },
-      );
+      const fallbackRaw = applyTrustFilter(input, [safeFallback(input)]).accepted[0] ?? safeFallback(input);
+      const fallback = await enrichRecommendation(fallbackRaw, country, platforms);
+      enrichedBatch = hasSubscriptionProvider(fallback)
+        ? [fallback]
+        : [unavailableSubscriptionFallback(fallback, country)];
     }
 
     const firstPick = enrichedBatch[0];
@@ -152,6 +183,10 @@ export async function POST(req: Request) {
       ...firstPick,
       _batch: enrichedBatch,
       _batchIndex: 0,
+      _trust: {
+        rejections: trustedRaw.rejections,
+        fallbackUsed: normalizedBatch.length === 1 && normalizedBatch[0]?.title === safeFallback(input).title,
+      },
     });
   } catch (error) {
     console.error("Recommendation route failed:", error);

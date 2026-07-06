@@ -49,6 +49,8 @@ function detectRequestedLanguage(text: string): string | null {
   return null;
 }
 
+// NEW: Forces the model to infer the emotional outcome the user is chasing, not just match genre tags.
+// Prevents "tag averaging" — e.g. tired+nostalgic+emotional should not collapse into a generic sad indie.
 function buildEmotionalJobProtocol(userContext: string) {
   return `
 - Emotional job protocol: before choosing any title, silently infer "what emotional outcome is this person chasing tonight?" Use that as the primary selection signal. Do not surface this chain of thought; only reflect it through the title and why-it-fits.
@@ -57,20 +59,45 @@ function buildEmotionalJobProtocol(userContext: string) {
 - Affect bridging: when the user says "like X but lighter/darker/weirder", preserve the emotional engine of X and only adjust the requested weight. Example: "Parasite but lighter" means class anxiety + dark irony + twist satisfaction with less brutality, not "Korean romcom".`;
 }
 
+// NEW: Explicit ranked order for the model — avoids overrides everything, free text beats chips,
+// reference fingerprint beats genre label, Taste Risk never overrides hard constraints.
 function buildSignalPriorityProtocol(input: RecommendRequest) {
   return `
 - Signal priority hierarchy:
   1. Hard avoids and explicit negatives are strict.
   2. Free-text self-description overrides picker tags if both exist.
   3. Reference-title emotional fingerprint overrides broad genre labels.
-  4. Taste Risk controls emotional appetite: refuge vs discovery vs challenge vs intensity.
+  4. Taste Risk controls emotional appetite inside hard boundaries; it never overrides avoids, time limits, already-seen memory, explicit language, or subscription-only scope.
   5. Extreme time context can bend tone: very late night should be more precise/intimate; weekday tired should be lower-friction.
   6. Language and region choose the content lane, but should not erase the emotional job.
   7. Picker mood/want tags are supporting evidence, not the whole request.
   8. Platform availability filters the answer after taste match, not before.`;
 }
 
+// NEW: Time/day context was always passed but never instructed. Added explicit energy-to-complexity
+// mapping (zero brain → no exposition dumps) and viewing context psychology (partner → shared arcs,
+// friends → group-reactive, alone → introspective territory OK).
 function buildContextAmplifier(input: RecommendRequest) {
+  const energyMap: Record<string, string> = {
+    "very low": "Content must feel like a reward, not a task. No complex exposition dumps, no demanding narrative grammar, no slow-burn that requires patience. The viewer needs to be carried by familiar storytelling grammar, forward momentum, and payoff without effort.",
+    "low": "Moderate engagement is fine. Some narrative complexity is acceptable. The pick should be involving but not punishing; the viewer can miss a small detail and not lose the thread.",
+    "medium": "Full narrative engagement is welcome. Character depth, layered storytelling, moral ambiguity, and slower build are acceptable when they serve the emotional job.",
+    "high": "Intellectually or formally demanding content is appropriate. Experimental structure, morally complex territory, and active-viewer films can work when requested by mood and Taste Risk.",
+  };
+  const energyClause = input.energy
+    ? `\n  - Energy mapping (${input.energy}): ${energyMap[input.energy.toLowerCase()] ?? "Calibrate narrative complexity to the stated energy level."}`
+    : "";
+
+  const contextMap: Record<string, string> = {
+    "alone": "Solo watch — introspective, singular-POV narratives, intimate character studies, or immersive world-building are all appropriate. Content with ambiguous endings or demanding emotional territory is more tolerable alone.",
+    "partner": "Watching with a partner — favor shared emotional experiences: tension-and-release, conversation-starter narratives, content with clear emotional arcs that two people can react to together. Avoid slow solo-character studies or content so personal it feels odd to watch with someone else.",
+    "friends": "Group watch — kinetic, entertaining, quotable, social energy. Content that provokes group reaction can work best, but only inside the user's avoidances. Avoid deeply personal or slow introspective cinema.",
+    "family": "Family watch — accessible, shared reference points, avoiding heavy adult darkness, violence, or content that would create awkward silences. Broad enough for different generations without being generic.",
+  };
+  const viewingContextClause = input.viewingContext
+    ? `\n  - Viewing context (${input.viewingContext}): ${contextMap[input.viewingContext.toLowerCase()] ?? "Calibrate social dynamics of the pick to match the stated viewing context."}`
+    : "";
+
   return `
 - Context amplifier:
   - Weekend late night + lonely: intimate, hypnotic, emotionally precise; avoid generic cheer-up picks unless requested.
@@ -78,24 +105,49 @@ function buildContextAmplifier(input: RecommendRequest) {
   - Friday/weekend evening + happy: celebratory, kinetic, social, or deliciously entertaining; avoid overly introspective picks.
   - Late night + anxious/lonely: either controlled catharsis or beautiful alienation; avoid loud crowd-pleasers unless the user asks for escape.
   - Morning/afternoon: cleaner energy, more focused, less punishing.
-  - Winter/autumn context can support cozy, gothic, reflective, or nocturnal choices; summer/spring can support kinetic, sensual, open-air, or lighter picks.`;
+  - Winter/autumn context can support cozy, gothic, reflective, or nocturnal choices; summer/spring can support kinetic, sensual, open-air, or lighter picks.${energyClause}${viewingContextClause}`;
 }
 
+// UPDATED: Added good-not-perfect (emotional register slightly off → adjust precision)
+// and too-much-effort (cognitive tax too high → lower complexity next pick).
+// These were captured in the UI but previously discarded before reaching the model.
 function buildFeedbackRepairClause(input: RecommendRequest) {
   const feedback = input.feedbackContext;
   if (!feedback) return "";
   const clauses: string[] = [];
   if (feedback.wrongVibeTitles?.length) {
-    clauses.push(`Recent wrong-vibe titles: ${feedback.wrongVibeTitles.join(", ")}. Treat this as an emotional-job miss. Do NOT simply recommend another title with the same surface genre; infer a different emotional interpretation.`);
+    clauses.push(`Wrong-vibe titles: ${feedback.wrongVibeTitles.join(", ")}. This was an emotional-job miss — the surface genre may have matched but the feeling did not. Infer a different emotional interpretation. Consider trying a different format (film vs. series), a different emotional register (lighter/darker/weirder), or a completely different genre that serves the same underlying need.`);
   }
   if (feedback.notOnServiceTitles?.length) {
-    clauses.push(`Recent not-on-service titles: ${feedback.notOnServiceTitles.join(", ")}. If subscription mode is active, prioritize picks more likely to satisfy the selected services and region.`);
+    clauses.push(`Not-on-service titles: ${feedback.notOnServiceTitles.join(", ")}. Prioritize picks with higher regional availability likelihood for this country and subscription set.`);
   }
   if (feedback.alreadySeenTitles?.length) {
-    clauses.push(`Recent already-seen feedback: ${feedback.alreadySeenTitles.join(", ")}. Avoid these and nearby obvious repeats.`);
+    clauses.push(`Already-seen titles: ${feedback.alreadySeenTitles.join(", ")}. Avoid these and their obvious adjacents.`);
   }
   if (feedback.perfectTitles?.length) {
-    clauses.push(`Recent perfect picks: ${feedback.perfectTitles.join(", ")}. Preserve their successful emotional traits only when they match the current request; do not repeat the exact titles.`);
+    clauses.push(`Perfect picks: ${feedback.perfectTitles.join(", ")}. Extract the emotional traits that made these work and carry them forward — but do not repeat the titles or their closest sequels.`);
+  }
+  if (feedback.goodButNotPerfectTitles?.length) {
+    clauses.push(`Good-but-not-perfect watched picks: ${feedback.goodButNotPerfectTitles.join(", ")}. The emotional direction was close, but the pick lacked precision. Preserve the underlying need, then adjust tone, pacing, or specificity instead of repeating the same lane.`);
+  }
+  if (feedback.notForMeTitles?.length) {
+    clauses.push(`Watched but not-for-me titles: ${feedback.notForMeTitles.join(", ")}. Treat these as completed-watch taste misses, not obvious pre-watch mismatches. Avoid their emotional texture, pacing, and appeal pattern unless the new request explicitly asks for it.`);
+  }
+  if (feedback.quitHalfwayTitles?.length) {
+    clauses.push(`Quit-halfway titles: ${feedback.quitHalfwayTitles.join(", ")}. Reduce friction: less setup burden, clearer momentum, and a stronger early hook unless the user explicitly asks for slow or demanding cinema.`);
+  }
+  // New signals from expanded feedback UI
+  if (feedback.lastReason === "good-not-perfect") {
+    clauses.push(`Last pick was "good but not perfect" — the user was close but not satisfied. Adjust the emotional register: try something sharper, softer, shorter, longer, or more specific. The emotional job is right; the execution or precision of the pick was slightly off. Do not pick the same tone or genre lane again.`);
+  }
+  if (feedback.lastReason === "too-much-effort") {
+    clauses.push(`Last pick felt like "too much effort" — cognitive/emotional tax was too high. The user wants something that feels like a reward, not homework. Lower the narrative complexity, avoid slow-burn or demanding pacing, and prefer content with satisfying forward momentum and a familiar enough grammar that the viewer does not have to work to follow it.`);
+  }
+  if (feedback.lastReason === "not-for-me") {
+    clauses.push(`Last watched pick was "not for me" — do not overfit to its genre label. Reinterpret the emotional job and choose a different appeal pattern.`);
+  }
+  if (feedback.lastReason === "quit-halfway") {
+    clauses.push(`Last watched pick was quit halfway — the next pick needs a cleaner early hook and lower start-up friction.`);
   }
   if (!clauses.length) return "";
   return `\n- Feedback repair context: ${clauses.join(" ")}`;
@@ -183,7 +235,7 @@ export function buildRecommendationPrompt(input: RecommendRequest) {
     "Safe — emotional appetite is refuge. The user wants certainty, familiarity, low regret, and no emotional tax. Pick satisfying, accessible, well-liked titles that solve the mood without punishing the viewer. Avoid experimental, niche, polarising, or homework-feeling content.",
     "Curious — emotional appetite is discovery without punishment. The user wants to feel a little smarter or surprised, but still cared for. Prefer acclaimed but slightly off-mainstream picks, international breakouts, overlooked prestige, or quiet cult classics.",
     "Bold — emotional appetite is stimulation and challenge. The user wants surprise, provocation, intensity, or a title with real teeth. Use festival picks, morally complex films, politically charged work, surrealism, or challenging genre cinema when it matches the emotional job. If the user's mood has explicit violence/gore/horror signals, go full extreme. A mainstream safe pick at this level is a failure.",
-    "Unhinged — emotional appetite is aliveness through unfamiliarity, discomfort, extremity, or strangeness. Ignore mainstream appeal. Target cult, avant-garde, extreme, transgressive, experimental, or genuinely divisive works. If the request includes gore/horror/intensity, go extreme. If not, go formally or emotionally strange. A safe pick at this level is a total failure.",
+    "Unhinged — emotional appetite is aliveness through unfamiliarity, discomfort, extremity, or strangeness. Ignore mainstream appeal, but stay inside hard avoidances. Target cult, avant-garde, transgressive, experimental, or genuinely divisive works. If the request includes gore/horror/intensity and does not avoid it, go extreme. If not, go formally or emotionally strange. A safe pick at this level is a failure unless hard constraints force a safer fallback.",
   ];
   const crazinessClause = `\n- Taste Risk (${["Safe", "Curious", "Bold", "Unhinged"][crazinessLevel]}): ${CRAZINESS_PHILOSOPHY[crazinessLevel]}`;
 
@@ -195,7 +247,7 @@ export function buildRecommendationPrompt(input: RecommendRequest) {
     ? `- Hidden titles: 3 acclaimed films/series that ARE typically on ${platforms} but get buried by the algorithm — things the user has probably scrolled past without realising how good they are. Show what the platform already has but actively hides.${detectedLanguage ? ` All 3 must be ${detectedLanguage}-language or ${detectedLanguage}-market titles.` : ""}`
     : detectedLanguage
     ? `- Hidden titles: 3 acclaimed ${detectedLanguage}-language films/series that deserve more visibility — strong picks from that market that are less algorithm-pushed. NOT English or global arthouse.`
-    : `- Hidden titles: 3 acclaimed films/series from the last 3 years NOT found on mainstream platforms (Netflix, Prime, Disney+) — arthouse, MUBI, Criterion, or specialised catalogues. Titles that feel like a real discovery.`;
+    : `- Hidden titles: 3 acclaimed films/series NOT commonly found on mainstream platforms (Netflix, Prime, Disney+) — arthouse, MUBI, Criterion, or specialised catalogues. Any era is fine. Titles that feel like a real discovery, not algorithm bait.`;
 
   const tasteRiskHeader = crazinessLevel >= 2 ? `
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -270,8 +322,15 @@ ${detectedLanguage
   : `The 3 recommendations should offer variety: if pick 1 is a film, pick 2 could be a series; if pick 1 is recent, pick 2 could be classic; if pick 1 is international, pick 2 could be American. Give the user choices while all matching their mood.`}
 
 Constraints:
+- Hard boundaries are trust contracts. Avoidances, already-seen titles, explicit language/culture requests, subscription-only scope, and time limits outrank Taste Risk, novelty, hidden-gem intent, and cinematic quality. "Unhinged" means unusual inside the boundaries, not boundary-breaking.
+// NEW psychology anchors: confidence definition stops score inflation; regret minimization
+// optimises for post-watch satisfaction not tag match; peak-end rule protects tired users
+// from ambiguous/punishing endings.
+- Confidence score definition: 90–100 = you are certain this matches the emotional job and would surprise no one who knows the user's request. 75–89 = strong match with one or two small question marks. 60–74 = reasonable match but a clear compromise somewhere. Below 60 = do not include this pick; find a better one. Do not inflate confidence to seem authoritative.
+- Regret minimization: before finalising a pick, run this silent check — "Would this person, after watching, feel this was the right choice for tonight?" A technically good film that mismatches tonight's energy creates regret. A B+ film that perfectly matches tonight's need creates satisfaction. Optimise for the latter.
+- Peak-end rule: people remember how a film/series made them feel at its peak moment and at the end — not the average. For tired, low-energy, or emotionally depleted users, prioritise picks with emotionally satisfying or resolving endings. Avoid tonally ambiguous, punishing, or unresolved endings for these users unless Bold/Unhinged is selected.
 - Use the time context to calibrate the pick's energy: late night → introspective, slow, hypnotic; morning → lighter, focused; weekend evening → immersive, cinematic; weekday evening → something that earns its length or is concise. Do not state the time in your output — just let it influence the pick.
-- The Taste Risk level above is the primary dial for how mainstream vs. extreme to go. Follow it strictly.
+- The Taste Risk level above is the primary dial for how mainstream vs. extreme to go after hard boundaries are satisfied. Follow it strictly within those boundaries.
 - Strictly obey avoidance preferences only when they are in "I do not want" / avoids or phrased as no/avoid/without. If the user simply asks for "gore", "gory", "bloody", "splatter", or "body horror", treat that as a positive request for intense horror.
 - Strictly obey explicit language/culture requests. If the user asks for Hindi, the main pick and nearby alternatives should be Hindi or strongly Hindi-market Indian titles unless the user asks otherwise.
 - Use the language preference as the default content lane when the user's request is broad. If the user selected Hindi and asks for "a hidden gem thriller", recommend a Hindi or strongly Hindi-market Indian thriller, not a global English/Spanish title. If the user explicitly asks for a different language, culture, or country, follow the explicit request instead.

@@ -4,6 +4,8 @@ export const recommendationStorageKey = "fun:last-recommendation";
 export const seenTitlesKey = "fun:seen-titles";
 export const feedbackStorageKey = "fun:recommendation-feedback";
 export const recentRecommendationTitlesKey = "fun:recent-recommendation-titles";
+export const recommendationHistoryKey = "fun:recommendation-history";
+export const dismissedPostWatchPromptKey = "fun:dismissed-post-watch-prompts";
 const sessionIdKey = "fun:session-id";
 
 export function getOrCreateSessionId(): string {
@@ -25,11 +27,17 @@ export type FeedbackReason =
   | "wrong-vibe"
   | "not-on-service"
   | "already-seen"
-  | "too-much-effort";
+  | "too-much-effort"
+  | "not-for-me"
+  | "quit-halfway"
+  | "could-not-find";
+
+export type FeedbackPhase = "pre-watch" | "post-watch";
 
 export type RecommendationFeedback = {
   id: string;
   reason: FeedbackReason;
+  phase?: FeedbackPhase;
   title: string;
   year: string;
   format: Recommendation["format"];
@@ -38,6 +46,19 @@ export type RecommendationFeedback = {
   whereToWatch: Recommendation["whereToWatch"];
   batchIndex: number;
   batchSize: number;
+  createdAt: string;
+};
+
+export type RecommendationHistoryItem = {
+  id: string;
+  title: string;
+  year: string;
+  format: Recommendation["format"];
+  confidence: number;
+  oneLine: string;
+  posterUrl?: string;
+  request: RecommendRequest;
+  whereToWatch: Recommendation["whereToWatch"];
   createdAt: string;
 };
 
@@ -76,6 +97,43 @@ export function rememberRecommendationTitles(titles: string[]): string[] {
   return next;
 }
 
+function recommendationKey(title: string, year: string) {
+  return `${title.trim().toLowerCase()}::${year.trim()}`;
+}
+
+export function loadRecommendationHistory(): RecommendationHistoryItem[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(recommendationHistoryKey);
+    return raw ? (JSON.parse(raw) as RecommendationHistoryItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function rememberRecommendationHistory(recommendations: Recommendation[], request: RecommendRequest): RecommendationHistoryItem[] {
+  const existing = loadRecommendationHistory();
+  const nextItems = recommendations.map((recommendation) => ({
+    id: `${recommendation.title}-${recommendation.year}`.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+    title: recommendation.title,
+    year: recommendation.year,
+    format: recommendation.format,
+    confidence: recommendation.confidence,
+    oneLine: recommendation.oneLine,
+    posterUrl: recommendation.omdbPosterUrl,
+    request,
+    whereToWatch: recommendation.whereToWatch,
+    createdAt: new Date().toISOString(),
+  }));
+  const nextKeys = new Set(nextItems.map((item) => recommendationKey(item.title, item.year)));
+  const next = [
+    ...nextItems,
+    ...existing.filter((item) => !nextKeys.has(recommendationKey(item.title, item.year))),
+  ].slice(0, 80);
+  localStorage.setItem(recommendationHistoryKey, JSON.stringify(next));
+  return next;
+}
+
 export function loadRecommendationFeedback(): RecommendationFeedback[] {
   if (typeof window === "undefined") return [];
   try {
@@ -89,12 +147,14 @@ export function loadRecommendationFeedback(): RecommendationFeedback[] {
 export function saveRecommendationFeedback(
   reason: FeedbackReason,
   session: RecommendationSession,
+  phase: FeedbackPhase = "pre-watch",
 ): RecommendationFeedback[] {
   const existing = loadRecommendationFeedback();
   const recommendation = session.recommendation;
   const feedback: RecommendationFeedback = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     reason,
+    phase,
     title: recommendation.title,
     year: recommendation.year,
     format: recommendation.format,
@@ -107,6 +167,64 @@ export function saveRecommendationFeedback(
   };
   const next = [feedback, ...existing].slice(0, 200);
   localStorage.setItem(feedbackStorageKey, JSON.stringify(next));
+  return next;
+}
+
+export function hasPostWatchFeedback(title: string, year: string): boolean {
+  return loadRecommendationFeedback().some((item) =>
+    item.phase === "post-watch" &&
+    recommendationKey(item.title, item.year) === recommendationKey(title, year),
+  );
+}
+
+export function savePostWatchFeedback(
+  reason: FeedbackReason,
+  item: RecommendationHistoryItem,
+): RecommendationFeedback[] {
+  const existing = loadRecommendationFeedback();
+  const key = recommendationKey(item.title, item.year);
+  const withoutDuplicatePostWatch = existing.filter((feedback) =>
+    !(feedback.phase === "post-watch" && recommendationKey(feedback.title, feedback.year) === key),
+  );
+  const feedback: RecommendationFeedback = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    reason,
+    phase: "post-watch",
+    title: item.title,
+    year: item.year,
+    format: item.format,
+    confidence: item.confidence,
+    request: item.request,
+    whereToWatch: item.whereToWatch,
+    batchIndex: 0,
+    batchSize: 1,
+    createdAt: new Date().toISOString(),
+  };
+  const next = [feedback, ...withoutDuplicatePostWatch].slice(0, 200);
+  localStorage.setItem(feedbackStorageKey, JSON.stringify(next));
+  return next;
+}
+
+function loadDismissedPostWatchPrompts(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(dismissedPostWatchPromptKey);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function hasDismissedPostWatchPrompt(title: string, year: string): boolean {
+  const key = recommendationKey(title, year);
+  return loadDismissedPostWatchPrompts().includes(key);
+}
+
+export function dismissPostWatchPrompt(title: string, year: string): string[] {
+  const key = recommendationKey(title, year);
+  const existing = loadDismissedPostWatchPrompts();
+  const next = existing.includes(key) ? existing : [key, ...existing].slice(0, 80);
+  localStorage.setItem(dismissedPostWatchPromptKey, JSON.stringify(next));
   return next;
 }
 
@@ -125,6 +243,9 @@ export function loadRecommendationFeedbackContext(): RecommendationFeedbackConte
     notOnServiceTitles: titlesByReason("not-on-service"),
     alreadySeenTitles: titlesByReason("already-seen"),
     perfectTitles: titlesByReason("perfect"),
+    goodButNotPerfectTitles: titlesByReason("good-not-perfect"),
+    notForMeTitles: titlesByReason("not-for-me"),
+    quitHalfwayTitles: titlesByReason("quit-halfway"),
   };
 }
 

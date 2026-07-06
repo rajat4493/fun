@@ -2,12 +2,18 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowLeft, CheckCircle2, Database, Heart, Lock, RefreshCw, Shield, Trash2 } from "lucide-react";
+import { ArrowLeft, Ban, CheckCircle2, Database, Heart, Lock, RefreshCw, Shield, Trash2 } from "lucide-react";
 import { ONBOARDING_KEY } from "@/components/OnboardingFlow";
 import {
+  dismissedPostWatchPromptKey,
   feedbackStorageKey,
+  hasPostWatchFeedback,
+  loadRecommendationHistory,
   recentRecommendationTitlesKey,
+  RecommendationHistoryItem,
   recommendationStorageKey,
+  recommendationHistoryKey,
+  savePostWatchFeedback,
   seenTitlesKey,
 } from "@/lib/recommendation-session";
 
@@ -17,9 +23,18 @@ type MemoryState = {
   recentTitles: string[];
   seenTitles: string[];
   feedbackCount: number;
+  history: RecommendationHistoryItem[];
 };
 
-const keys = [ONBOARDING_KEY, recommendationStorageKey, recentRecommendationTitlesKey, seenTitlesKey, feedbackStorageKey];
+const keys = [
+  ONBOARDING_KEY,
+  recommendationStorageKey,
+  recentRecommendationTitlesKey,
+  seenTitlesKey,
+  feedbackStorageKey,
+  recommendationHistoryKey,
+  dismissedPostWatchPromptKey,
+];
 
 function Logo() {
   return (
@@ -53,6 +68,7 @@ function readMemory(): MemoryState {
     recentTitles: readArray(recentRecommendationTitlesKey),
     seenTitles: readArray(seenTitlesKey),
     feedbackCount,
+    history: loadRecommendationHistory(),
   };
 }
 
@@ -70,6 +86,11 @@ export default function MemoryPage() {
 
   function clearAll() {
     keys.forEach((key) => localStorage.removeItem(key));
+    setMemory(readMemory());
+  }
+
+  function rateHistoryPick(reason: "perfect" | "good-not-perfect" | "not-for-me" | "quit-halfway" | "could-not-find", item: RecommendationHistoryItem) {
+    savePostWatchFeedback(reason, item);
     setMemory(readMemory());
   }
 
@@ -158,6 +179,41 @@ export default function MemoryPage() {
               {memory.feedbackCount > 0 && (
                 <button type="button" onClick={() => clearKey(feedbackStorageKey)} className="text-sm text-red-200 hover:text-white">Clear feedback</button>
               )}
+            </div>
+          </article>
+
+          <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 lg:col-span-3">
+            <h2 className="flex items-center gap-3 text-2xl"><Heart size={23} className="text-amber-200" /> Rate watched picks</h2>
+            <p className="mt-3 max-w-3xl text-white/54">
+              Use this after watching. F.U.N only asks once on the homepage, but your history stays here for later.
+            </p>
+            <div className="mt-6 grid gap-3">
+              {memory.history.length === 0 && (
+                <div className="rounded-xl border border-white/10 bg-black/26 p-4 text-white/46">No recommendation history yet.</div>
+              )}
+              {memory.history.slice(0, 12).map((item) => {
+                const rated = hasPostWatchFeedback(item.title, item.year);
+                return (
+                  <div key={`${item.title}-${item.year}`} className="grid gap-4 rounded-xl border border-white/10 bg-black/26 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
+                    <div className="min-w-0">
+                      <p className="truncate text-lg text-white">{item.title} <span className="text-white/38">({item.year})</span></p>
+                      <p className="mt-1 line-clamp-1 text-sm text-white/46">{item.oneLine}</p>
+                    </div>
+                    {rated ? (
+                      <span className="inline-flex h-10 items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-400/[0.07] px-4 text-sm text-emerald-100">
+                        <CheckCircle2 size={15} /> Rated
+                      </span>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={() => rateHistoryPick("perfect", item)} className="inline-flex h-10 items-center gap-2 rounded-lg border border-emerald-300/28 px-3 text-sm text-emerald-100"><Heart size={15} /> Loved</button>
+                        <button type="button" onClick={() => rateHistoryPick("good-not-perfect", item)} className="inline-flex h-10 items-center gap-2 rounded-lg border border-amber-300/24 px-3 text-sm text-amber-100"><CheckCircle2 size={15} /> Good</button>
+                        <button type="button" onClick={() => rateHistoryPick("not-for-me", item)} className="inline-flex h-10 items-center gap-2 rounded-lg border border-white/12 px-3 text-sm text-white/64"><Ban size={15} /> Not for me</button>
+                        <button type="button" onClick={() => rateHistoryPick("quit-halfway", item)} className="inline-flex h-10 items-center gap-2 rounded-lg border border-white/12 px-3 text-sm text-white/64"><RefreshCw size={15} /> Quit</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </article>
 
