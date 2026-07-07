@@ -123,7 +123,8 @@ function avoidanceViolations(input: RecommendRequest, rec: RawRecommendation | R
   if (avoids.has("gore") && (isKnownHorror || goreTerms.test(text))) reasons.push("avoidance: gore");
   if (avoids.has("horror") && (isKnownHorror || horrorTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: horror");
   if (avoids.has("violence") && (isKnownHorror || violenceTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: violence");
-  if (avoids.has("heavy drama") && heavyDramaTerms.test(text)) reasons.push("avoidance: heavy drama");
+  // Only check heavyDrama if user explicitly put it in avoids — the regex matches too many legitimate picks otherwise.
+  if (avoids.has("heavy drama") && (input.avoids ?? []).some((a) => /heavy.?drama|devastating|harrowing|depressing/i.test(a)) && heavyDramaTerms.test(text)) reasons.push("avoidance: heavy drama");
   if (avoids.has("sad ending") && sadEndingTerms.test(text)) reasons.push("avoidance: sad ending");
   if (avoids.has("slow") && slowTerms.test(text)) reasons.push("avoidance: slow");
 
@@ -143,20 +144,11 @@ function confidenceViolation(rec: RawRecommendation | Recommendation): string | 
   return typeof rec.confidence === "number" && rec.confidence < 60 ? `confidence: ${rec.confidence} below minimum` : null;
 }
 
-function positiveFitViolations(input: RecommendRequest, rec: RawRecommendation | Recommendation): string[] {
-  const text = requestText(input);
-  const recText = contentText(rec);
-  const reasons: string[] = [];
-  const wantsWeird = /\b(weird|strange|unusual|offbeat|quirky|absurd|surreal|experimental|cult|unhinged)\b/i.test(text);
-  const wantsFunny = /\b(funny|comedy|laugh|witty|playful|banter)\b/i.test(text) || (input.wants ?? []).some((want) => /funny/i.test(want));
-
-  if ((wantsWeird || ((input.craziness ?? 0) >= 3 && !explicitlyWantsIntensity(input))) && !weirdTerms.test(recText)) {
-    reasons.push("fit: missing weird/unhinged signal");
-  }
-  if (wantsFunny && !funnyTerms.test(recText)) {
-    reasons.push("fit: missing funny/comedy signal");
-  }
-  return reasons;
+// Positive-fit checks removed: keyword matching on recommendation text is too brittle.
+// A weird film can say "formally inventive" not "weird"; a comedy can say "sharp wit" not "funny".
+// The LLM is trusted to match the request. Hard avoidances and memory are the only hard gates.
+function positiveFitViolations(_input: RecommendRequest, _rec: RawRecommendation | Recommendation): string[] {
+  return [];
 }
 
 export function validateRecommendation<T extends RawRecommendation | Recommendation>(

@@ -119,16 +119,12 @@ async function verifiedSubscriptionBatch(
   const platforms = input.platforms ?? [];
   const enriched = await enrichBatch(batch, country, platforms);
   const verified = enriched.filter(hasSubscriptionProvider);
+  // Verified subscription picks exist — use them.
   if (verified.length > 0) return verified;
-
-  const fallback = await enrichBatch(filteredLocalFallback(input), country, platforms);
-  const verifiedFallback = fallback.filter(hasSubscriptionProvider);
-  if (verifiedFallback.length > 0) return verifiedFallback;
-
-  // Do not collapse to the same safe title just because subscription availability
-  // could not be verified. Keep the trusted recommendation and let the UI state
-  // clearly say that availability is not verified inside the user's apps yet.
-  return enriched.length > 0 ? enriched.map((item) => unavailableSubscriptionFallback(item, country)) : [];
+  // No verified picks: keep the LLM's picks with unverified status.
+  // Do NOT fall back to curated safe titles — that's what causes repeated picks.
+  // The UI will show "Availability not verified yet" which is honest.
+  return enriched.map((item) => unavailableSubscriptionFallback(item, country));
 }
 
 function unavailableSubscriptionFallback(
@@ -157,15 +153,12 @@ export async function POST(req: Request) {
     const trustedRaw = await trustedRawBatch(input, prompt);
     let normalizedBatch = trustedRaw.batch;
 
+    // Trust filter already ran on raw picks in trustedRawBatch — do not run it again here.
+    // A second pass on enriched picks causes false rejections because TMDB metadata
+    // can add text that triggers avoidance regex on otherwise valid picks.
     let enrichedBatch = input.platformFilter === "mine"
       ? await verifiedSubscriptionBatch(normalizedBatch, input, country)
       : await enrichBatch(normalizedBatch, country, platforms);
-
-    const trustedEnriched = applyTrustFilter(input, enrichedBatch);
-    if (trustedEnriched.rejected.length > 0) {
-      console.warn("[FUN trust filter rejected enriched picks]", JSON.stringify(trustedEnriched.rejected));
-    }
-    enrichedBatch = trustedEnriched.accepted;
 
     const languageMatchedBatch = enrichedBatch.filter((recommendation) => matchesLanguageRequest(input, recommendation));
     if (languageMatchedBatch.length > 0) {
