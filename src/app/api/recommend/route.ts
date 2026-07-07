@@ -122,7 +122,13 @@ async function verifiedSubscriptionBatch(
   if (verified.length > 0) return verified;
 
   const fallback = await enrichBatch(filteredLocalFallback(input), country, platforms);
-  return fallback.filter(hasSubscriptionProvider);
+  const verifiedFallback = fallback.filter(hasSubscriptionProvider);
+  if (verifiedFallback.length > 0) return verifiedFallback;
+
+  // Do not collapse to the same safe title just because subscription availability
+  // could not be verified. Keep the trusted recommendation and let the UI state
+  // clearly say that availability is not verified inside the user's apps yet.
+  return enriched.length > 0 ? enriched.map((item) => unavailableSubscriptionFallback(item, country)) : [];
 }
 
 function unavailableSubscriptionFallback(

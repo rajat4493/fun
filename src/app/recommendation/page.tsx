@@ -161,6 +161,10 @@ function watchAction(pick: Recommendation, providers: WatchProvider[], platforms
   if (provider.url && provider.urlKind === "title") {
     return { label: `Watch on ${provider.name}`, href: provider.url, verified: true };
   }
+  const searchUrl = providerSearchUrl(provider, pick.title);
+  if (searchUrl && (provider.access === "subscription" || provider.access === "included")) {
+    return { label: `Open ${provider.name}`, href: searchUrl, verified: true };
+  }
   return { label: "Find where to watch", href: fallbackUrl, verified: false };
 }
 

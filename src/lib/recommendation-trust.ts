@@ -340,24 +340,68 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
     return weirdFallbacks.find((candidate) => !isExcluded(candidate.title)) ?? weirdFallbacks[0];
   }
 
-  return {
-    title: "The Fundamentals of Caring",
-    year: "2016",
-    runtime: "97 min",
-    vibe: "warm, humane, low-regret",
-    confidence: 76,
-    oneLine: "Watch The Fundamentals of Caring when you want something gentle, human, and easy to say yes to.",
-    whyItFits: [
-      "It avoids gore, horror, and heavy violence while still feeling like a real film, not filler.",
-      "The runtime respects a short evening and keeps the effort budget low.",
-      "It is a safer close match when the stricter mood could not be satisfied cleanly.",
-    ],
-    hiddenTitles: [
-      { title: "The Half of It", year: "2020" },
-      { title: "Paddleton", year: "2019" },
-      { title: "Hunt for the Wilderpeople", year: "2016" },
-    ],
-    alternatives: ["The Half of It (2020)", "Paddleton (2019)", "Hunt for the Wilderpeople (2016)"],
-    ...base,
-  };
+  const gentleFallbacks: RawRecommendation[] = [
+    {
+      title: "The Fundamentals of Caring",
+      year: "2016",
+      runtime: "97 min",
+      vibe: "warm, humane, low-regret",
+      confidence: 76,
+      oneLine: "Watch The Fundamentals of Caring when you want something gentle, human, and easy to say yes to.",
+      whyItFits: [
+        "It avoids gore, horror, and heavy violence while still feeling like a real film, not filler.",
+        "The runtime respects a short evening and keeps the effort budget low.",
+        "It is a safer close match when the stricter mood could not be satisfied cleanly.",
+      ],
+      hiddenTitles: [
+        { title: "The Half of It", year: "2020" },
+        { title: "Paddleton", year: "2019" },
+        { title: "Hunt for the Wilderpeople", year: "2016" },
+      ],
+      alternatives: ["The Half of It (2020)", "Paddleton (2019)", "Hunt for the Wilderpeople (2016)"],
+      ...base,
+    },
+    {
+      title: "Hunt for the Wilderpeople",
+      year: "2016",
+      runtime: "101 min",
+      vibe: "warm, odd, adventurous",
+      confidence: 75,
+      oneLine: "Watch Hunt for the Wilderpeople when you want something humane, funny, and not emotionally punishing.",
+      whyItFits: [
+        "It has enough story movement to avoid feeling like homework.",
+        "The warmth comes with bite and personality, not generic softness.",
+        "It stays inside a low-regret comfort lane when stricter options fail.",
+      ],
+      hiddenTitles: [
+        { title: "The Peanut Butter Falcon", year: "2019" },
+        { title: "The Way Way Back", year: "2013" },
+        { title: "Paddleton", year: "2019" },
+      ],
+      alternatives: ["The Peanut Butter Falcon (2019)", "The Way Way Back (2013)", "Paddleton (2019)"],
+      ...base,
+    },
+    {
+      title: "The Peanut Butter Falcon",
+      year: "2019",
+      runtime: "97 min",
+      vibe: "kind, road-movie, easygoing",
+      confidence: 74,
+      oneLine: "Watch The Peanut Butter Falcon for a gentle road movie that is easy to enter and satisfying to leave.",
+      whyItFits: [
+        "It gives emotional payoff without turning the night heavy.",
+        "The shape is familiar enough for low energy but specific enough to feel chosen.",
+        "It avoids the darker lanes that would break the stated boundaries.",
+      ],
+      hiddenTitles: [
+        { title: "Hunt for the Wilderpeople", year: "2016" },
+        { title: "The Way Way Back", year: "2013" },
+        { title: "Paddleton", year: "2019" },
+      ],
+      alternatives: ["Hunt for the Wilderpeople (2016)", "The Way Way Back (2013)", "Paddleton (2019)"],
+      ...base,
+    },
+  ];
+
+  return gentleFallbacks.find((candidate) => !isExcluded(candidate.title)) ?? gentleFallbacks[0];
 }
