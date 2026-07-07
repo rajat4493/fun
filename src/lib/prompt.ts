@@ -323,9 +323,6 @@ ${detectedLanguage
 
 Constraints:
 - Hard boundaries are trust contracts. Avoidances, already-seen titles, explicit language/culture requests, subscription-only scope, and time limits outrank Taste Risk, novelty, hidden-gem intent, and cinematic quality. "Unhinged" means unusual inside the boundaries, not boundary-breaking.
-// NEW psychology anchors: confidence definition stops score inflation; regret minimization
-// optimises for post-watch satisfaction not tag match; peak-end rule protects tired users
-// from ambiguous/punishing endings.
 - Confidence score definition: 90–100 = you are certain this matches the emotional job and would surprise no one who knows the user's request. 75–89 = strong match with one or two small question marks. 60–74 = reasonable match but a clear compromise somewhere. Below 60 = do not include this pick; find a better one. Do not inflate confidence to seem authoritative.
 - Regret minimization: before finalising a pick, run this silent check — "Would this person, after watching, feel this was the right choice for tonight?" A technically good film that mismatches tonight's energy creates regret. A B+ film that perfectly matches tonight's need creates satisfaction. Optimise for the latter.
 - Peak-end rule: people remember how a film/series made them feel at its peak moment and at the end — not the average. For tired, low-energy, or emotionally depleted users, prioritise picks with emotionally satisfying or resolving endings. Avoid tonally ambiguous, punishing, or unresolved endings for these users unless Bold/Unhinged is selected.

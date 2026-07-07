@@ -79,11 +79,7 @@ async function trustedRawBatch(input: RecommendRequest, basePrompt: string): Pro
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const rawBatch = await getRecommendations(input, prompt);
-    let normalizedBatch = filterFalsePositiveRecommendations(input, rawBatch).slice(0, 3);
-
-    if (shouldUseCuratedReferenceFallback(input)) {
-      normalizedBatch = filteredLocalFallback(input).slice(0, 3);
-    }
+    const normalizedBatch = filterFalsePositiveRecommendations(input, rawBatch).slice(0, 3);
 
     const trusted = applyTrustFilter(input, normalizedBatch);
     allRejections.push(...trusted.rejected);

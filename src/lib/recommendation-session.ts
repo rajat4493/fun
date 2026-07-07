@@ -97,6 +97,21 @@ export function rememberRecommendationTitles(titles: string[]): string[] {
   return next;
 }
 
+export function loadRecommendationMemoryTitles(): string[] {
+  const titles = [
+    ...loadRecentRecommendationTitles(),
+    ...loadRecommendationHistory().map((item) => item.title),
+    ...loadRecommendationFeedback().map((item) => item.title),
+  ].filter(Boolean);
+  const seen = new Set<string>();
+  return titles.filter((title) => {
+    const key = recommendationKey(title, "");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 40);
+}
+
 function recommendationKey(title: string, year: string) {
   return `${title.trim().toLowerCase()}::${year.trim()}`;
 }

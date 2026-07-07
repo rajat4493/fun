@@ -1,7 +1,7 @@
 import { RawRecommendation } from "@/lib/types";
 import { extractJson, uniqueValues, withTimeout } from "@/lib/recommendation-utils";
 
-const LLM_TIMEOUT_MS = 12000;
+const LLM_TIMEOUT_MS = 25000;
 
 type AnthropicTextBlock = {
   type: "text";

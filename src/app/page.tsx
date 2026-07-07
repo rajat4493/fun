@@ -45,7 +45,7 @@ import {
   hasDismissedPostWatchPrompt,
   hasPostWatchFeedback,
   loadRecommendationFeedbackContext,
-  loadRecentRecommendationTitles,
+  loadRecommendationMemoryTitles,
   RecommendationHistoryItem,
   RecommendationSession,
   loadSeenTitles,
@@ -147,10 +147,10 @@ function RegionLanguageButton({ onboarding, onClick }: { onboarding: OnboardingD
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-10 items-center gap-2 rounded-full border border-white/12 bg-white/[0.05] px-4 text-sm text-white/78 transition hover:border-white/24 hover:bg-white/[0.08]"
+      className="inline-flex min-h-10 max-w-[62vw] items-center gap-2 rounded-full border border-white/12 bg-white/[0.05] px-4 py-2 text-sm text-white/78 transition hover:border-white/24 hover:bg-white/[0.08]"
     >
       <Globe2 size={16} />
-      <span>{onboarding.country} · {language}</span>
+      <span className="truncate">{onboarding.country} · {language}</span>
       <ChevronDown size={15} className="text-white/44" />
     </button>
   );
@@ -248,14 +248,14 @@ function ChoiceButton({ option, active, onClick }: { option: Option; active: boo
     <button
       type="button"
       onClick={onClick}
-      className={`flex h-14 min-w-0 items-center justify-center gap-3 rounded-xl border px-4 text-base transition ${
+      className={`flex min-h-14 min-w-0 items-center justify-center gap-3 rounded-xl border px-3 py-3 text-sm transition ${
         active
           ? "border-red-400/70 bg-red-500/12 text-white shadow-[0_0_30px_rgba(239,68,68,0.18)]"
           : "border-white/12 bg-white/[0.045] text-white/72 hover:border-white/24 hover:text-white"
       }`}
     >
       <Icon size={19} className={active ? "text-red-200" : "text-white/60"} />
-      <span className="truncate">{option.label}</span>
+      <span className="min-w-0 leading-5">{option.label}</span>
     </button>
   );
 }
@@ -273,7 +273,7 @@ function PlatformChip({ name }: { name: string }) {
     MUBI: "M",
   };
   return (
-    <span className="grid h-11 min-w-16 place-items-center rounded-lg border border-white/10 bg-white/[0.055] px-3 text-sm font-semibold text-white/82">
+    <span className="grid min-h-11 min-w-14 place-items-center rounded-lg border border-white/10 bg-white/[0.055] px-3 py-2 text-center text-xs font-semibold leading-4 text-white/82 sm:min-w-16 sm:text-sm">
       {marks[name] ?? name.slice(0, 3)}
     </span>
   );
@@ -419,15 +419,15 @@ export default function Home() {
     const recentTitles = (() => {
       try {
         const raw = localStorage.getItem(recommendationStorageKey);
-        if (!raw) return loadRecentRecommendationTitles();
+        if (!raw) return loadRecommendationMemoryTitles();
         const session = JSON.parse(raw) as { recommendation?: Recommendation; batch?: Recommendation[] };
         return [
-          ...loadRecentRecommendationTitles(),
+          ...loadRecommendationMemoryTitles(),
           session.recommendation?.title,
           ...(session.batch ?? []).map((item) => item.title),
-        ].filter((title): title is string => Boolean(title)).slice(0, 24);
+        ].filter((title): title is string => Boolean(title)).slice(0, 40);
       } catch {
-        return loadRecentRecommendationTitles();
+        return loadRecommendationMemoryTitles();
       }
     })();
 
@@ -480,6 +480,7 @@ export default function Home() {
       const response = await fetch("/api/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        cache: "no-store",
         body: JSON.stringify(requestInput),
         signal: controller.signal,
       });
@@ -527,7 +528,7 @@ export default function Home() {
   return (
     <main className="min-h-screen overflow-hidden bg-[#030303] text-white">
       <div className="fixed inset-0 bg-[radial-gradient(circle_at_78%_20%,rgba(65,92,111,0.22),transparent_30%),radial-gradient(circle_at_18%_62%,rgba(185,28,28,0.16),transparent_32%),#030303]" />
-      <section className="relative mx-auto w-full max-w-[1760px] px-5 py-5 sm:px-8 lg:px-12">
+      <section className="relative mx-auto w-full max-w-[1540px] px-5 py-5 sm:px-8 lg:px-10 xl:px-12">
         <header className="relative flex h-12 items-center justify-between">
           <Logo />
           <nav className="hidden items-center gap-10 text-sm text-white/68 lg:flex">
@@ -549,9 +550,9 @@ export default function Home() {
           </div>
         </header>
 
-        <section className="grid min-h-[620px] items-center gap-8 py-12 lg:grid-cols-[0.95fr_1.05fr]">
-          <div className="max-w-3xl">
-            <h1 className="font-serif text-[clamp(4rem,7.8vw,7.8rem)] leading-[0.9] tracking-normal">
+        <section className="grid min-h-[560px] items-center gap-8 py-10 lg:grid-cols-[0.92fr_1.08fr] xl:min-h-[620px]">
+          <div className="max-w-[680px]">
+            <h1 className="font-serif text-[clamp(3.6rem,6.8vw,7rem)] leading-[0.9] tracking-normal">
               One perfect pick.
               <br />
               <span className="text-amber-200">No more scrolling.</span>
@@ -560,10 +561,10 @@ export default function Home() {
               F.U.N gives you one movie based on your mood, avoidances, time, and what is on your subscriptions.
             </p>
             <div className="mt-8 flex flex-wrap gap-4">
-              <a href="#mood" className="inline-flex h-16 min-w-[250px] items-center justify-center gap-4 rounded-xl bg-gradient-to-b from-red-400 to-red-800 px-7 text-lg font-semibold text-white shadow-[0_18px_54px_rgba(127,29,29,0.4)] transition hover:brightness-110">
+              <a href="#mood" className="inline-flex min-h-14 min-w-[220px] items-center justify-center gap-4 rounded-xl bg-gradient-to-b from-red-400 to-red-800 px-6 py-4 text-base font-semibold text-white shadow-[0_18px_54px_rgba(127,29,29,0.4)] transition hover:brightness-110 sm:min-h-16 sm:min-w-[250px] sm:text-lg">
                 Find my pick <ArrowRight size={22} />
               </a>
-              <a href="#how" className="inline-flex h-16 min-w-[190px] items-center justify-center gap-3 rounded-xl border border-white/16 bg-white/[0.045] px-7 text-lg text-white/86 transition hover:border-white/28 hover:bg-white/[0.08]">
+              <a href="#how" className="inline-flex min-h-14 min-w-[170px] items-center justify-center gap-3 rounded-xl border border-white/16 bg-white/[0.045] px-6 py-4 text-base text-white/86 transition hover:border-white/28 hover:bg-white/[0.08] sm:min-h-16 sm:min-w-[190px] sm:text-lg">
                 <PlayCircle size={22} className="text-amber-200" /> How it works
               </a>
             </div>
@@ -574,7 +575,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="relative hidden min-h-[440px] lg:block">
+          <div className="relative hidden min-h-[400px] lg:block xl:min-h-[440px]">
             <div className="absolute inset-0 rounded-[2rem] bg-cover bg-center opacity-82 shadow-[inset_0_-140px_90px_rgba(3,3,3,0.92)]" style={{ backgroundImage: "url('/fun/hero-cinematic.png')" }} />
             <div className="absolute inset-0 rounded-[2rem] bg-gradient-to-r from-[#030303] via-transparent to-transparent" />
           </div>
@@ -609,7 +610,7 @@ export default function Home() {
         <section id="mood" className="rounded-2xl border border-white/10 bg-[#090909]/82 p-5 shadow-[0_26px_100px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-xl sm:p-8">
           <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
             <div>
-              <h2 className="font-serif text-[clamp(2.8rem,5vw,5.2rem)] leading-none">How are you feeling tonight?</h2>
+              <h2 className="font-serif text-[clamp(2.5rem,4.4vw,4.8rem)] leading-none">How are you feeling tonight?</h2>
               <p className="mt-3 text-white/56">Pick one or more. We will respect your avoidances first.</p>
             </div>
             <button type="button" className="inline-flex h-11 items-center gap-2 rounded-full border border-amber-300/35 bg-amber-400/[0.06] px-5 text-sm text-amber-100">
@@ -641,7 +642,7 @@ export default function Home() {
               <>
                 <div className="grid gap-4 lg:grid-cols-[140px_1fr] lg:items-center">
                   <div className="border-l-2 border-red-400 pl-5 text-lg">I'm feeling</div>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
                     {moods.map((option) => (
                       <ChoiceButton key={option.label} option={option} active={selectedMoods.includes(option.label)} onClick={() => toggle(option.label, selectedMoods, setSelectedMoods)} />
                     ))}
@@ -649,7 +650,7 @@ export default function Home() {
                 </div>
                 <div className="grid gap-4 lg:grid-cols-[140px_1fr] lg:items-center">
                   <div className="border-l-2 border-red-400 pl-5 text-lg">I don't want</div>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
                     {avoids.map((option) => (
                       <ChoiceButton key={option.label} option={option} active={selectedAvoids.includes(option.label)} onClick={() => toggle(option.label, selectedAvoids, setSelectedAvoids)} />
                     ))}
@@ -657,7 +658,7 @@ export default function Home() {
                 </div>
                 <div className="grid gap-4 lg:grid-cols-[140px_1fr] lg:items-center">
                   <div className="border-l-2 border-red-400 pl-5 text-lg">I want</div>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
                     {wants.map((option) => (
                       <ChoiceButton key={option.label} option={option} active={selectedWants.includes(option.label)} onClick={() => toggle(option.label, selectedWants, setSelectedWants)} />
                     ))}
@@ -688,9 +689,9 @@ export default function Home() {
               </label>
               <div>
                 <span className="mb-3 flex items-center gap-2 text-lg"><Zap size={18} /> Energy</span>
-                <div className="grid grid-cols-4 rounded-xl border border-white/10 bg-black/26 p-1">
+                <div className="grid grid-cols-2 rounded-xl border border-white/10 bg-black/26 p-1 sm:grid-cols-4">
                   {energyOptions.map((option) => (
-                    <button key={option} type="button" onClick={() => setEnergy(option)} className={`h-12 rounded-lg text-sm transition ${energy === option ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/48 hover:text-white"}`}>
+                    <button key={option} type="button" onClick={() => setEnergy(option)} className={`min-h-12 rounded-lg px-2 py-2 text-sm leading-5 transition ${energy === option ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/48 hover:text-white"}`}>
                       {option}
                     </button>
                   ))}
@@ -698,9 +699,9 @@ export default function Home() {
               </div>
               <div>
                 <span className="mb-3 flex items-center gap-2 text-lg"><Users size={18} /> Context</span>
-                <div className="grid grid-cols-4 rounded-xl border border-white/10 bg-black/26 p-1">
+                <div className="grid grid-cols-2 rounded-xl border border-white/10 bg-black/26 p-1 sm:grid-cols-4">
                   {contextOptions.map((option) => (
-                    <button key={option} type="button" onClick={() => setViewingContext(option)} className={`h-12 rounded-lg text-sm transition ${viewingContext === option ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/48 hover:text-white"}`}>
+                    <button key={option} type="button" onClick={() => setViewingContext(option)} className={`min-h-12 rounded-lg px-2 py-2 text-sm leading-5 transition ${viewingContext === option ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/48 hover:text-white"}`}>
                       {option}
                     </button>
                   ))}

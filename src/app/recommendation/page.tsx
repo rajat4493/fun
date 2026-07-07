@@ -34,7 +34,7 @@ import {
   FeedbackReason,
   getOrCreateSessionId,
   loadRecommendationFeedbackContext,
-  loadRecentRecommendationTitles,
+  loadRecommendationMemoryTitles,
   RecommendationSession,
   recommendationStorageKey,
   rememberRecommendationHistory,
@@ -246,6 +246,7 @@ export default function RecommendationPage() {
   const [feedbackReason, setFeedbackReason] = useState<FeedbackReason | null>(null);
   const [searchIdx, setSearchIdx] = useState(0);
   const [shareState, setShareState] = useState<"idle" | "copied">("idle");
+  const [watchOptionsOpen, setWatchOptionsOpen] = useState(false);
 
   useEffect(() => {
     if (!fetchLoading) return;
@@ -302,6 +303,7 @@ export default function RecommendationPage() {
     const response = await fetch("/api/recommend", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      cache: "no-store",
       body: JSON.stringify(request),
     });
     if (!response.ok) throw new Error("failed");
@@ -340,7 +342,7 @@ export default function RecommendationPage() {
         await replaceWithBatch({
           ...session.request,
           seenTitles: seen,
-          recentTitles: [...loadRecentRecommendationTitles(), ...batch.map((item) => item.title)].slice(0, 24),
+          recentTitles: [...loadRecommendationMemoryTitles(), ...batch.map((item) => item.title)].slice(0, 40),
           feedbackContext: loadRecommendationFeedbackContext(),
         });
       }
@@ -382,6 +384,9 @@ export default function RecommendationPage() {
       body: JSON.stringify({ sessionId: getOrCreateSessionId(), ...payload }),
     }).catch(() => {});
     captureEvent("feedback", payload);
+    if (reason === "already-seen") {
+      void handleSeenIt();
+    }
   }
 
   async function handleShare() {
@@ -409,9 +414,9 @@ export default function RecommendationPage() {
         ...session.request,
         platformFilter: "any",
         recentTitles: [
-          ...loadRecentRecommendationTitles(),
+          ...loadRecommendationMemoryTitles(),
           ...(session.batch ?? [session.recommendation]).map((item) => item.title),
-        ].slice(0, 24),
+        ].slice(0, 40),
         feedbackContext: loadRecommendationFeedbackContext(),
       });
     } catch {
@@ -430,6 +435,12 @@ export default function RecommendationPage() {
   const rentBuyProviders = providers.filter((provider) => provider.access === "rent" || provider.access === "buy");
   const fallbackUrl = justWatchUrl(pick.title, region);
   const primaryAction = watchAction(pick, providers, session?.request.platforms ?? [], fallbackUrl);
+  const watchOptionLinks = providers
+    .map((provider) => ({
+      provider,
+      href: provider.url && provider.urlKind === "title" ? provider.url : providerSearchUrl(provider, pick.title),
+    }))
+    .filter((item): item is { provider: WatchProvider; href: string } => Boolean(item.href));
   const verified = pick.whereToWatch.status === "verified";
   const subscriptionOnly = session?.request.platformFilter === "mine";
   const exhaustedSubscriptionBatch = subscriptionOnly && batch.length > 0 && batchIndex >= batch.length - 1;
@@ -543,16 +554,55 @@ export default function RecommendationPage() {
                 <Play size={20} fill="currentColor" /> {primaryAction.label}
                 {primaryAction.verified && <BadgeCheck size={18} />}
               </a>
-              <button
-                type="button"
-                onClick={handleSeenIt}
-                disabled={rerolling}
-                className="inline-flex h-16 min-w-[250px] items-center justify-center gap-3 rounded-xl border border-white/12 bg-white/[0.045] px-6 text-lg font-semibold text-white/72 transition hover:border-white/24 hover:text-white disabled:cursor-wait disabled:opacity-50"
-              >
-                <RefreshCw size={19} className={rerolling ? "animate-spin" : ""} />
-                {rerolling ? "Finding another..." : "More watch options"}
-                <ChevronDown size={16} />
-              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setWatchOptionsOpen((open) => !open)}
+                  className="inline-flex h-16 min-w-[250px] items-center justify-center gap-3 rounded-xl border border-white/12 bg-white/[0.045] px-6 text-lg font-semibold text-white/72 transition hover:border-white/24 hover:text-white"
+                >
+                  <Search size={19} />
+                  More watch options
+                  <ChevronDown size={16} className={watchOptionsOpen ? "rotate-180 transition" : "transition"} />
+                </button>
+                {watchOptionsOpen && (
+                  <div className="absolute left-0 top-[calc(100%+0.75rem)] z-30 w-[min(92vw,360px)] rounded-2xl border border-white/12 bg-[#111111]/96 p-3 shadow-[0_24px_80px_rgba(0,0,0,0.72)] backdrop-blur-2xl">
+                    <p className="px-2 pb-2 text-xs uppercase tracking-[0.2em] text-white/36">Watch options</p>
+                    <div className="space-y-2">
+                      {watchOptionLinks.length > 0 ? watchOptionLinks.map(({ provider, href }) => (
+                        <a
+                          key={`${provider.name}-${provider.access}-${href}`}
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => captureEvent("watch-option-click", { title: pick.title, provider: provider.name, href })}
+                          className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.05] p-3 transition hover:border-white/24 hover:bg-white/[0.075]"
+                        >
+                          <ProviderLogo provider={provider} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm text-white">{provider.name}</span>
+                            <span className="block truncate text-xs text-white/46">{provider.note ?? provider.price ?? toTitleCase(provider.access)}</span>
+                          </span>
+                          <ExternalLink size={14} className="text-white/42" />
+                        </a>
+                      )) : (
+                        <p className="rounded-xl border border-white/10 bg-white/[0.04] p-3 text-sm leading-5 text-white/54">
+                          We do not have a verified direct provider for this title yet.
+                        </p>
+                      )}
+                      <a
+                        href={fallbackUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => captureEvent("watch-option-click", { title: pick.title, provider: "JustWatch", href: fallbackUrl })}
+                        className="flex items-center justify-between rounded-xl border border-amber-300/20 bg-amber-400/[0.07] px-3 py-3 text-sm text-amber-100 transition hover:border-amber-200/38"
+                      >
+                        Check broader availability
+                        <ExternalLink size={14} />
+                      </a>
+                    </div>
+                  </div>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={handleShare}
