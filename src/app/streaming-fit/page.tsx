@@ -21,11 +21,21 @@ import {
 import { loadOnboarding, OnboardingData, platformOptionsForCountry } from "@/components/OnboardingFlow";
 import {
   loadRecommendationFeedback,
+  loadRecommendationHistory,
   RecommendationFeedback,
+  RecommendationHistoryItem,
   RecommendationSession,
   recommendationStorageKey,
 } from "@/lib/recommendation-session";
 import { Recommendation, WatchProvider } from "@/lib/types";
+
+// Future commercial feature: platforms in this set may show a "Partner" badge in the UI.
+// Partner status NEVER affects scoring. Scores derive solely from availability data and
+// user feedback. Partnerships are disclosed visually (badge only) and do not inflate any metric.
+// To onboard a partner, add their normalized name here — nothing else changes.
+const PARTNER_PLATFORMS: Set<string> = new Set();
+
+type ScoringPick = { title: string; year: string; whereToWatch: Recommendation["whereToWatch"] };
 
 type PlatformFit = {
   name: string;
@@ -35,6 +45,8 @@ type PlatformFit = {
   includedCount: number;
   transactionalCount: number;
   isSelected: boolean;
+  sampleSize: number;
+  isPartner: boolean;
 };
 
 function Logo() {
@@ -99,46 +111,60 @@ function isIncluded(provider: WatchProvider) {
   return provider.access === "included" || provider.access === "subscription";
 }
 
-function platformEvidence(platform: string, session: RecommendationSession | null) {
-  const picks = session?.batch ?? (session?.recommendation ? [session.recommendation] : []);
+// Combine current session batch with history, deduplicated by title+year.
+// Caps at 40 historical picks so scoring stays fast and recent picks weigh more.
+function combinedScoringPicks(session: RecommendationSession | null, history: RecommendationHistoryItem[]): ScoringPick[] {
+  const sessionPicks: ScoringPick[] = session?.batch ?? (session?.recommendation ? [session.recommendation] : []);
+  const sessionKeys = new Set(sessionPicks.map((p) => `${p.title.toLowerCase()}::${p.year}`));
+  const historyPicks = history
+    .filter((h) => !sessionKeys.has(`${h.title.toLowerCase()}::${h.year}`))
+    .slice(0, 40);
+  return [...sessionPicks, ...historyPicks];
+}
+
+function platformEvidence(platform: string, picks: ScoringPick[]) {
   let includedCount = 0;
   let transactionalCount = 0;
-
   for (const pick of picks) {
     const matched = matchingProviders(platform, pick.whereToWatch.providers ?? []);
     if (matched.some(isIncluded)) includedCount += 1;
-    else if (matched.some((provider) => provider.access === "rent" || provider.access === "buy" || provider.access === "unknown")) transactionalCount += 1;
+    else if (matched.some((p) => p.access === "rent" || p.access === "buy" || p.access === "unknown")) transactionalCount += 1;
   }
-
-  return { picks, includedCount, transactionalCount };
+  return { includedCount, transactionalCount };
 }
 
-function scorePlatform(platform: string, session: RecommendationSession | null, feedback: RecommendationFeedback[], selectedPlatforms: string[]) {
-  const { picks, includedCount, transactionalCount } = platformEvidence(platform, session);
+function scorePlatform(platform: string, picks: ScoringPick[], feedback: RecommendationFeedback[], selectedPlatforms: string[]) {
+  const { includedCount, transactionalCount } = platformEvidence(platform, picks);
   const selected = selectedPlatforms.some((item) => normalize(item) === normalize(platform));
   const base = picks.length
     ? Math.round(((includedCount / picks.length) * 82) + ((transactionalCount / picks.length) * 34))
     : selected ? 34 : 22;
   const positive = feedback.filter((item) => item.reason === "perfect" || item.reason === "good-not-perfect").length;
-  const notOnService = feedback.filter((item) => item.reason === "not-on-service").length;
-  const modifier = Math.min(12, positive * 2) - Math.min(16, notOnService * 3);
+  // Platform-specific penalty: "not-on-service" only hurts the platform(s) that were listed for that pick.
+  // This prevents a Prime Video failure from dragging down Netflix's score.
+  const platformNotOnService = feedback.filter((item) =>
+    item.reason === "not-on-service" &&
+    matchingProviders(platform, item.whereToWatch?.providers ?? []).some(isIncluded),
+  ).length;
+  const modifier = Math.min(12, positive * 2) - Math.min(20, platformNotOnService * 5);
   const selectedNudge = selected && includedCount > 0 ? 4 : 0;
-  return Math.max(8, Math.min(94, base + modifier + selectedNudge));
+  // No artificial ceiling — if a platform genuinely serves all your picks, it can reach 100.
+  return Math.max(5, Math.min(100, base + modifier + selectedNudge));
 }
 
-function platformFits(onboarding: OnboardingData | null, session: RecommendationSession | null, feedback: RecommendationFeedback[], compareAll: boolean): PlatformFit[] {
+function platformFits(onboarding: OnboardingData | null, session: RecommendationSession | null, history: RecommendationHistoryItem[], feedback: RecommendationFeedback[], compareAll: boolean): PlatformFit[] {
   const selectedPlatforms = onboarding?.platforms?.length ? onboarding.platforms : ["Netflix", "Prime Video", "Apple TV+"];
-  const providerNames = (session?.batch ?? (session?.recommendation ? [session.recommendation] : []))
-    .flatMap((pick) => pick.whereToWatch.providers ?? [])
-    .map((provider) => provider.name);
+  const allPicks = combinedScoringPicks(session, history);
+  const providerNames = allPicks.flatMap((pick) => pick.whereToWatch.providers ?? []).map((p) => p.name);
   const countryOptions = onboarding ? platformOptionsForCountry(onboarding.countryCode) : [];
   const platforms = compareAll
     ? [...new Set([...selectedPlatforms, ...countryOptions, ...providerNames])].slice(0, 14)
     : selectedPlatforms;
   return platforms.map((platform) => {
-    const { includedCount, transactionalCount } = platformEvidence(platform, session);
-    const score = scorePlatform(platform, session, feedback, selectedPlatforms);
+    const { includedCount, transactionalCount } = platformEvidence(platform, allPicks);
+    const score = scorePlatform(platform, allPicks, feedback, selectedPlatforms);
     const status: PlatformFit["status"] = score >= 70 ? "Keep" : score >= 42 ? "Pause" : "Try";
+    const picksForPlatform = allPicks.filter((p) => matchingProviders(platform, p.whereToWatch.providers ?? []).length > 0).length;
     return {
       name: platform,
       score,
@@ -151,6 +177,8 @@ function platformFits(onboarding: OnboardingData | null, session: Recommendation
       includedCount,
       transactionalCount,
       isSelected: selectedPlatforms.some((item) => normalize(item) === normalize(platform)),
+      sampleSize: picksForPlatform,
+      isPartner: PARTNER_PLATFORMS.has(normalize(platform)),
     };
   }).sort((a, b) => b.score - a.score);
 }
@@ -161,10 +189,16 @@ function ScoreBar({ fit }: { fit: PlatformFit }) {
   return (
     <div className="grid grid-cols-[minmax(120px,170px)_1fr_54px] items-center gap-4">
       <div className="flex min-w-0 items-center gap-3">
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.055] font-semibold text-white">
+        <span className="relative grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.055] font-semibold text-white">
           {fit.name.charAt(0)}
+          {fit.isPartner && (
+            <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-amber-400 ring-2 ring-[#030303]" title="Partner" />
+          )}
         </span>
-        <span className="truncate text-white/82">{fit.name}</span>
+        <div className="min-w-0">
+          <span className="truncate text-white/82">{fit.name}</span>
+          {fit.isPartner && <span className="ml-2 text-xs text-amber-400/70">Partner</span>}
+        </div>
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-white/10">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${fit.score}%` }} />
@@ -198,6 +232,7 @@ function RecommendationRow({ fit }: { fit: PlatformFit }) {
 export default function StreamingFitPage() {
   const [onboarding, setOnboarding] = useState<OnboardingData | null>(null);
   const [session, setSession] = useState<RecommendationSession | null>(null);
+  const [history, setHistory] = useState<RecommendationHistoryItem[]>([]);
   const [feedback, setFeedback] = useState<RecommendationFeedback[]>([]);
   const [moodOpen, setMoodOpen] = useState(false);
   const [compareAll, setCompareAll] = useState(false);
@@ -205,6 +240,7 @@ export default function StreamingFitPage() {
   useEffect(() => {
     setOnboarding(loadOnboarding());
     setFeedback(loadRecommendationFeedback());
+    setHistory(loadRecommendationHistory());
     try {
       const raw = localStorage.getItem(recommendationStorageKey);
       setSession(raw ? JSON.parse(raw) as RecommendationSession : null);
@@ -213,8 +249,8 @@ export default function StreamingFitPage() {
     }
   }, []);
 
-  const fits = useMemo(() => platformFits(onboarding, session, feedback, compareAll), [onboarding, session, feedback, compareAll]);
-  const picks = session?.batch ?? (session?.recommendation ? [session.recommendation] : []);
+  const fits = useMemo(() => platformFits(onboarding, session, history, feedback, compareAll), [onboarding, session, history, feedback, compareAll]);
+  const picks = useMemo(() => combinedScoringPicks(session, history), [session, history]);
   const availableOnApps = picks.filter((pick) => {
     const providers = pick.whereToWatch.providers ?? [];
     return onboarding?.platforms.some((platform) => matchingProviders(platform, providers).some(isIncluded));
@@ -226,6 +262,7 @@ export default function StreamingFitPage() {
     const onOtherApps = providers.some((provider) => isIncluded(provider) && !selectedPlatforms.some((platform) => providerMatches(platform, provider)));
     return !onUserApps && onOtherApps;
   }).length;
+  const totalPicksAnalyzed = picks.length;
   const selectedFits = fits.filter((fit) => fit.isSelected);
   const outsideFits = fits.filter((fit) => !fit.isSelected);
   const bestSelectedScore = selectedFits[0]?.score ?? 0;
@@ -235,8 +272,10 @@ export default function StreamingFitPage() {
     ...(session?.request.mood ?? []),
     ...(session?.request.wants ?? []),
   ].slice(0, 3).join(", ") || "latest mood";
+  // Avoidance check only runs on full Recommendation objects (session batch), not slim history items.
+  const sessionBatchPicks = session?.batch ?? (session?.recommendation ? [session.recommendation] : []);
   const trustViolationCount = session
-    ? picks.filter((pick) => violatesAvoidance(session.request.avoids, pick)).length
+    ? sessionBatchPicks.filter((pick) => violatesAvoidance(session.request.avoids, pick)).length
     : 0;
   const wrongVibeCount = feedback.filter((item) => item.reason === "wrong-vibe" || item.reason === "too-much-effort").length;
   const avoidanceScore = trustViolationCount > 0 ? "Low" : wrongVibeCount > 0 ? "Learning" : "High";
@@ -249,13 +288,7 @@ export default function StreamingFitPage() {
           <Link href="/" aria-label="Home"><Logo /></Link>
           <nav className="hidden items-center gap-10 text-sm text-white/64 lg:flex">
             <Link href="/">Home</Link>
-            <span className="relative text-white">
-              Streaming Fit
-              <span className="absolute -bottom-4 left-1/2 h-0.5 w-7 -translate-x-1/2 rounded-full bg-red-500" />
-            </span>
             <Link href="/memory" className="hover:text-white">Memory</Link>
-            <Link href="/privacy" className="hover:text-white">Privacy</Link>
-            <a href="mailto:feedback@findurnext.com" className="hover:text-white">Give feedback</a>
           </nav>
           <div className="flex items-center gap-4">
             <Search size={20} className="hidden text-white/58 sm:block" />
@@ -289,10 +322,10 @@ export default function StreamingFitPage() {
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-white/[0.045] p-7">
-            <div className="mb-4 text-xs uppercase tracking-widest text-amber-200/72">This session</div>
+            <div className="mb-4 text-xs uppercase tracking-widest text-amber-200/72">Your fit data</div>
             <div className="grid grid-cols-3 gap-5">
               <div>
-                <p className="font-serif text-6xl">{picks.length}</p>
+                <p className="font-serif text-6xl">{totalPicksAnalyzed}</p>
                 <p className="mt-1 text-white/56">picks analyzed</p>
               </div>
               <div className="border-x border-white/10 px-5">
@@ -305,6 +338,7 @@ export default function StreamingFitPage() {
               </div>
             </div>
             <p className="mt-6 text-sm text-white/42">Based on availability in {onboarding?.country ?? "your region"} · {session?.request.languagePreferences?.[0] ?? "Any language"}</p>
+            <p className="mt-1 text-xs text-white/30">{totalPicksAnalyzed < 5 ? "Add more picks for higher accuracy" : totalPicksAnalyzed < 15 ? "Getting more accurate with each pick" : "High confidence — enough data to trust these scores"}</p>
             <p className="mt-2 inline-flex items-center gap-2 rounded-full border border-amber-300/18 bg-amber-400/[0.06] px-3 py-1 text-xs text-amber-100">
               <Lock size={13} /> Streaming Fit is a member-preview insight.
             </p>

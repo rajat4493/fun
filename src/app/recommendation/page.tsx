@@ -754,7 +754,11 @@ export default function RecommendationPage() {
         )}
 
         <footer className="mt-7 rounded-xl border border-white/10 bg-white/[0.03] px-5 py-4 text-sm text-white/44">
-          F.U.N gives one pick, verified where possible. We choose the best match for your mood so you can stop searching and start watching.
+          <span>F.U.N gives one pick, verified where possible. We choose the best match for your mood so you can stop searching and start watching.</span>
+          <span className="ml-6 gap-4 inline-flex">
+            <Link href="/privacy" className="hover:text-white/70">Privacy</Link>
+            <a href="mailto:feedback@findurnext.com" className="hover:text-white/70">Give feedback</a>
+          </span>
         </footer>
       </section>
     </main>

@@ -556,10 +556,7 @@ export default function Home() {
           <Logo />
           <nav className="hidden items-center gap-10 text-sm text-white/68 lg:flex">
             <a href="#how" className="hover:text-white">How it works</a>
-            <Link href="/streaming-fit" className="hover:text-white">Streaming Fit</Link>
             <Link href="/memory" className="hover:text-white">Memory</Link>
-            <Link href="/privacy" className="hover:text-white">Privacy</Link>
-            <a href="mailto:feedback@findurnext.com" className="hover:text-white">Give feedback</a>
           </nav>
           <div className="relative">
             <RegionLanguageButton onboarding={onboarding} onClick={() => setSettingsOpen((open) => !open)} />
@@ -823,6 +820,10 @@ export default function Home() {
           </div>
           <p className="mt-8 text-center text-white/46">One pick, verified where possible. No logins. No endless lists.</p>
         </section>
+        <footer className="mt-8 flex flex-wrap items-center justify-center gap-6 border-t border-white/[0.06] pt-6 text-sm text-white/32">
+          <Link href="/privacy" className="hover:text-white/60">Privacy</Link>
+          <a href="mailto:feedback@findurnext.com" className="hover:text-white/60">Give feedback</a>
+        </footer>
       </section>
     </main>
   );
