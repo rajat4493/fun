@@ -17,12 +17,6 @@ function wantsHindi(input: RecommendRequest): boolean {
   return /\bhindi\b/i.test(text);
 }
 
-function shouldUseCuratedReferenceFallback(input: RecommendRequest): boolean {
-  if (!wantsHindi(input)) return false;
-  const text = [input.selfText, input.reference].filter(Boolean).join(" ");
-  return /\b(friends|shameless)\b/i.test(text);
-}
-
 function matchesLanguageRequest(input: RecommendRequest, recommendation: Recommendation): boolean {
   if (!wantsHindi(input)) return true;
   const metadata = recommendation.contentMetadata;
@@ -34,28 +28,64 @@ function matchesLanguageRequest(input: RecommendRequest, recommendation: Recomme
   return false;
 }
 
+function normalizeTitle(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function hash(value: string): number {
+  return value.split("").reduce((total, char) => ((total << 5) - total + char.charCodeAt(0)) | 0, 0);
+}
+
+function diversifyFallbackBatch(input: RecommendRequest, batch: RawRecommendation[]): RawRecommendation[] {
+  if (batch.length <= 1) return batch;
+  const excluded = new Set([...(input.recentTitles ?? []), ...(input.seenTitles ?? [])].map(normalizeTitle));
+  const available = batch.filter((item) => !excluded.has(normalizeTitle(item.title)));
+  const source = available.length > 0 ? available : batch;
+  const requestSeed = [
+    input.selfText,
+    input.reference,
+    input.mood?.join(","),
+    input.wants?.join(","),
+    input.avoids?.join(","),
+    input.time,
+    input.energy,
+    input.viewingContext,
+    input.country,
+    input.languagePreferences?.join(","),
+    input.platformFilter,
+    input.discoveryMode,
+    input.craziness,
+    input.recentTitles?.length ?? 0,
+    new Date().toISOString().slice(0, 10),
+  ].filter(Boolean).join("|");
+  const start = Math.abs(hash(requestSeed)) % source.length;
+  return [...source.slice(start), ...source.slice(0, start)];
+}
+
 function llmTemperature(input: RecommendRequest): number {
   return input.craziness === 3 ? 1 : 0.85;
 }
 
-// CHANGED: OpenAI is now primary, Anthropic is fallback. Anthropic key is optional — add it
-// to .env.local when budget allows for better recommendation quality.
+// Anthropic is preferred for recommendation quality and to avoid recent OpenAI timeout
+// loops. OpenAI remains a fallback, then local curated fallback as the last resort.
 async function getRecommendations(input: RecommendRequest, prompt: string): Promise<RawRecommendation[]> {
   const temperature = llmTemperature(input);
+  const hasOpenAI = Boolean(process.env.OPENAI_API_KEY);
+  const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY);
 
-  if (process.env.OPENAI_API_KEY) {
-    try {
-      return await recommendWithOpenAI(prompt, temperature);
-    } catch (error) {
-      console.warn("OpenAI failed, trying Anthropic:", error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  if (process.env.ANTHROPIC_API_KEY) {
+  if (hasAnthropic) {
     try {
       return await recommendWithAnthropic(prompt, temperature);
     } catch (error) {
-      console.warn("Anthropic failed, using local fallback:", error instanceof Error ? error.message : String(error));
+      console.warn("Anthropic failed, trying OpenAI:", error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (hasOpenAI) {
+    try {
+      return await recommendWithOpenAI(prompt, temperature);
+    } catch (error) {
+      console.warn("OpenAI failed, using local fallback:", error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -63,8 +93,9 @@ async function getRecommendations(input: RecommendRequest, prompt: string): Prom
 }
 
 function filteredLocalFallback(input: RecommendRequest): RawRecommendation[] {
-  const filtered = filterFalsePositiveRecommendations(input, localFallback(input));
-  return filtered.length > 0 ? filtered : [];
+  const diversified = diversifyFallbackBatch(input, localFallback(input));
+  const filtered = filterFalsePositiveRecommendations(input, diversified);
+  return filtered.length > 0 ? diversifyFallbackBatch(input, filtered) : diversified;
 }
 
 // NEW: Trust filter with retry loop. If all picks are rejected (wrong language, seen titles, etc.)

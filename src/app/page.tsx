@@ -45,6 +45,7 @@ import {
   hasDismissedPostWatchPrompt,
   hasPostWatchFeedback,
   loadRecommendationFeedbackContext,
+  loadRecommendationHistory,
   loadRecommendationMemoryTitles,
   RecommendationHistoryItem,
   RecommendationSession,
@@ -98,6 +99,7 @@ const riskOptions: Array<{ level: CrazinessLevel; label: string; helper: string;
   { level: 2, label: "Bold", helper: "Deep & challenging", icon: Sparkles },
   { level: 3, label: "Unhinged", helper: "Wild & unexpected", icon: Star },
 ];
+const POST_WATCH_PROMPT_DELAY_MS = 30 * 60 * 1000;
 
 const defaultPick: Recommendation = {
   title: "The Station Agent",
@@ -305,6 +307,23 @@ function isPlaceholderPick(recommendation?: Recommendation | null) {
   );
 }
 
+function isOldEnoughForWatchFeedback(createdAt?: string) {
+  if (!createdAt) return true;
+  const createdTime = new Date(createdAt).getTime();
+  if (Number.isNaN(createdTime)) return true;
+  return Date.now() - createdTime > POST_WATCH_PROMPT_DELAY_MS;
+}
+
+function findPostWatchCandidateFromHistory(): RecommendationHistoryItem | null {
+  return loadRecommendationHistory()
+    .filter((item) =>
+      isOldEnoughForWatchFeedback(item.createdAt) &&
+      !hasPostWatchFeedback(item.title, item.year) &&
+      !hasDismissedPostWatchPrompt(item.title, item.year),
+    )
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] ?? null;
+}
+
 export default function Home() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
@@ -335,10 +354,8 @@ export default function Home() {
         const session = JSON.parse(raw) as Partial<RecommendationSession>;
         if (session.recommendation && !isPlaceholderPick(session.recommendation)) {
           setPick(session.recommendation);
-          const generatedAt = session.generatedAt ?? "";
-          const oldEnough = generatedAt ? Date.now() - new Date(generatedAt).getTime() > 20 * 60 * 1000 : true;
           if (
-            oldEnough &&
+            isOldEnoughForWatchFeedback(session.generatedAt) &&
             !hasPostWatchFeedback(session.recommendation.title, session.recommendation.year) &&
             !hasDismissedPostWatchPrompt(session.recommendation.title, session.recommendation.year)
           ) {
@@ -352,10 +369,16 @@ export default function Home() {
               posterUrl: session.recommendation.omdbPosterUrl,
               request: session.request ?? { mode: "choose" },
               whereToWatch: session.recommendation.whereToWatch,
-              createdAt: generatedAt || new Date().toISOString(),
+              createdAt: session.generatedAt || new Date().toISOString(),
             });
+          } else {
+            setPostWatchCandidate(findPostWatchCandidateFromHistory());
           }
+        } else {
+          setPostWatchCandidate(findPostWatchCandidateFromHistory());
         }
+      } else {
+        setPostWatchCandidate(findPostWatchCandidateFromHistory());
       }
     } catch {
       // ignore local storage issues
