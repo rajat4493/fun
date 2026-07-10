@@ -224,7 +224,7 @@ export default function OnboardingFlow({ onComplete }: { onComplete: (data: Onbo
                       onClick={() => toggleLanguage(language)}
                       className={`h-9 rounded-full border px-4 text-sm transition ${
                         active
-                          ? "border-red-400/50 bg-red-500/12 text-white shadow-[0_0_18px_rgba(239,68,68,0.16)]"
+                          ? "border-red-400 bg-red-950/55 text-white shadow-[0_0_6px_rgba(248,113,113,0.8),0_0_18px_rgba(239,68,68,0.5),0_0_40px_rgba(239,68,68,0.2)]"
                           : "border-white/10 bg-white/[0.04] text-white/68 hover:border-white/22 hover:text-white"
                       }`}
                     >
@@ -264,7 +264,7 @@ export default function OnboardingFlow({ onComplete }: { onComplete: (data: Onbo
                     onClick={() => togglePlatform(platform)}
                     className={`flex h-11 items-center justify-between rounded-xl border px-4 text-sm transition ${
                       active
-                        ? "border-red-400/50 bg-red-500/12 text-white shadow-[0_0_20px_rgba(239,68,68,0.2)]"
+                        ? "border-red-400 bg-red-950/55 text-white shadow-[0_0_6px_rgba(248,113,113,0.8),0_0_18px_rgba(239,68,68,0.5),0_0_40px_rgba(239,68,68,0.2)]"
                         : "border-white/10 bg-white/[0.04] text-white/72 hover:border-white/22 hover:text-white"
                     }`}
                   >

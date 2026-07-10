@@ -390,7 +390,7 @@ export default function RecommendationPage() {
   }
 
   async function handleShare() {
-    const text = `Tonight's F.U.N pick: ${pick.title} (${pick.year}) — ${pick.oneLine}`;
+    const text = `My F.U.N pick: ${pick.title} (${pick.year}) — ${pick.oneLine}`;
     const url = typeof window !== "undefined" ? window.location.href : "";
     try {
       if (navigator.share) {
@@ -456,6 +456,14 @@ export default function RecommendationPage() {
     const seed = `${pick.title}-${pick.year}`.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
     return `${seed % 2 === 0 ? "center" : "top"}`;
   }, [pick.title, pick.year]);
+
+  const whyItFitsLabel = useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) return "Why it fits your morning";
+    if (hour >= 12 && hour < 17) return "Why it fits your afternoon";
+    if (hour >= 17 && hour < 21) return "Why it fits your evening";
+    return "Why it fits tonight";
+  }, []);
 
   if (fetchLoading) {
     return (
@@ -529,7 +537,7 @@ export default function RecommendationPage() {
           <div>
             <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-400/[0.07] px-3 py-1.5 text-sm text-amber-100">
               <Sparkles size={15} />
-              Your one pick for tonight
+              Your one pick
               <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-white/68">{batchIndex + 1} of {batch.length}</span>
             </div>
             <h1 className="font-serif font-normal leading-[0.88] tracking-normal text-white" style={{ fontSize: titleSize(pick.title) }}>
@@ -585,9 +593,9 @@ export default function RecommendationPage() {
                           <ExternalLink size={14} className="text-white/42" />
                         </a>
                       )) : (
-                        <p className="rounded-xl border border-white/10 bg-white/[0.04] p-3 text-sm leading-5 text-white/54">
-                          We do not have a verified direct provider for this title yet.
-                        </p>
+                        <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
+                          <p className="text-sm leading-5 text-white/54">No verified streaming links found for your region. Use the link below to check JustWatch.</p>
+                        </div>
                       )}
                       <a
                         href={fallbackUrl}
@@ -637,7 +645,7 @@ export default function RecommendationPage() {
         <section className="rounded-2xl border border-white/10 bg-black/38 p-6">
           <div className="grid gap-7 lg:grid-cols-[1.05fr_1.05fr_0.7fr]">
             <article>
-              <h2 className="mb-5 flex items-center gap-3 text-xl text-amber-100"><Heart size={20} /> Why it fits tonight</h2>
+              <h2 className="mb-5 flex items-center gap-3 text-xl text-amber-100"><Heart size={20} /> {whyItFitsLabel}</h2>
               <div className="space-y-4">
                 {pick.whyItFits.slice(0, 3).map((reason, index) => (
                   <div key={`${index}-${reason}`} className="flex gap-4">

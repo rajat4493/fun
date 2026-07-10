@@ -249,6 +249,7 @@ function ChoiceButton({ option, active, onClick }: { option: Option; active: boo
   return (
     <button
       type="button"
+      aria-pressed={active}
       onClick={onClick}
       className={`flex min-h-14 min-w-0 items-center justify-center gap-3 rounded-xl border px-3 py-3 text-sm transition-all duration-150 ${
         active
@@ -458,7 +459,8 @@ export default function Home() {
       mode: inputMode === "describe" ? "self" : "choose",
       mood: inputMode === "describe" ? undefined : selectedMoods,
       wants: inputMode === "describe" ? undefined : selectedWants,
-      avoids: inputMode === "describe" ? undefined : selectedAvoids,
+      // Avoidances are safety constraints, not mood signals — always pass them regardless of mode.
+      avoids: selectedAvoids.length > 0 ? selectedAvoids : undefined,
       time: time !== "no preference" ? time : undefined,
       energy,
       viewingContext,
@@ -644,14 +646,14 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setInputMode("choose")}
-                  className={`h-12 rounded-lg text-sm transition ${inputMode === "choose" ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/50 hover:text-white"}`}
+                  className={`h-12 rounded-lg text-sm transition ${inputMode === "choose" ? "bg-red-950/55 text-white shadow-[0_0_6px_rgba(248,113,113,0.8),0_0_18px_rgba(239,68,68,0.5),0_0_40px_rgba(239,68,68,0.2)]" : "text-white/50 hover:text-white"}`}
                 >
                   <Sparkles size={16} className="mr-2 inline" /> Choose
                 </button>
                 <button
                   type="button"
                   onClick={() => setInputMode("describe")}
-                  className={`h-12 rounded-lg text-sm transition ${inputMode === "describe" ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/50 hover:text-white"}`}
+                  className={`h-12 rounded-lg text-sm transition ${inputMode === "describe" ? "bg-red-950/55 text-white shadow-[0_0_6px_rgba(248,113,113,0.8),0_0_18px_rgba(239,68,68,0.5),0_0_40px_rgba(239,68,68,0.2)]" : "text-white/50 hover:text-white"}`}
                 >
                   <PenLine size={16} className="mr-2 inline" /> Describe
                 </button>
@@ -691,6 +693,11 @@ export default function Home() {
                   <span className="mb-3 flex items-center gap-2 text-lg"><PenLine size={18} /> Describe it your way</span>
                   <textarea value={selfText} onChange={(event) => setSelfText(event.target.value)} rows={5} placeholder="I want a hidden gem thriller, or something like Friends but in Hindi..." className="w-full resize-none rounded-xl border border-white/12 bg-black/28 px-4 py-3 text-white outline-none placeholder:text-white/28 focus:border-red-300/45" />
                   <span className="mt-2 block text-sm text-white/42">Describe mode ignores the mood buttons and uses your words directly.</span>
+                  {selectedAvoids.length > 0 && (
+                    <span className="mt-2 flex items-center gap-2 text-sm text-amber-200/70">
+                      <Shield size={13} /> Avoidances still active: {selectedAvoids.join(", ")}
+                    </span>
+                  )}
                 </label>
                 <label>
                   <span className="mb-3 flex items-center gap-2 text-lg"><FilmIcon /> Reference title</span>
@@ -711,7 +718,7 @@ export default function Home() {
                 <span className="mb-3 flex items-center gap-2 text-lg"><Zap size={18} /> Energy</span>
                 <div className="grid grid-cols-2 rounded-xl border border-white/10 bg-black/26 p-1 sm:grid-cols-4">
                   {energyOptions.map((option) => (
-                    <button key={option} type="button" onClick={() => setEnergy(option)} className={`min-h-12 rounded-lg px-2 py-2 text-sm leading-5 transition ${energy === option ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/48 hover:text-white"}`}>
+                    <button key={option} type="button" onClick={() => setEnergy(option)} className={`min-h-12 rounded-lg px-2 py-2 text-sm leading-5 transition ${energy === option ? "bg-red-950/55 text-white shadow-[0_0_6px_rgba(248,113,113,0.8),0_0_18px_rgba(239,68,68,0.5),0_0_40px_rgba(239,68,68,0.2)]" : "text-white/48 hover:text-white"}`}>
                       {option}
                     </button>
                   ))}
@@ -721,7 +728,7 @@ export default function Home() {
                 <span className="mb-3 flex items-center gap-2 text-lg"><Users size={18} /> Context</span>
                 <div className="grid grid-cols-2 rounded-xl border border-white/10 bg-black/26 p-1 sm:grid-cols-4">
                   {contextOptions.map((option) => (
-                    <button key={option} type="button" onClick={() => setViewingContext(option)} className={`min-h-12 rounded-lg px-2 py-2 text-sm leading-5 transition ${viewingContext === option ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/48 hover:text-white"}`}>
+                    <button key={option} type="button" onClick={() => setViewingContext(option)} className={`min-h-12 rounded-lg px-2 py-2 text-sm leading-5 transition ${viewingContext === option ? "bg-red-950/55 text-white shadow-[0_0_6px_rgba(248,113,113,0.8),0_0_18px_rgba(239,68,68,0.5),0_0_40px_rgba(239,68,68,0.2)]" : "text-white/48 hover:text-white"}`}>
                       {option}
                     </button>
                   ))}
@@ -735,7 +742,7 @@ export default function Home() {
                 {riskOptions.map((option) => {
                   const Icon = option.icon;
                   return (
-                    <button key={option.level} type="button" onClick={() => setRisk(option.level)} className={`min-h-20 rounded-lg border px-4 py-3 text-center transition ${risk === option.level ? "border-red-400/70 bg-red-500/12 text-white" : "border-transparent text-white/54 hover:bg-white/[0.04] hover:text-white"}`}>
+                    <button key={option.level} type="button" onClick={() => setRisk(option.level)} className={`min-h-20 rounded-lg border px-4 py-3 text-center transition-all duration-150 ${risk === option.level ? "border-red-400 bg-red-950/55 text-white shadow-[0_0_6px_rgba(248,113,113,0.8),0_0_18px_rgba(239,68,68,0.5),0_0_40px_rgba(239,68,68,0.2)]" : "border-transparent text-white/54 hover:bg-white/[0.04] hover:text-white"}`}>
                       <span className="flex items-center justify-center gap-2"><Icon size={17} /> {option.label}</span>
                       <span className="mt-1 block text-sm text-white/42">{option.helper}</span>
                     </button>
@@ -748,8 +755,8 @@ export default function Home() {
               <div className="max-w-3xl">
                 <span className="mb-3 block text-sm uppercase tracking-widest text-white/36">Where to search</span>
                   <div className="grid grid-cols-2 rounded-xl border border-white/10 bg-black/26 p-1">
-                    <button type="button" onClick={() => setPlatformFilter("mine")} className={`h-14 rounded-lg text-base transition ${platformFilter === "mine" ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/50 hover:text-white"}`}>My subscriptions</button>
-                    <button type="button" onClick={() => setPlatformFilter("any")} className={`h-14 rounded-lg text-base transition ${platformFilter === "any" ? "bg-red-500/16 text-white ring-1 ring-red-400/45" : "text-white/50 hover:text-white"}`}>All cinema</button>
+                    <button type="button" onClick={() => setPlatformFilter("mine")} className={`h-14 rounded-lg text-base transition ${platformFilter === "mine" ? "bg-red-950/55 text-white shadow-[0_0_6px_rgba(248,113,113,0.8),0_0_18px_rgba(239,68,68,0.5),0_0_40px_rgba(239,68,68,0.2)]" : "text-white/50 hover:text-white"}`}>My subscriptions</button>
+                    <button type="button" onClick={() => setPlatformFilter("any")} className={`h-14 rounded-lg text-base transition ${platformFilter === "any" ? "bg-red-950/55 text-white shadow-[0_0_6px_rgba(248,113,113,0.8),0_0_18px_rgba(239,68,68,0.5),0_0_40px_rgba(239,68,68,0.2)]" : "text-white/50 hover:text-white"}`}>All cinema</button>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
                     {onboarding.platforms.slice(0, 7).map((platform) => <PlatformChip key={platform} name={platform} />)}

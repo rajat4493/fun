@@ -22,6 +22,17 @@ type OpenAIResponse = {
   }>;
 };
 
+// Standard OpenAI-compatible chat completions response.
+// Supported by Groq, Mistral, Together AI, Ollama, LM Studio, Fireworks, Perplexity,
+// Google Gemini (via compat layer), and any other OpenAI-compatible provider.
+type ChatCompletionsResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+};
+
 function parseRecommendationJson(text: string): RawRecommendation[] {
   const parsed = JSON.parse(extractJson(text)) as unknown;
   if (Array.isArray(parsed)) return parsed as RawRecommendation[];
@@ -30,6 +41,38 @@ function parseRecommendationJson(text: string): RawRecommendation[] {
     if (wrapped) return wrapped as RawRecommendation[];
   }
   return [parsed as RawRecommendation];
+}
+
+// Generic OpenAI-compatible provider — reads LLM_BASE_URL, LLM_API_KEY, LLM_MODEL.
+// Set these to use Groq, Mistral, Together AI, Ollama, Fireworks, Perplexity, Gemini, etc.
+export async function recommendWithGenericLLM(prompt: string, temperature = 0.85): Promise<RawRecommendation[]> {
+  const baseUrl = process.env.LLM_BASE_URL;
+  const apiKey = process.env.LLM_API_KEY;
+  const model = process.env.LLM_MODEL;
+  if (!baseUrl || !apiKey || !model) throw new Error("Missing LLM_BASE_URL, LLM_API_KEY, or LLM_MODEL");
+
+  const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
+  const response = await withTimeout(
+    fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    }),
+    LLM_TIMEOUT_MS,
+    `Generic LLM (${model})`,
+  );
+
+  if (!response.ok) throw new Error(`Generic LLM (${model}) failed with ${response.status}`);
+  const data = (await response.json()) as ChatCompletionsResponse;
+  const text = data.choices?.[0]?.message?.content ?? "";
+  return parseRecommendationJson(text);
 }
 
 export async function recommendWithAnthropic(prompt: string, temperature = 0.85): Promise<RawRecommendation[]> {

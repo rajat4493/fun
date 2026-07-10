@@ -16,6 +16,7 @@ type TmdbMovie = {
   media_type: "movie" | "tv";
   original_language?: string;
   origin_country?: string[];
+  genre_ids?: number[];
 };
 
 type TmdbProvider = {
@@ -75,23 +76,53 @@ async function tmdbFetch<T>(path: string): Promise<T | null> {
   }
 }
 
+type TmdbSearchResult = {
+  id: number;
+  poster_path: string | null;
+  original_language?: string;
+  origin_country?: string[];
+  genre_ids?: number[];
+  release_date?: string;
+  first_air_date?: string;
+};
+
+function yearMatchesResult(result: TmdbSearchResult, dateField: "release_date" | "first_air_date", expectedYear: string): boolean {
+  const resultYear = parseInt((result[dateField] ?? "").slice(0, 4));
+  return !isNaN(resultYear) && Math.abs(resultYear - parseInt(expectedYear)) <= 1;
+}
+
+function pickResult(results: TmdbSearchResult[], year: string, dateField: "release_date" | "first_air_date"): TmdbSearchResult | null {
+  if (!results.length) return null;
+  if (!year) return results[0];
+  return results.find((r) => yearMatchesResult(r, dateField, year)) ?? null;
+}
+
 async function tmdbSearch(title: string, year: string): Promise<TmdbMovie | null> {
   const q = encodeURIComponent(title.trim());
-  const moviePaths = year
-    ? [`/search/movie?query=${q}&primary_release_year=${year}&language=en-US&page=1`, `/search/movie?query=${q}&language=en-US&page=1`]
-    : [`/search/movie?query=${q}&language=en-US&page=1`];
-  for (const path of moviePaths) {
-    const movieData = await tmdbFetch<{ results: Array<{ id: number; poster_path: string | null; original_language?: string }> }>(path);
+
+  // Year-filtered search first — TMDB applies the filter server-side, results are trustworthy.
+  if (year) {
+    const movieData = await tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/movie?query=${q}&primary_release_year=${year}&language=en-US&page=1`);
     if (movieData?.results?.[0]) return { ...movieData.results[0], media_type: "movie" };
   }
 
-  const tvPaths = year
-    ? [`/search/tv?query=${q}&first_air_date_year=${year}&language=en-US&page=1`, `/search/tv?query=${q}&language=en-US&page=1`]
-    : [`/search/tv?query=${q}&language=en-US&page=1`];
-  for (const path of tvPaths) {
-    const tvData = await tmdbFetch<{ results: Array<{ id: number; poster_path: string | null; original_language?: string; origin_country?: string[] }> }>(path);
+  // Unfiltered movie fallback — only accept if the result's year roughly matches.
+  // Returning null here means the pick is treated as "unknown" rather than trusted with wrong genre data.
+  const movieFallback = await tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/movie?query=${q}&language=en-US&page=1`);
+  const movieMatch = pickResult(movieFallback?.results ?? [], year, "release_date");
+  if (movieMatch) return { ...movieMatch, media_type: "movie" };
+
+  // Year-filtered TV search.
+  if (year) {
+    const tvData = await tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/tv?query=${q}&first_air_date_year=${year}&language=en-US&page=1`);
     if (tvData?.results?.[0]) return { ...tvData.results[0], media_type: "tv" };
   }
+
+  // Unfiltered TV fallback — same year validation.
+  const tvFallback = await tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/tv?query=${q}&language=en-US&page=1`);
+  const tvMatch = pickResult(tvFallback?.results ?? [], year, "first_air_date");
+  if (tvMatch) return { ...tvMatch, media_type: "tv" };
+
   return null;
 }
 
@@ -217,6 +248,7 @@ export async function enrichRecommendation(
     contentMetadata: {
       originalLanguage: mainMovie?.original_language,
       originCountry: mainMovie?.origin_country,
+      genreIds: mainMovie?.genre_ids,
     },
     hiddenLayer: {
       ...raw.hiddenLayer,

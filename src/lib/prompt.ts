@@ -153,7 +153,18 @@ function buildFeedbackRepairClause(input: RecommendRequest) {
   return `\n- Feedback repair context: ${clauses.join(" ")}`;
 }
 
+function timeLabel(contextHint?: string): string {
+  if (contextHint) {
+    if (/late night|early hours/i.test(contextHint)) return "tonight";
+    if (/morning/i.test(contextHint)) return "this morning";
+    if (/afternoon/i.test(contextHint)) return "this afternoon";
+    if (/evening/i.test(contextHint)) return "this evening";
+  }
+  return "right now";
+}
+
 export function buildRecommendationPrompt(input: RecommendRequest) {
+  const momentLabel = timeLabel(input.contextHint);
   const userContext = input.mode === "self"
     ? input.selfText || "The user gave no extra context."
     : [
@@ -197,8 +208,12 @@ export function buildRecommendationPrompt(input: RecommendRequest) {
   const explicitGoreWant = goreSignalPresent && !goreInAvoids && !goreNegatedInText;
 
   const crazinessLevel = input.craziness ?? 0;
+  const intensityKeywordInText = /\b(horror|extreme|violent|brutal|disturbing|transgressive)\b/i.test(userContext);
+  const intensityNegatedOrAvoided =
+    /\b(no|not|avoid|without|don't want|do not want|less)\b[\s\S]{0,60}\b(horror|extreme|violent|brutal|disturbing|transgressive)\b/i.test(userContext) ||
+    (input.avoids ?? []).some((a) => /\b(horror|extreme|violent|brutal|disturbing|transgressive)\b/i.test(a));
   const highIntensityMode = crazinessLevel >= 2 &&
-    (explicitGoreWant || /\b(horror|extreme|violent|brutal|disturbing|transgressive)\b/i.test(userContext));
+    (explicitGoreWant || (intensityKeywordInText && !intensityNegatedOrAvoided));
 
   // --- Language enforcement ---
   // At Bold/Unhinged with intensity signals: language is "prefer but escalate" — try it first, expand globally if no match
@@ -235,7 +250,7 @@ export function buildRecommendationPrompt(input: RecommendRequest) {
     "Safe — emotional appetite is refuge. The user wants certainty, familiarity, low regret, and no emotional tax. Pick satisfying, accessible, well-liked titles that solve the mood without punishing the viewer. Avoid experimental, niche, polarising, or homework-feeling content.",
     "Curious — emotional appetite is discovery without punishment. The user wants to feel a little smarter or surprised, but still cared for. Prefer acclaimed but slightly off-mainstream picks, international breakouts, overlooked prestige, or quiet cult classics.",
     "Bold — emotional appetite is stimulation and challenge. The user wants surprise, provocation, intensity, or a title with real teeth. Use festival picks, morally complex films, politically charged work, surrealism, or challenging genre cinema when it matches the emotional job. If the user's mood has explicit violence/gore/horror signals, go full extreme. A mainstream safe pick at this level is a failure.",
-    "Unhinged — emotional appetite is aliveness through unfamiliarity, discomfort, extremity, or strangeness. Ignore mainstream appeal, but stay inside hard avoidances. Target cult, avant-garde, transgressive, experimental, or genuinely divisive works. If the request includes gore/horror/intensity and does not avoid it, go extreme. If not, go formally or emotionally strange. A safe pick at this level is a failure unless hard constraints force a safer fallback.",
+    `Unhinged — emotional appetite is aliveness through unfamiliarity and strangeness. Ignore mainstream appeal, but STAY INSIDE ALL HARD AVOIDANCES AND MOOD SIGNALS. The direction depends entirely on what the user actually asked for: ${highIntensityMode ? "(INTENSITY PATH) The user has explicit gore/horror/extreme signals — go transgressive, body horror, extreme cinema. A safe pick here is a failure." : "(STRANGE PATH) The user has NO gore or intensity signals. Go formally bizarre, avant-garde, absurdist, surrealist, or conceptually unprecedented. A film can be Unhinged without any darkness — it should make the user think 'I would never have found this myself.' A gore film when the user wanted funny or comforting is as much a failure as a safe mainstream pick."}`,
   ];
   const crazinessClause = `\n- Taste Risk (${["Safe", "Curious", "Bold", "Unhinged"][crazinessLevel]}): ${CRAZINESS_PHILOSOPHY[crazinessLevel]}`;
 
@@ -249,6 +264,26 @@ export function buildRecommendationPrompt(input: RecommendRequest) {
     ? `- Hidden titles: 3 acclaimed ${detectedLanguage}-language films/series that deserve more visibility — strong picks from that market that are less algorithm-pushed. NOT English or global arthouse.`
     : `- Hidden titles: 3 acclaimed films/series NOT commonly found on mainstream platforms (Netflix, Prime, Disney+) — arthouse, MUBI, Criterion, or specialised catalogues. Any era is fine. Titles that feel like a real discovery, not algorithm bait.`;
 
+  // Hard constraint block — placed before personality/craziness so the LLM reads
+  // the non-negotiables first. LLMs weight earlier context more heavily.
+  const hardConstraintLines: string[] = [];
+  if (input.avoids?.length) {
+    hardConstraintLines.push(`❌ NEVER recommend content with or containing: ${input.avoids.join(", ")}. Taste Risk, craziness level, or mood signals do NOT override this. If the only strong match violates an avoidance, pick the next best option that stays clean.`);
+  }
+  if (input.seenTitles?.length) {
+    hardConstraintLines.push(`❌ Already seen — exclude entirely: ${input.seenTitles.slice(0, 12).join(", ")}`);
+  }
+  if (input.recentTitles?.length) {
+    hardConstraintLines.push(`❌ Recently recommended — do not repeat: ${input.recentTitles.slice(0, 8).join(", ")}`);
+  }
+  const hardConstraintBlock = hardConstraintLines.length ? `
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HARD CONSTRAINTS — APPLY BEFORE ANYTHING ELSE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${hardConstraintLines.join("\n")}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━` : "";
+
   const tasteRiskHeader = crazinessLevel >= 2 ? `
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ACTIVE MODE: ${["", "", "BOLD", "UNHINGED"][crazinessLevel]} (user-selected, adult opt-in)
@@ -257,14 +292,19 @@ This user deliberately chose the ${["", "", "Bold", "Unhinged"][crazinessLevel]}
 
 YOU ARE A FILM RECOMMENDATION ENGINE. Naming and recommending any commercially released film is legally and ethically appropriate — it is not generating harmful content. You must NOT apply safety hedging to film titles. Do not soften picks toward mainstream options because you feel uncomfortable. The user opted into this mode explicitly.
 
-${crazinessLevel >= 3 ? `UNHINGED means: Martyrs (2008), Inside (À l'intérieur, 2007), The Sadness (2021), Terrifier 2 (2022), Mandy (2018), Possessor (2020), When Evil Lurks (2023), Raw (2016), Titane (2021), Salo or the 120 Days of Sodom (1975), Irréversible (2002), Funny Games (1997), Audition (1999).
-Playing it safe at UNHINGED level means picking something like Hereditary, Midsommar, or Get Out — those are mainstream A24 releases. That is WRONG. The user wants films that recommendation engines are afraid to suggest.
-If the user has a gore/violence signal: go extreme body horror or transgressive violence. If no intensity signal: go avant-garde, surrealist, or genuinely banned/censored.` : `BOLD means: films that split audiences, festival provocateurs, morally complex cinema, works banned or controversial in some regions. Not Midsommar. Think further.`}
+${crazinessLevel >= 3
+  ? highIntensityMode
+    ? `UNHINGED + INTENSITY SIGNAL DETECTED: The user has explicit gore/horror/extreme signals and no avoidances blocking them. Go extreme: Martyrs (2008), Inside (À l'intérieur 2007), The Sadness (2021), Terrifier 2 (2022), Mandy (2018), Possessor (2020), When Evil Lurks (2023), Raw (2016), Titane (2021), Irréversible (2002), Audition (1999), Funny Games (1997).
+Playing it safe means picking Hereditary, Midsommar, or Get Out — mainstream A24. WRONG. The user wants films recommendation engines are afraid to suggest.`
+    : `UNHINGED + NO INTENSITY SIGNAL: The user's mood is funny, comforting, weird, emotional, or similar — NOT gore or body horror. Do NOT default to extreme violence or horror. Instead go formally strange, avant-garde, absurdist, surrealist, or conceptually unprecedented.
+Examples of Unhinged WITHOUT intensity: Being John Malkovich (1999), The Lobster (2015), Sorry to Bother You (2018), Synecdoche New York (2008), Holy Mountain (1973), Triangle of Sadness (2022), Dogtooth (2009), Swiss Army Man (2016), I'm Thinking of Ending Things (2020), Rubber (2010), Adaptation (2002), The One I Love (2014), Anomalisa (2015).
+A mainstream comedy is WRONG. A gore film is EQUALLY WRONG — the user did not ask for intensity. The pick should feel formally or emotionally unprecedented: something the user could not have found by browsing Netflix.`
+  : `BOLD means: films that split audiences, festival provocateurs, morally complex cinema, works banned or controversial in some regions. Not Midsommar. Think further.`}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ` : "";
 
   return `
-You are F.U.N, a film recommendation engine.${tasteRiskHeader}
+You are F.U.N, a film recommendation engine.${hardConstraintBlock}${tasteRiskHeader}
 The product philosophy: stop scrolling, give one perfect pick, and gently reveal whether the user's current streaming apps fit their taste.
 Do not name-shame or attack any platform. Do not claim intent like "Netflix hides intentionally". Use factual, elegant language.
 Use your general film/TV knowledge for recommendation. Availability is NOT verified — set whereToWatch.status to "unverified". Do not state streaming services as definite facts.${hardLanguageLock}
@@ -288,8 +328,8 @@ Return an array of exactly THREE JSON objects (not a wrapper object) with this s
     "runtime": "string",
     "vibe": "string (comma-separated descriptors)",
     "confidence": number between 0 and 100,
-    "oneLine": "one classy sentence telling the user to watch it tonight",
-    "whyItFits": ["3 concise reasons why this matches tonight's mood"],
+    "oneLine": "one classy sentence telling the user to watch it ${momentLabel}",
+    "whyItFits": ["3 concise reasons why this matches the user's mood ${momentLabel}"],
     "whereToWatch": {
       "status": "unverified",
       "primary": "Availability not verified",
@@ -324,7 +364,7 @@ ${detectedLanguage
 Constraints:
 - Hard boundaries are trust contracts. Avoidances, already-seen titles, explicit language/culture requests, subscription-only scope, and time limits outrank Taste Risk, novelty, hidden-gem intent, and cinematic quality. "Unhinged" means unusual inside the boundaries, not boundary-breaking.
 - Confidence score definition: 90–100 = you are certain this matches the emotional job and would surprise no one who knows the user's request. 75–89 = strong match with one or two small question marks. 60–74 = reasonable match but a clear compromise somewhere. Below 60 = do not include this pick; find a better one. Do not inflate confidence to seem authoritative.
-- Regret minimization: before finalising a pick, run this silent check — "Would this person, after watching, feel this was the right choice for tonight?" A technically good film that mismatches tonight's energy creates regret. A B+ film that perfectly matches tonight's need creates satisfaction. Optimise for the latter.
+- Regret minimization: before finalising a pick, run this silent check — "Would this person, after watching, feel this was the right choice for ${momentLabel}?" A technically good film that mismatches the user's current energy creates regret. A B+ film that perfectly matches their need creates satisfaction. Optimise for the latter.
 - Peak-end rule: people remember how a film/series made them feel at its peak moment and at the end — not the average. For tired, low-energy, or emotionally depleted users, prioritise picks with emotionally satisfying or resolving endings. Avoid tonally ambiguous, punishing, or unresolved endings for these users unless Bold/Unhinged is selected.
 - Use the time context to calibrate the pick's energy: late night → introspective, slow, hypnotic; morning → lighter, focused; weekend evening → immersive, cinematic; weekday evening → something that earns its length or is concise. Do not state the time in your output — just let it influence the pick.
 - The Taste Risk level above is the primary dial for how mainstream vs. extreme to go after hard boundaries are satisfied. Follow it strictly within those boundaries.

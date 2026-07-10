@@ -95,6 +95,7 @@ export type Recommendation = {
   contentMetadata?: {
     originalLanguage?: string;
     originCountry?: string[];
+    genreIds?: number[];
   };
 };
 

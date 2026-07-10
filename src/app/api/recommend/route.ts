@@ -1,10 +1,40 @@
 import { NextResponse } from "next/server";
 import { filterFalsePositiveRecommendations, localFallback } from "@/lib/fallbacks";
-import { recommendWithAnthropic, recommendWithOpenAI } from "@/lib/llm";
+import { recommendWithAnthropic, recommendWithGenericLLM, recommendWithOpenAI } from "@/lib/llm";
 import { enrichRecommendation } from "@/lib/metadata";
 import { buildRecommendationPrompt } from "@/lib/prompt";
 import { applyTrustFilter, rejectionPrompt, safeFallback, TrustRejection } from "@/lib/recommendation-trust";
 import { RawRecommendation, RecommendRequest, Recommendation } from "@/lib/types";
+
+// TMDB genre IDs that map to user avoidances.
+// Only genres with clear, unambiguous mapping are included — Action (28) is too broad.
+const AVOIDANCE_GENRE_MAP: Record<string, number[]> = {
+  horror: [27],
+  gore: [27],
+};
+
+// Text keywords used as a secondary safety net when TMDB has no genre data.
+// Deliberately narrow — only flag obvious matches, not borderline ones.
+const AVOIDANCE_SUSPICION_KEYWORDS: Record<string, string[]> = {
+  horror: ["horror", "haunted", "ghost", "demon", "slasher", "zombie", "terrifying", "supernatural horror"],
+  gore: ["gore", "gory", "torture", "visceral", "graphic violence", "brutal killing"],
+};
+
+function genreViolatesAvoidance(avoids: string[], genreIds: number[]): boolean {
+  if (!genreIds.length || !avoids.length) return false;
+  return avoids.some((avoid) => {
+    const mapped = AVOIDANCE_GENRE_MAP[avoid.toLowerCase().trim()];
+    return mapped ? mapped.some((id) => genreIds.includes(id)) : false;
+  });
+}
+
+function textSuggestsAvoidance(avoids: string[], rec: Recommendation): boolean {
+  const text = [rec.title, rec.vibe, rec.oneLine].filter(Boolean).join(" ").toLowerCase();
+  return avoids.some((avoid) => {
+    const keywords = AVOIDANCE_SUSPICION_KEYWORDS[avoid.toLowerCase().trim()] ?? [];
+    return keywords.some((keyword) => text.includes(keyword));
+  });
+}
 
 function hasSubscriptionProvider(recommendation: Recommendation): boolean {
   return recommendation.whereToWatch.status === "verified" &&
@@ -66,26 +96,32 @@ function llmTemperature(input: RecommendRequest): number {
   return input.craziness === 3 ? 1 : 0.85;
 }
 
-// Anthropic is preferred for recommendation quality and to avoid recent OpenAI timeout
-// loops. OpenAI remains a fallback, then local curated fallback as the last resort.
+// Provider chain: Anthropic → generic OpenAI-compatible (Groq/Mistral/Ollama/etc.) → OpenAI → local fallback.
+// Each provider is tried only when its required env vars are set.
 async function getRecommendations(input: RecommendRequest, prompt: string): Promise<RawRecommendation[]> {
   const temperature = llmTemperature(input);
-  const hasOpenAI = Boolean(process.env.OPENAI_API_KEY);
-  const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY);
 
-  if (hasAnthropic) {
+  if (process.env.ANTHROPIC_API_KEY) {
     try {
       return await recommendWithAnthropic(prompt, temperature);
     } catch (error) {
-      console.warn("Anthropic failed, trying OpenAI:", error instanceof Error ? error.message : String(error));
+      console.warn("Anthropic failed:", error instanceof Error ? error.message : String(error));
     }
   }
 
-  if (hasOpenAI) {
+  if (process.env.LLM_BASE_URL && process.env.LLM_API_KEY && process.env.LLM_MODEL) {
+    try {
+      return await recommendWithGenericLLM(prompt, temperature);
+    } catch (error) {
+      console.warn("Generic LLM failed:", error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (process.env.OPENAI_API_KEY) {
     try {
       return await recommendWithOpenAI(prompt, temperature);
     } catch (error) {
-      console.warn("OpenAI failed, using local fallback:", error instanceof Error ? error.message : String(error));
+      console.warn("OpenAI failed:", error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -186,6 +222,29 @@ export async function POST(req: Request) {
     let enrichedBatch = input.platformFilter === "mine"
       ? await verifiedSubscriptionBatch(normalizedBatch, input, country)
       : await enrichBatch(normalizedBatch, country, platforms);
+
+    // Three-bucket genre gate:
+    //   verifiedClean  — TMDB returned genre data AND no avoidance violation → serve first
+    //   textSafeUnknown — TMDB had no genre data AND title/vibe text isn't suspicious → serve if no verifiedClean
+    //   everything else  — confirmed violation OR suspicious text without genre data → fail closed
+    const avoids = input.avoids ?? [];
+    if (avoids.length > 0) {
+      const withGenreData = enrichedBatch.filter((rec) => (rec.contentMetadata?.genreIds?.length ?? 0) > 0);
+      const withoutGenreData = enrichedBatch.filter((rec) => (rec.contentMetadata?.genreIds?.length ?? 0) === 0);
+      const verifiedClean = withGenreData.filter((rec) => !genreViolatesAvoidance(avoids, rec.contentMetadata!.genreIds!));
+      const textSafeUnknown = withoutGenreData.filter((rec) => !textSuggestsAvoidance(avoids, rec));
+
+      if (verifiedClean.length > 0) {
+        enrichedBatch = verifiedClean;
+      } else if (textSafeUnknown.length > 0) {
+        enrichedBatch = textSafeUnknown;
+      } else {
+        // All picks are either confirmed genre violations or text-suspicious with no genre data.
+        const fallbackRaw = safeFallback(input);
+        const fallback = await enrichRecommendation(fallbackRaw, country, platforms);
+        enrichedBatch = [hasSubscriptionProvider(fallback) ? fallback : unavailableSubscriptionFallback(fallback, country)];
+      }
+    }
 
     const languageMatchedBatch = enrichedBatch.filter((recommendation) => matchesLanguageRequest(input, recommendation));
     if (languageMatchedBatch.length > 0) {

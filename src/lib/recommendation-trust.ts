@@ -191,10 +191,25 @@ export function applyTrustFilter<T extends RawRecommendation | Recommendation>(
 
 export function rejectionPrompt(rejections: TrustRejection[]): string {
   if (!rejections.length) return "";
-  return `\n\nBackend trust filter rejected these candidates. These are hard-boundary failures, not taste suggestions. Do not repeat them, do not recommend adjacent titles with the same issue, and fix the listed issues:\n${rejections
-    .slice(0, 8)
-    .map((item) => `- ${item.title}: ${item.reasons.join("; ")}`)
-    .join("\n")}\nReturn three different valid candidates that preserve the emotional job while staying inside the boundaries.`;
+
+  const avoidanceViolations = rejections.flatMap((r) => r.reasons.filter((reason) => reason.startsWith("avoidance:")));
+  const memoryViolations = rejections.flatMap((r) => r.reasons.filter((reason) => reason.startsWith("memory:")));
+  const runtimeViolations = rejections.flatMap((r) => r.reasons.filter((reason) => reason.startsWith("time:")));
+
+  const avoidanceNote = avoidanceViolations.length
+    ? `\n⛔ Avoidance violations found: ${[...new Set(avoidanceViolations)].join(", ")}. Do NOT recommend anything in these categories or adjacent genres — this is absolute regardless of Taste Risk or craziness level.`
+    : "";
+  const memoryNote = memoryViolations.length
+    ? `\n⛔ Memory violations: titles already seen or recently recommended. Pick something the user has not encountered before.`
+    : "";
+  const runtimeNote = runtimeViolations.length
+    ? `\n⛔ Runtime violations: ${[...new Set(runtimeViolations)].join(", ")}. Stay within the user's stated time preference.`
+    : "";
+
+  return `\n\nBackend trust filter REJECTED the previous candidates. These are hard-boundary failures — not preference suggestions. Do not repeat any rejected title, do not pick thematically adjacent titles that would hit the same boundary:
+${rejections.slice(0, 8).map((item) => `- "${item.title}" rejected: ${item.reasons.join("; ")}`).join("\n")}
+${avoidanceNote}${memoryNote}${runtimeNote}
+Return three completely different valid candidates that preserve the emotional job while staying strictly inside all boundaries.`;
 }
 
 export function safeFallback(input: RecommendRequest): RawRecommendation {
