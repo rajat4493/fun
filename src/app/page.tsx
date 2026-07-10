@@ -250,13 +250,13 @@ function ChoiceButton({ option, active, onClick }: { option: Option; active: boo
     <button
       type="button"
       onClick={onClick}
-      className={`flex min-h-14 min-w-0 items-center justify-center gap-3 rounded-xl border px-3 py-3 text-sm transition ${
+      className={`flex min-h-14 min-w-0 items-center justify-center gap-3 rounded-xl border px-3 py-3 text-sm transition-all duration-150 ${
         active
-          ? "border-red-400/70 bg-red-500/12 text-white shadow-[0_0_30px_rgba(239,68,68,0.18)]"
+          ? "border-red-400 bg-red-950/55 text-white shadow-[0_0_6px_rgba(248,113,113,0.8),0_0_18px_rgba(239,68,68,0.5),0_0_40px_rgba(239,68,68,0.2)]"
           : "border-white/12 bg-white/[0.045] text-white/72 hover:border-white/24 hover:text-white"
       }`}
     >
-      <Icon size={19} className={active ? "text-red-200" : "text-white/60"} />
+      <Icon size={19} className={active ? "text-red-300" : "text-white/60"} />
       <span className="min-w-0 leading-5">{option.label}</span>
     </button>
   );
@@ -330,9 +330,9 @@ export default function Home() {
   const [onboarding, setOnboarding] = useState<OnboardingData | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [inputMode, setInputMode] = useState<"choose" | "describe">("choose");
-  const [selectedMoods, setSelectedMoods] = useState(["tired"]);
-  const [selectedAvoids, setSelectedAvoids] = useState(["violence"]);
-  const [selectedWants, setSelectedWants] = useState(["emotional"]);
+  const [selectedMoods, setSelectedMoods] = useState<string[]>([]);
+  const [selectedAvoids, setSelectedAvoids] = useState<string[]>([]);
+  const [selectedWants, setSelectedWants] = useState<string[]>([]);
   const [time, setTime] = useState("90 min");
   const [energy, setEnergy] = useState("Low");
   const [viewingContext, setViewingContext] = useState("Alone");
