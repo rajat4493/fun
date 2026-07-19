@@ -55,7 +55,7 @@ import {
   rememberRecommendationTitles,
   savePostWatchFeedback,
 } from "@/lib/recommendation-session";
-import { CrazinessLevel, RecommendRequest, Recommendation } from "@/lib/types";
+import { CrazinessLevel, RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
 
 type Option = {
   label: string;
@@ -510,11 +510,11 @@ export default function Home() {
         signal: controller.signal,
       });
       if (!response.ok) throw new Error("Could not generate a pick.");
-      const data = await response.json() as Recommendation & { _batch?: Recommendation[] };
+      const data = await response.json() as Recommendation & { _batch?: Recommendation[]; _trust?: { displayState?: RecommendationDisplayState } };
       const batch = data._batch ?? [data];
       rememberRecommendationTitles(batch.map((item) => item.title));
       rememberRecommendationHistory(batch, requestInput);
-      localStorage.setItem(recommendationStorageKey, JSON.stringify(createRecommendationSession(batch[0], requestInput, batch)));
+      localStorage.setItem(recommendationStorageKey, JSON.stringify(createRecommendationSession(batch[0], requestInput, batch, data._trust?.displayState)));
       captureEvent("recommendation", {
         title: batch[0].title,
         year: batch[0].year,

@@ -74,6 +74,126 @@ function buildSignalPriorityProtocol(input: RecommendRequest) {
   8. Platform availability filters the answer after taste match, not before.`;
 }
 
+function situationSource(input: RecommendRequest): string {
+  return [
+    input.selfText,
+    input.reference,
+    input.mood?.join(" "),
+    input.wants?.join(" "),
+    input.avoids?.join(" "),
+    input.time,
+    input.energy,
+    input.viewingContext,
+    input.contextHint,
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function buildSituationClause(input: RecommendRequest): string {
+  const text = situationSource(input);
+  const clauses: string[] = [];
+
+  if (/\b(journey|travel|travelling|traveling|train|flight|plane|airport|bus|cab|taxi|uber|commute|road trip|on the way|in transit)\b/i.test(text)) {
+    clauses.push("In-transit viewing detected: favor interruption-tolerant, easy re-entry stories that work on a smaller screen. Prefer clear momentum, strong premise, and moderate runtime. Avoid subtitle-heavy visual slow burns, films that require perfect silence, or dense plots where missing two minutes ruins the experience.");
+  }
+
+  if (/\b(lunch break|work break|at work|office break|between meetings|quick break)\b/i.test(text)) {
+    clauses.push("Work-break viewing detected: treat time and social safety as hard practical constraints. Favor short episodes, cleanly contained films, or low-awkwardness comedy/drama. Avoid sexually awkward, graphically violent, or emotionally wrecking picks.");
+  }
+
+  if (/\b(before (a |an |the )?(meeting|interview|exam|presentation|call)|calm down|need to calm|anxious before)\b/i.test(text)) {
+    clauses.push("Pre-event calming detected: the pick should regulate the viewer, not spike adrenaline. Favor soothing structure, warmth, gentle humor, or focused beauty. Avoid cliffhangers, frantic pacing, dread, and unresolved endings.");
+  }
+
+  if (/\b(waiting|delayed|delay|waiting room|station|gate|layover|queue)\b/i.test(text)) {
+    clauses.push("Waiting-time viewing detected: the session length may be uncertain. Favor absorbing but interruptible stories with quick hooks. Avoid very slow setup, emotionally punishing arcs, or films that only pay off after a long final act.");
+  }
+
+  if (/\b(date night|date-night|with my date|romantic night|watching with (my )?(partner|boyfriend|girlfriend|wife|husband))\b/i.test(text)) {
+    clauses.push("Date-night viewing detected: favor shared chemistry, emotional readability, conversational aftertaste, and endings that do not sour the room. If the user asks for romance or funny, avoid bleak endings and awkwardly explicit content unless explicitly requested.");
+  }
+
+  if (/\b(parents|parent|family|with family|mom|mum|mother|dad|father|in-laws|kids|children)\b/i.test(text)) {
+    clauses.push("Family/parents viewing detected: prioritize cross-generational comfort and avoid awkward sexual content, graphic violence, excessive profanity, or nihilistic heaviness unless explicitly requested. The pick should feel safe to watch in a shared living room.");
+  }
+
+  if (/\b(before bed|bedtime|late night|can't sleep|cant sleep|insomnia|lonely before bed|sleepy)\b/i.test(text)) {
+    clauses.push("Bedtime/late-night viewing detected: favor emotionally settling, intimate, or hypnotic picks with low start-up friction. Avoid noisy chaos, punishing endings, or anything likely to leave the viewer agitated unless Bold/Unhinged is explicitly selected.");
+  }
+
+  if (/\b(with friends|friends over|group watch|movie night|party|hangout|hanging out)\b/i.test(text)) {
+    clauses.push("Group/friends viewing detected: favor social energy, quotable moments, fast hooks, and shared reactions. Avoid quiet internal character studies or films that need total silence to work.");
+  }
+
+  if (!clauses.length) return "";
+
+  return `\n  - Situation context from free text: ${clauses.join(" ")} Why-it-fits reasons must reference this situation when it is central to the request.`;
+}
+
+function hasNegated(text: string, pattern: RegExp): boolean {
+  return /\b(no|not|avoid|without|don't want|do not want|less|skip|hate)\b/i.test(text) && pattern.test(text);
+}
+
+function buildAvoidanceTiers(input: RecommendRequest, userContext: string) {
+  const text = userContext.toLowerCase();
+  const hard = new Set<string>();
+  const soft = new Set<string>();
+
+  for (const avoid of input.avoids ?? []) {
+    const value = avoid.toLowerCase().trim();
+    if (/\bgore|gory|blood\b/.test(value)) hard.add("gore");
+    else if (/\bhorror|scary\b/.test(value)) hard.add("horror");
+    else if (/\bviolence|violent\b/.test(value)) hard.add("violence");
+    else if (/\bslow|slow burn|slow-burn\b/.test(value)) soft.add("slow pacing");
+    else if (/\bheavy drama|heavy\b/.test(value)) soft.add("heavy drama");
+    else if (/\bsad ending|tragic ending|sad\b/.test(value)) soft.add("sad ending");
+    else hard.add(avoid);
+  }
+
+  if (hasNegated(text, /\bgore|gory|blood|bloody|splatter|body horror\b/i)) hard.add("gore");
+  if (hasNegated(text, /\bviolence|violent|brutal|graphic violence\b/i)) hard.add("violence");
+  if (hasNegated(text, /\bhorror|scary|ghost|haunted|supernatural\b/i)) hard.add("horror");
+  if (hasNegated(text, /\bsex|sexual|nudity|erotic|explicit|raunchy|awkward sexual content\b/i)) hard.add("explicit sexual content");
+  if (/\b(family safe|family-safe|with family|with parents|parents|kids|children|work safe|work-safe|at work|office)\b/i.test(text)) {
+    hard.add("explicit sexual content");
+    hard.add("graphic violence");
+    hard.add("gore");
+    hard.add("horror");
+  }
+
+  if (hasNegated(text, /\bheavy drama|heavy|trauma|depressing|bleak\b/i)) soft.add("heavy drama");
+  if (hasNegated(text, /\bsad ending|tragic ending|sad\b/i)) soft.add("sad ending");
+  if (hasNegated(text, /\bslow|slow burn|slow-burn\b/i)) soft.add("slow pacing");
+
+  return { hard: [...hard], soft: [...soft] };
+}
+
+function buildPracticalConstraints(input: RecommendRequest, userContext: string): string[] {
+  const constraints: string[] = [];
+  const text = userContext.toLowerCase();
+  const minuteLimit = text.match(/\b(?:under|less than|within|up to|max(?:imum)?|no more than)\s+(\d{1,3})\s*(?:min|mins|minutes)\b/);
+  const plainMinutes = text.match(/\b(\d{1,3})\s*(?:min|mins|minutes)\b/);
+
+  if (/\b(one|1)\s+episode\b|\ban episode\b/i.test(text) || input.time?.toLowerCase().includes("one episode")) {
+    constraints.push("Format/time: recommend one episode, not a full film, unless the user explicitly asks for a movie.");
+  }
+
+  const limit = minuteLimit ? Number(minuteLimit[1]) : plainMinutes ? Number(plainMinutes[1]) : null;
+  if (limit && limit >= 10 && limit <= 240) {
+    constraints.push(`Runtime: stay within ${limit} minutes.`);
+  } else if (/\b(?:under|less than|within|up to|max(?:imum)?|no more than)\s+(?:two|2)\s+hours?\b/i.test(text) || input.time?.toLowerCase().includes("under 2")) {
+    constraints.push("Runtime: stay under two hours.");
+  }
+
+  if (/\b(family safe|family-safe|with family|with parents|parents|kids|children)\b/i.test(text)) {
+    constraints.push("Content safety: suitable for family/parents; avoid explicit sex, graphic violence, horror, and awkward adult content.");
+  }
+  if (/\b(work safe|work-safe|at work|office|lunch break|between meetings)\b/i.test(text)) {
+    constraints.push("Content safety: work-safe; avoid explicit sex, graphic violence, and socially awkward material.");
+  }
+
+  return constraints;
+}
+
 // NEW: Time/day context was always passed but never instructed. Added explicit energy-to-complexity
 // mapping (zero brain → no exposition dumps) and viewing context psychology (partner → shared arcs,
 // friends → group-reactive, alone → introspective territory OK).
@@ -97,6 +217,7 @@ function buildContextAmplifier(input: RecommendRequest) {
   const viewingContextClause = input.viewingContext
     ? `\n  - Viewing context (${input.viewingContext}): ${contextMap[input.viewingContext.toLowerCase()] ?? "Calibrate social dynamics of the pick to match the stated viewing context."}`
     : "";
+  const situationClause = buildSituationClause(input);
 
   return `
 - Context amplifier:
@@ -105,7 +226,7 @@ function buildContextAmplifier(input: RecommendRequest) {
   - Friday/weekend evening + happy: celebratory, kinetic, social, or deliciously entertaining; avoid overly introspective picks.
   - Late night + anxious/lonely: either controlled catharsis or beautiful alienation; avoid loud crowd-pleasers unless the user asks for escape.
   - Morning/afternoon: cleaner energy, more focused, less punishing.
-  - Winter/autumn context can support cozy, gothic, reflective, or nocturnal choices; summer/spring can support kinetic, sensual, open-air, or lighter picks.${energyClause}${viewingContextClause}`;
+  - Winter/autumn context can support cozy, gothic, reflective, or nocturnal choices; summer/spring can support kinetic, sensual, open-air, or lighter picks.${energyClause}${viewingContextClause}${situationClause}`;
 }
 
 // UPDATED: Added good-not-perfect (emotional register slightly off → adjust precision)
@@ -163,7 +284,7 @@ function timeLabel(contextHint?: string): string {
   return "right now";
 }
 
-export function buildRecommendationPrompt(input: RecommendRequest) {
+export function buildRecommendationPrompt(input: RecommendRequest, options?: { strictSubscription?: boolean }) {
   const momentLabel = timeLabel(input.contextHint);
   const userContext = input.mode === "self"
     ? input.selfText || "The user gave no extra context."
@@ -183,6 +304,8 @@ export function buildRecommendationPrompt(input: RecommendRequest) {
   const mineMode = input.platformFilter === "mine";
   const indieMode = input.discoveryMode === "indie";
   const detectedLanguage = detectRequestedLanguage(userContext);
+  const avoidanceTiers = buildAvoidanceTiers(input, userContext);
+  const practicalConstraints = buildPracticalConstraints(input, userContext);
 
   const seenClause = input.seenTitles?.length
     ? `\n- Already seen (do NOT recommend): ${input.seenTitles.join(", ")}`
@@ -255,7 +378,9 @@ export function buildRecommendationPrompt(input: RecommendRequest) {
   const crazinessClause = `\n- Taste Risk (${["Safe", "Curious", "Bold", "Unhinged"][crazinessLevel]}): ${CRAZINESS_PHILOSOPHY[crazinessLevel]}`;
 
   const scopeClause = mineMode
-    ? `\n- Scope (streaming filter only): User wants picks available on ${platforms}. CRITICAL: Honor the user's language, genre, culture, and mood request exactly — if they ask for Hindi comedy, pick Hindi comedies; if they ask for French thriller, pick French thrillers. Major platforms carry vast international and non-English catalogues. The filter changes WHERE it streams, NOT what language or genre you pick. Only avoid titles that are exclusively on niche services (Mubi, Criterion Channel, BFI Player) or completely unavailable on mainstream platforms. Find the best match for the request that also lives on ${platforms}.`
+    ? options?.strictSubscription
+      ? `\n- ⚠️ STRICT SUBSCRIPTION RETRY: Your previous picks could not be verified on ${platforms} in ${country}. This is your second and final attempt. You MUST only recommend titles you are highly confident currently appear on ${platforms} in ${country}. If you are uncertain whether a title is on these platforms, do not choose it — pick your next-best option that you can be confident about. Setting a lower confidence score (70–80) is fine — honesty is better than a guess. Do NOT pick titles that are typically exclusive to other platforms, only available to buy/rent, or festival-only.`
+      : `\n- Scope (streaming filter only): User wants picks available on ${platforms}. CRITICAL: Honor the user's language, genre, culture, and mood request exactly — if they ask for Hindi comedy, pick Hindi comedies; if they ask for French thriller, pick French thrillers. Major platforms carry vast international and non-English catalogues. The filter changes WHERE it streams, NOT what language or genre you pick. Only avoid titles that are exclusively on niche services (Mubi, Criterion Channel, BFI Player) or completely unavailable on mainstream platforms. Find the best match for the request that also lives on ${platforms}.`
     : "";
 
   const hiddenLayerInstruction = mineMode
@@ -267,14 +392,17 @@ export function buildRecommendationPrompt(input: RecommendRequest) {
   // Hard constraint block — placed before personality/craziness so the LLM reads
   // the non-negotiables first. LLMs weight earlier context more heavily.
   const hardConstraintLines: string[] = [];
-  if (input.avoids?.length) {
-    hardConstraintLines.push(`❌ NEVER recommend content with or containing: ${input.avoids.join(", ")}. Taste Risk, craziness level, or mood signals do NOT override this. If the only strong match violates an avoidance, pick the next best option that stays clean.`);
+  if (avoidanceTiers.hard.length) {
+    hardConstraintLines.push(`❌ Hard content gates — NEVER recommend content with or containing: ${avoidanceTiers.hard.join(", ")}. Taste Risk, craziness level, mood signals, novelty, and cinematic quality do NOT override these.`);
   }
   if (input.seenTitles?.length) {
     hardConstraintLines.push(`❌ Already seen — exclude entirely: ${input.seenTitles.slice(0, 12).join(", ")}`);
   }
   if (input.recentTitles?.length) {
     hardConstraintLines.push(`❌ Recently recommended — do not repeat: ${input.recentTitles.slice(0, 8).join(", ")}`);
+  }
+  for (const constraint of practicalConstraints) {
+    hardConstraintLines.push(`❌ ${constraint}`);
   }
   const hardConstraintBlock = hardConstraintLines.length ? `
 
@@ -283,6 +411,9 @@ HARD CONSTRAINTS — APPLY BEFORE ANYTHING ELSE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ${hardConstraintLines.join("\n")}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━` : "";
+  const softMoodDirectionClause = avoidanceTiers.soft.length
+    ? `\n- Soft mood directions: User wants less ${avoidanceTiers.soft.join(", ")}. Treat these as tone/pacing guidance, not automatic title bans. Prefer lighter, cleaner, more resolving picks, but do not reject a brilliant match for having trace amounts unless it would clearly ruin the user's stated situation.`
+    : "";
 
   const tasteRiskHeader = crazinessLevel >= 2 ? `
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -316,7 +447,7 @@ User context:
 - Time context: ${input.contextHint ?? "not provided"}
 - Energy level: ${input.energy ?? "not provided"}
 - Viewing context: ${input.viewingContext ?? "not provided"}
-- Mood/request: ${userContext}${seenClause}${recentClause}${hiddenGemClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${crazinessClause}${feedbackRepairClause}${emotionalJobProtocol}${signalPriorityProtocol}${contextAmplifier}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
+- Mood/request: ${userContext}${seenClause}${recentClause}${hiddenGemClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${crazinessClause}${softMoodDirectionClause}${feedbackRepairClause}${emotionalJobProtocol}${signalPriorityProtocol}${contextAmplifier}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
 - Discovery mode: ${indieMode ? "Indie / hidden cinema" : "Standard"}${indieClause}
 
 Return an array of exactly THREE JSON objects (not a wrapper object) with this schema, no markdown:
@@ -362,13 +493,13 @@ ${detectedLanguage
   : `The 3 recommendations should offer variety: if pick 1 is a film, pick 2 could be a series; if pick 1 is recent, pick 2 could be classic; if pick 1 is international, pick 2 could be American. Give the user choices while all matching their mood.`}
 
 Constraints:
-- Hard boundaries are trust contracts. Avoidances, already-seen titles, explicit language/culture requests, subscription-only scope, and time limits outrank Taste Risk, novelty, hidden-gem intent, and cinematic quality. "Unhinged" means unusual inside the boundaries, not boundary-breaking.
+- Hard boundaries are trust contracts. Hard content gates, already-seen titles, explicit language/culture requests, subscription-only scope, and time/format/content-safety constraints outrank Taste Risk, novelty, hidden-gem intent, and cinematic quality. "Unhinged" means unusual inside the boundaries, not boundary-breaking.
 - Confidence score definition: 90–100 = you are certain this matches the emotional job and would surprise no one who knows the user's request. 75–89 = strong match with one or two small question marks. 60–74 = reasonable match but a clear compromise somewhere. Below 60 = do not include this pick; find a better one. Do not inflate confidence to seem authoritative.
 - Regret minimization: before finalising a pick, run this silent check — "Would this person, after watching, feel this was the right choice for ${momentLabel}?" A technically good film that mismatches the user's current energy creates regret. A B+ film that perfectly matches their need creates satisfaction. Optimise for the latter.
 - Peak-end rule: people remember how a film/series made them feel at its peak moment and at the end — not the average. For tired, low-energy, or emotionally depleted users, prioritise picks with emotionally satisfying or resolving endings. Avoid tonally ambiguous, punishing, or unresolved endings for these users unless Bold/Unhinged is selected.
 - Use the time context to calibrate the pick's energy: late night → introspective, slow, hypnotic; morning → lighter, focused; weekend evening → immersive, cinematic; weekday evening → something that earns its length or is concise. Do not state the time in your output — just let it influence the pick.
 - The Taste Risk level above is the primary dial for how mainstream vs. extreme to go after hard boundaries are satisfied. Follow it strictly within those boundaries.
-- Strictly obey avoidance preferences only when they are in "I do not want" / avoids or phrased as no/avoid/without. If the user simply asks for "gore", "gory", "bloody", "splatter", or "body horror", treat that as a positive request for intense horror.
+- Strictly obey hard content avoidances only when they are in "I do not want" / avoids or phrased as no/avoid/without. Soft mood directions like less slow, less heavy, or no sad ending should guide tone unless the user's situation makes them practically hard. If the user simply asks for "gore", "gory", "bloody", "splatter", or "body horror", treat that as a positive request for intense horror.
 - Strictly obey explicit language/culture requests. If the user asks for Hindi, the main pick and nearby alternatives should be Hindi or strongly Hindi-market Indian titles unless the user asks otherwise.
 - Use the language preference as the default content lane when the user's request is broad. If the user selected Hindi and asks for "a hidden gem thriller", recommend a Hindi or strongly Hindi-market Indian thriller, not a global English/Spanish title. If the user explicitly asks for a different language, culture, or country, follow the explicit request instead.
 - If the user wants romantic/sexy, recommend sensual mainstream adult-themed content, never pornographic.

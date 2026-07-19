@@ -35,20 +35,35 @@ function requestHasNegated(input: RecommendRequest, pattern: RegExp): boolean {
   return negation.test(text) && pattern.test(text);
 }
 
-function activeAvoids(input: RecommendRequest): Set<string> {
-  const avoids = new Set((input.avoids ?? []).map((avoid) => avoid.toLowerCase().trim()));
+function wantsFamilySafe(input: RecommendRequest): boolean {
+  const text = [requestText(input), input.viewingContext, input.contextHint].filter(Boolean).join(" ");
+  return /\b(family safe|family-safe|family|with family|with parents|parents|kids|children|work safe|work-safe|at work|office)\b/i.test(text);
+}
+
+function activeHardAvoids(input: RecommendRequest): Set<string> {
+  const avoids = new Set<string>();
+  for (const avoid of input.avoids ?? []) {
+    const value = avoid.toLowerCase().trim();
+    if (/\bgore|gory|blood\b/.test(value)) avoids.add("gore");
+    if (/\bhorror|scary\b/.test(value)) avoids.add("horror");
+    if (/\bviolence|violent\b/.test(value)) avoids.add("violence");
+  }
   if (requestHasNegated(input, /\bgore|gory|blood|bloody|splatter|body horror\b/i)) avoids.add("gore");
   if (requestHasNegated(input, /\bviolence|violent|brutal|action\b/i)) avoids.add("violence");
   if (requestHasNegated(input, /\bhorror|scary|ghost|haunted|supernatural\b/i)) avoids.add("horror");
-  if (requestHasNegated(input, /\bheavy drama|heavy|drama|trauma|depressing|bleak\b/i)) avoids.add("heavy drama");
-  if (requestHasNegated(input, /\bsad ending|tragic ending|sad\b/i)) avoids.add("sad ending");
-  if (requestHasNegated(input, /\bslow|slow burn|slow-burn\b/i)) avoids.add("slow");
+  if (requestHasNegated(input, /\bsex|sexual|nudity|erotic|explicit|raunchy|awkward sexual content\b/i)) avoids.add("sex");
+  if (wantsFamilySafe(input)) {
+    avoids.add("sex");
+    avoids.add("gore");
+    avoids.add("horror");
+    avoids.add("graphic violence");
+  }
   return avoids;
 }
 
 function explicitlyWantsIntensity(input: RecommendRequest): boolean {
   const text = requestText(input);
-  const avoids = activeAvoids(input);
+  const avoids = activeHardAvoids(input);
   if (avoids.has("gore") || avoids.has("violence") || avoids.has("horror")) return false;
   return /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror|brutal horror|horror)\b/i.test(text);
 }
@@ -78,9 +93,8 @@ const knownHorrorOrGoreTitles = new Set([
 const goreTerms = /\b(gore|gory|bloody|blood-soaked|blood soaked|splatter|body horror|visceral violence|graphic violence|mutilation|dismember|cannibal|extreme horror|brutal horror|torture)\b/i;
 const horrorTerms = /\b(horror|scary|haunted|ghost|possession|demonic|supernatural terror|slasher|zombie|evil dead|nightmare|occult|creature feature)\b/i;
 const violenceTerms = /\b(violent|violence|brutal|brutality|blood|killer|serial killer|murder|revenge|war|combat|massacre|assassin|gangster|crime thriller|survival horror|torture)\b/i;
-const heavyDramaTerms = /\b(heavy drama|devastating|harrowing|bleak|trauma|traumatic|abuse|grief|suicide|terminal|war|genocide|true crime|moral punishment|emotionally punishing|depressing)\b/i;
-const sadEndingTerms = /\b(sad ending|tragic ending|devastating ending|bleak ending|heartbreaking|tragedy|tragic|grief)\b/i;
-const slowTerms = /\b(slow|slow-burn|slow burn|meditative|contemplative|glacial|minimalist|patient pacing|hypnotic)\b/i;
+const graphicViolenceTerms = /\b(graphic violence|visceral violence|brutal killing|mutilation|dismember|massacre|torture|blood-soaked|blood soaked|extreme horror|brutal horror)\b/i;
+const sexualTerms = /\b(explicit sex|sexual content|sex scene|sex scenes|nudity|nude|erotic|raunchy|pornographic|awkward sexual content)\b/i;
 const weirdTerms = /\b(weird|strange|unusual|offbeat|quirky|absurd|surreal|experimental|cult|wildly inventive|formally strange|bizarre|odd|unhinged)\b/i;
 const funnyTerms = /\b(funny|comedy|comic|witty|satire|satirical|slapstick|banter|absurd|laugh|playful|farce)\b/i;
 
@@ -99,34 +113,43 @@ function isEpisodeRuntime(rec: RawRecommendation | Recommendation): boolean {
 }
 
 function runtimeViolation(input: RecommendRequest, rec: RawRecommendation | Recommendation): string | null {
+  const request = requestText(input).toLowerCase();
   const time = input.time?.toLowerCase();
-  if (!time || time === "no preference") return null;
-
   const minutes = parseRuntimeMinutes(rec.runtime);
-  if (time.includes("one episode")) {
+  if (time?.includes("one episode") || /\b(one|1)\s+episode\b|\ban episode\b/.test(request)) {
     return isEpisodeRuntime(rec) ? null : "time: requested one episode";
   }
   if (!minutes) return null;
+
+  const freeTextLimit = request.match(/\b(?:under|less than|within|up to|max(?:imum)?|no more than)\s+(\d{1,3})\s*(?:min|mins|minutes)\b/);
+  const plainMinuteNeed = request.match(/\b(\d{1,3})\s*(?:min|mins|minutes)\b/);
+  const requestedLimit = freeTextLimit ? Number(freeTextLimit[1]) : plainMinuteNeed ? Number(plainMinuteNeed[1]) : null;
+  if (requestedLimit && requestedLimit >= 10 && requestedLimit <= 240 && minutes > requestedLimit) {
+    return `time: ${minutes} min exceeds ${requestedLimit} min request`;
+  }
+  if (/\b(?:under|less than|within|up to|max(?:imum)?|no more than)\s+(?:two|2)\s+hours?\b/.test(request) && minutes > 120) {
+    return `time: ${minutes} min exceeds under 2 hours`;
+  }
+
+  if (!time || time === "no preference") return null;
   if (time.includes("90") && !isEpisodeRuntime(rec) && minutes > 110) return `time: ${minutes} min exceeds 90 min mood`;
   if (time.includes("under 2") && !isEpisodeRuntime(rec) && minutes > 120) return `time: ${minutes} min exceeds under 2 hours`;
   return null;
 }
 
 function avoidanceViolations(input: RecommendRequest, rec: RawRecommendation | Recommendation): string[] {
-  if (explicitlyWantsIntensity(input)) return [];
-  const avoids = activeAvoids(input);
+  const allowIntensity = explicitlyWantsIntensity(input);
+  const avoids = activeHardAvoids(input);
   const text = contentText(rec);
   const titleKey = normalize(rec.title);
   const reasons: string[] = [];
 
   const isKnownHorror = knownHorrorOrGoreTitles.has(titleKey);
-  if (avoids.has("gore") && (isKnownHorror || goreTerms.test(text))) reasons.push("avoidance: gore");
-  if (avoids.has("horror") && (isKnownHorror || horrorTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: horror");
-  if (avoids.has("violence") && (isKnownHorror || violenceTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: violence");
-  // Only check heavyDrama if user explicitly put it in avoids — the regex matches too many legitimate picks otherwise.
-  if (avoids.has("heavy drama") && (input.avoids ?? []).some((a) => /heavy.?drama|devastating|harrowing|depressing/i.test(a)) && heavyDramaTerms.test(text)) reasons.push("avoidance: heavy drama");
-  if (avoids.has("sad ending") && sadEndingTerms.test(text)) reasons.push("avoidance: sad ending");
-  if (avoids.has("slow") && slowTerms.test(text)) reasons.push("avoidance: slow");
+  if (!allowIntensity && avoids.has("gore") && (isKnownHorror || goreTerms.test(text))) reasons.push("avoidance: gore");
+  if (!allowIntensity && avoids.has("horror") && (isKnownHorror || horrorTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: horror");
+  if (!allowIntensity && avoids.has("violence") && (isKnownHorror || violenceTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: violence");
+  if (!allowIntensity && avoids.has("graphic violence") && (isKnownHorror || graphicViolenceTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: graphic violence");
+  if (avoids.has("sex") && sexualTerms.test(text)) reasons.push("avoidance: explicit sexual content");
 
   return [...new Set(reasons)];
 }

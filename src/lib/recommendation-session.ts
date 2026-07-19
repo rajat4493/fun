@@ -1,4 +1,4 @@
-import { RecommendRequest, Recommendation, RecommendationFeedbackContext, WatchProvider } from "@/lib/types";
+import { RecommendRequest, Recommendation, RecommendationDisplayState, RecommendationFeedbackContext, WatchProvider } from "@/lib/types";
 
 export const recommendationStorageKey = "fun:last-recommendation";
 export const seenTitlesKey = "fun:seen-titles";
@@ -268,8 +268,9 @@ export type RecommendationSession = {
   recommendation: Recommendation;
   request: RecommendRequest;
   generatedAt: string;
-  batch?: Recommendation[]; // Full batch of 3 recommendations
-  batchIndex?: number; // Current index in batch (0-2)
+  batch?: Recommendation[];
+  batchIndex?: number;
+  displayState?: RecommendationDisplayState; // from _trust.displayState on the API response
 };
 
 export const defaultRecommendation: Recommendation = {
@@ -302,6 +303,7 @@ export function createRecommendationSession(
   recommendation: Recommendation,
   request: RecommendRequest,
   batch?: Recommendation[],
+  displayState?: RecommendationDisplayState,
 ): RecommendationSession {
   return {
     recommendation,
@@ -309,6 +311,7 @@ export function createRecommendationSession(
     generatedAt: new Date().toISOString(),
     batch: batch ?? [recommendation],
     batchIndex: 0,
+    displayState,
   };
 }
 

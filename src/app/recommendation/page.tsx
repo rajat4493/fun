@@ -42,7 +42,7 @@ import {
   saveRecommendationFeedback,
   toTitleCase,
 } from "@/lib/recommendation-session";
-import { Recommendation, WatchProvider } from "@/lib/types";
+import { Recommendation, RecommendationDisplayState, WatchProvider } from "@/lib/types";
 
 const LOADING_KEY = "fun:loading";
 const LOADING_STARTED_KEY = "fun:loading-started-at";
@@ -222,6 +222,10 @@ function InfoPill({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
   );
 }
 
+function displayStateFor(session: RecommendationSession | null, pick: Recommendation): RecommendationDisplayState {
+  return session?.displayState ?? (pick.whereToWatch.status === "verified" ? "verified" : "unverified");
+}
+
 function titleSize(title: string) {
   const longest = Math.max(...title.split(/\s+/).map((word) => word.length));
   if (longest > 12 || title.length > 30) return "clamp(3.1rem,6.2vw,6.4rem)";
@@ -307,11 +311,11 @@ export default function RecommendationPage() {
       body: JSON.stringify(request),
     });
     if (!response.ok) throw new Error("failed");
-    const data = await response.json() as Recommendation & { _batch?: Recommendation[] };
+    const data = await response.json() as Recommendation & { _batch?: Recommendation[]; _trust?: { displayState?: RecommendationDisplayState } };
     const batch = data._batch ?? [data];
     rememberRecommendationTitles(batch.map((item) => item.title));
     rememberRecommendationHistory(batch, request);
-    const next = createRecommendationSession(batch[0], request, batch);
+    const next = createRecommendationSession(batch[0], request, batch, data._trust?.displayState);
     localStorage.setItem(recommendationStorageKey, JSON.stringify(next));
     setSession(next);
     setBatchIndex(0);
@@ -443,7 +447,42 @@ export default function RecommendationPage() {
     .filter((item): item is { provider: WatchProvider; href: string } => Boolean(item.href));
   const verified = pick.whereToWatch.status === "verified";
   const subscriptionOnly = session?.request.platformFilter === "mine";
-  const exhaustedSubscriptionBatch = subscriptionOnly && batch.length > 0 && batchIndex >= batch.length - 1;
+  const displayState = displayStateFor(session, pick);
+  const noSubscriptionMatch = displayState === "no-subscription-match";
+  const avoidanceFallback = displayState === "avoidance-fallback";
+  const exhaustedSubscriptionBatch = subscriptionOnly && !noSubscriptionMatch && batch.length > 0 && batchIndex >= batch.length - 1;
+  const stateCopy = noSubscriptionMatch
+    ? {
+        eyebrow: "My subscriptions · No verified match",
+        line: "No confident subscription match",
+        detail: "Search all cinema for the best mood match, or refine your selection.",
+        icon: Shield,
+        tone: "text-white/36",
+      }
+    : avoidanceFallback
+    ? {
+        eyebrow: "Safer close match",
+        line: "Avoidances protected",
+        detail: verified ? pick.whereToWatch.note : "Availability needs checking for your region.",
+        icon: Shield,
+        tone: "text-amber-200",
+      }
+    : displayState === "verified"
+    ? {
+        eyebrow: "Your one pick",
+        line: "Verified availability",
+        detail: pick.whereToWatch.note,
+        icon: BadgeCheck,
+        tone: "text-emerald-300",
+      }
+    : {
+        eyebrow: "Your one pick",
+        line: "Availability not verified",
+        detail: "Use watch options to confirm before watching.",
+        icon: Search,
+        tone: "text-white/38",
+      };
+  const StateIcon = stateCopy.icon;
   const primaryVibe = toTitleCase(pick.vibe.split(",")[0] || pick.format);
   const hiddenTitles = pick.hiddenLayer.titles ?? [];
   const similar = pick.alternatives.slice(0, 4).map((item, index) => {
@@ -533,166 +572,211 @@ export default function RecommendationPage() {
           </div>
         </header>
 
-        <section className="grid min-h-[620px] items-center gap-9 py-8 lg:grid-cols-[1.1fr_0.9fr]">
-          <div>
-            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-400/[0.07] px-3 py-1.5 text-sm text-amber-100">
-              <Sparkles size={15} />
-              Your one pick
-              <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-white/68">{batchIndex + 1} of {batch.length}</span>
+        {noSubscriptionMatch ? (
+          <section className="py-12">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.04] px-3 py-1.5 text-sm text-white/46">
+              <StateIcon size={15} className={stateCopy.tone} />
+              {stateCopy.eyebrow}
             </div>
-            <h1 className="font-serif font-normal leading-[0.88] tracking-normal text-white" style={{ fontSize: titleSize(pick.title) }}>
-              {pick.title}
+            <h1 className="font-serif text-4xl font-normal leading-tight text-white/90 sm:text-5xl">
+              No confident match<br />on your subscriptions.
             </h1>
-            <p className="mt-6 max-w-3xl text-2xl leading-9 text-white/78">{pick.oneLine}</p>
-            <div className="mt-7 flex flex-wrap gap-3">
-              <InfoPill icon={Calendar} label={pick.year} />
-              <InfoPill icon={Clock3} label={pick.runtime} />
-              <InfoPill icon={Heart} label={primaryVibe} />
-              <InfoPill icon={pick.format === "Series" || pick.format === "Episode" ? Monitor : Film} label={pick.format} />
-            </div>
-
-            <div className="mt-8 flex flex-wrap items-center gap-4">
-              <a
-                href={primaryAction.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => captureEvent("watch-click", { title: pick.title, label: primaryAction.label, href: primaryAction.href, verified: primaryAction.verified })}
-                className="inline-flex h-16 min-w-[280px] items-center justify-center gap-3 rounded-xl bg-gradient-to-b from-red-400 to-red-800 px-7 text-lg font-semibold text-white shadow-[0_18px_52px_rgba(127,29,29,0.44)] transition hover:brightness-110"
-              >
-                <Play size={20} fill="currentColor" /> {primaryAction.label}
-                {primaryAction.verified && <BadgeCheck size={18} />}
-              </a>
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setWatchOptionsOpen((open) => !open)}
-                  className="inline-flex h-16 min-w-[250px] items-center justify-center gap-3 rounded-xl border border-white/12 bg-white/[0.045] px-6 text-lg font-semibold text-white/72 transition hover:border-white/24 hover:text-white"
-                >
-                  <Search size={19} />
-                  More watch options
-                  <ChevronDown size={16} className={watchOptionsOpen ? "rotate-180 transition" : "transition"} />
-                </button>
-                {watchOptionsOpen && (
-                  <div className="absolute left-0 top-[calc(100%+0.75rem)] z-30 w-[min(92vw,360px)] rounded-2xl border border-white/12 bg-[#111111]/96 p-3 shadow-[0_24px_80px_rgba(0,0,0,0.72)] backdrop-blur-2xl">
-                    <p className="px-2 pb-2 text-xs uppercase tracking-[0.2em] text-white/36">Watch options</p>
-                    <div className="space-y-2">
-                      {watchOptionLinks.length > 0 ? watchOptionLinks.map(({ provider, href }) => (
-                        <a
-                          key={`${provider.name}-${provider.access}-${href}`}
-                          href={href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={() => captureEvent("watch-option-click", { title: pick.title, provider: provider.name, href })}
-                          className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.05] p-3 transition hover:border-white/24 hover:bg-white/[0.075]"
-                        >
-                          <ProviderLogo provider={provider} />
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm text-white">{provider.name}</span>
-                            <span className="block truncate text-xs text-white/46">{provider.note ?? provider.price ?? toTitleCase(provider.access)}</span>
-                          </span>
-                          <ExternalLink size={14} className="text-white/42" />
-                        </a>
-                      )) : (
-                        <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
-                          <p className="text-sm leading-5 text-white/54">No verified streaming links found for your region. Use the link below to check JustWatch.</p>
-                        </div>
-                      )}
-                      <a
-                        href={fallbackUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={() => captureEvent("watch-option-click", { title: pick.title, provider: "JustWatch", href: fallbackUrl })}
-                        className="flex items-center justify-between rounded-xl border border-amber-300/20 bg-amber-400/[0.07] px-3 py-3 text-sm text-amber-100 transition hover:border-amber-200/38"
-                      >
-                        Check broader availability
-                        <ExternalLink size={14} />
-                      </a>
-                    </div>
-                  </div>
-                )}
-              </div>
+            <p className="mt-5 max-w-xl text-lg leading-7 text-white/52">
+              F.U.N checked your subscriptions and couldn{"'"}t verify{" "}
+              <span className="italic text-white/72">{pick.title}</span>{" "}
+              or similar picks. Search all cinema for the best mood match, or refine your selection.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-4">
               <button
                 type="button"
-                onClick={handleShare}
-                className="inline-flex h-16 min-w-[180px] items-center justify-center gap-3 rounded-xl border border-white/12 bg-white/[0.045] px-6 text-lg font-semibold text-white/72 transition hover:border-white/24 hover:text-white"
+                onClick={handleSearchBeyondSubscriptions}
+                disabled={rerolling}
+                className="inline-flex h-16 min-w-[240px] items-center justify-center gap-3 rounded-xl bg-gradient-to-b from-red-400 to-red-800 px-7 text-lg font-semibold text-white shadow-[0_18px_52px_rgba(127,29,29,0.44)] transition hover:brightness-110 disabled:opacity-60"
               >
-                <Share2 size={19} /> {shareState === "copied" ? "Copied" : "Share"}
+                <Search size={20} />
+                {rerolling ? "Searching…" : "Search all cinema"}
               </button>
-            </div>
-
-            <p className="mt-4 flex items-center gap-2 text-sm text-white/54">
-              <Shield size={16} className={verified ? "text-amber-200" : "text-white/36"} />
-              {verified ? `${pick.whereToWatch.note}` : "Availability not verified yet for your region."}
-            </p>
-          </div>
-
-          <div className="grid gap-7 lg:grid-cols-[0.62fr_0.38fr] lg:items-center">
-            <div className={`mx-auto grid h-36 w-36 place-items-center rounded-full border-4 bg-black/30 ${scoreClass(pick.confidence)}`}>
-              <div className="text-center">
-                <p className="text-sm text-white/64">Mood match</p>
-                <p className="text-4xl font-semibold">{pick.confidence}%</p>
-                <p className="text-sm text-white/44">Great match</p>
-              </div>
-            </div>
-            <div className="relative mx-auto h-[520px] w-full max-w-[330px] overflow-hidden rounded-2xl border border-white/14 bg-white/[0.05] shadow-[0_28px_100px_rgba(0,0,0,0.56),inset_0_1px_0_rgba(255,255,255,0.08)]">
-              <MovieImage posterUrl={pick.omdbPosterUrl} title={pick.title} className="absolute inset-0 h-full w-full" objectPosition={artworkPosition} />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/46 via-transparent to-transparent" />
-              <Bookmark size={23} className="absolute right-5 top-5 text-white/72" />
-            </div>
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-white/10 bg-black/38 p-6">
-          <div className="grid gap-7 lg:grid-cols-[1.05fr_1.05fr_0.7fr]">
-            <article>
-              <h2 className="mb-5 flex items-center gap-3 text-xl text-amber-100"><Heart size={20} /> {whyItFitsLabel}</h2>
-              <div className="space-y-4">
-                {pick.whyItFits.slice(0, 3).map((reason, index) => (
-                  <div key={`${index}-${reason}`} className="flex gap-4">
-                    <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full border border-white/14 bg-white/[0.055] text-sm text-white/70">{index + 1}</span>
-                    <p className="leading-6 text-white/72">{reason}</p>
-                  </div>
-                ))}
-              </div>
-            </article>
-
-            <article className="border-white/10 lg:border-l lg:pl-8">
-              <h2 className="mb-2 text-xl text-white">Before watching</h2>
-              <p className="mb-5 text-sm text-white/42">Only correct what you can already tell. Rate it after you watch.</p>
-              <div className="flex flex-wrap gap-3">
-                {FEEDBACK_OPTIONS.map((option) => {
-                  const Icon = option.icon;
-                  const active = feedbackReason === option.reason;
-                  return (
-                    <button
-                      key={option.reason}
-                      type="button"
-                      onClick={() => handleFeedback(option.reason)}
-                      className={`inline-flex h-11 items-center gap-2 rounded-xl border px-4 text-sm transition ${
-                        active ? "border-amber-300/50 bg-amber-400/14 text-amber-100" : "border-white/12 bg-white/[0.045] text-white/68 hover:border-white/24 hover:text-white"
-                      }`}
-                    >
-                      <Icon size={17} /> {option.label}
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="mt-4 text-sm text-white/38">{feedbackReason ? "Saved. This improves your next pick." : "No account needed. Actual watch feedback can be added later in Memory."}</p>
-            </article>
-
-            <article className="rounded-xl border border-amber-300/18 bg-amber-400/[0.055] p-5">
-              <h2 className="flex items-center gap-3 text-xl text-amber-100"><SlidersHorizontal size={20} /> Refine this mood</h2>
-              <p className="mt-4 text-white/58">Tweak your preferences to get a sharper match.</p>
-              <Link href="/" className="mt-7 inline-flex items-center gap-2 text-amber-100 hover:text-white">
-                Refine mood <ArrowRight size={17} />
+              <Link href="/" className="inline-flex h-16 min-w-[180px] items-center justify-center gap-3 rounded-xl border border-amber-300/35 bg-amber-400/[0.055] px-6 text-lg font-semibold text-amber-100 transition hover:bg-amber-400/[0.1]">
+                <Sparkles size={18} /> Refine mood
               </Link>
-            </article>
-          </div>
-        </section>
+            </div>
+          </section>
+        ) : (
+          <section className="grid min-h-[620px] items-center gap-9 py-8 lg:grid-cols-[1.1fr_0.9fr]">
+            <div>
+              <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-400/[0.07] px-3 py-1.5 text-sm text-amber-100">
+                <Sparkles size={15} />
+                {stateCopy.eyebrow}
+                <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-white/68">{batchIndex + 1} of {batch.length}</span>
+              </div>
+              <h1 className="font-serif font-normal leading-[0.88] tracking-normal text-white" style={{ fontSize: titleSize(pick.title) }}>
+                {pick.title}
+              </h1>
+              <p className="mt-6 max-w-3xl text-2xl leading-9 text-white/78">{pick.oneLine}</p>
+              <div className="mt-7 flex flex-wrap gap-3">
+                <InfoPill icon={Calendar} label={pick.year} />
+                <InfoPill icon={Clock3} label={pick.runtime} />
+                <InfoPill icon={Heart} label={primaryVibe} />
+                <InfoPill icon={pick.format === "Series" || pick.format === "Episode" ? Monitor : Film} label={pick.format} />
+              </div>
 
+              <div className="mt-8 flex flex-wrap items-center gap-4">
+                <a
+                  href={primaryAction.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => captureEvent("watch-click", { title: pick.title, label: primaryAction.label, href: primaryAction.href, verified: primaryAction.verified })}
+                  className="inline-flex h-16 min-w-[280px] items-center justify-center gap-3 rounded-xl bg-gradient-to-b from-red-400 to-red-800 px-7 text-lg font-semibold text-white shadow-[0_18px_52px_rgba(127,29,29,0.44)] transition hover:brightness-110"
+                >
+                  <Play size={20} fill="currentColor" /> {primaryAction.label}
+                  {primaryAction.verified && <BadgeCheck size={18} />}
+                </a>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setWatchOptionsOpen((open) => !open)}
+                    className="inline-flex h-16 min-w-[250px] items-center justify-center gap-3 rounded-xl border border-white/12 bg-white/[0.045] px-6 text-lg font-semibold text-white/72 transition hover:border-white/24 hover:text-white"
+                  >
+                    <Search size={19} />
+                    More watch options
+                    <ChevronDown size={16} className={watchOptionsOpen ? "rotate-180 transition" : "transition"} />
+                  </button>
+                  {watchOptionsOpen && (
+                    <div className="absolute left-0 top-[calc(100%+0.75rem)] z-30 w-[min(92vw,360px)] rounded-2xl border border-white/12 bg-[#111111]/96 p-3 shadow-[0_24px_80px_rgba(0,0,0,0.72)] backdrop-blur-2xl">
+                      <p className="px-2 pb-2 text-xs uppercase tracking-[0.2em] text-white/36">Watch options</p>
+                      <div className="space-y-2">
+                        {watchOptionLinks.length > 0 ? watchOptionLinks.map(({ provider, href }) => (
+                          <a
+                            key={`${provider.name}-${provider.access}-${href}`}
+                            href={href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={() => captureEvent("watch-option-click", { title: pick.title, provider: provider.name, href })}
+                            className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.05] p-3 transition hover:border-white/24 hover:bg-white/[0.075]"
+                          >
+                            <ProviderLogo provider={provider} />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm text-white">{provider.name}</span>
+                              <span className="block truncate text-xs text-white/46">{provider.note ?? provider.price ?? toTitleCase(provider.access)}</span>
+                            </span>
+                            <ExternalLink size={14} className="text-white/42" />
+                          </a>
+                        )) : (
+                          <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
+                            <p className="text-sm leading-5 text-white/54">No verified streaming links found for your region. Use the link below to check JustWatch.</p>
+                          </div>
+                        )}
+                        <a
+                          href={fallbackUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => captureEvent("watch-option-click", { title: pick.title, provider: "JustWatch", href: fallbackUrl })}
+                          className="flex items-center justify-between rounded-xl border border-amber-300/20 bg-amber-400/[0.07] px-3 py-3 text-sm text-amber-100 transition hover:border-amber-200/38"
+                        >
+                          Check broader availability
+                          <ExternalLink size={14} />
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleShare}
+                  className="inline-flex h-16 min-w-[180px] items-center justify-center gap-3 rounded-xl border border-white/12 bg-white/[0.045] px-6 text-lg font-semibold text-white/72 transition hover:border-white/24 hover:text-white"
+                >
+                  <Share2 size={19} /> {shareState === "copied" ? "Copied" : "Share"}
+                </button>
+              </div>
+
+              <p className="mt-4 flex items-center gap-2 text-sm text-white/54">
+                <StateIcon size={16} className={stateCopy.tone} />
+                <span className="font-medium text-white/66">{stateCopy.line}</span>
+                <span className="text-white/34">·</span>
+                <span>{stateCopy.detail}</span>
+              </p>
+            </div>
+
+            <div className="grid gap-7 lg:grid-cols-[0.62fr_0.38fr] lg:items-center">
+              <div className={`mx-auto grid h-36 w-36 place-items-center rounded-full border-4 bg-black/30 ${scoreClass(pick.confidence)}`}>
+                <div className="text-center">
+                  <p className="text-sm text-white/64">Mood match</p>
+                  <p className="text-4xl font-semibold">{pick.confidence}%</p>
+                  <p className="text-sm text-white/44">Great match</p>
+                </div>
+              </div>
+              <div className="relative mx-auto h-[520px] w-full max-w-[330px] overflow-hidden rounded-2xl border border-white/14 bg-white/[0.05] shadow-[0_28px_100px_rgba(0,0,0,0.56),inset_0_1px_0_rgba(255,255,255,0.08)]">
+                <MovieImage posterUrl={pick.omdbPosterUrl} title={pick.title} className="absolute inset-0 h-full w-full" objectPosition={artworkPosition} />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/46 via-transparent to-transparent" />
+                <Bookmark size={23} className="absolute right-5 top-5 text-white/72" />
+              </div>
+            </div>
+          </section>
+        )}
+
+        {!noSubscriptionMatch && (
+          <section className="rounded-2xl border border-white/10 bg-black/38 p-6">
+            <div className="grid gap-7 lg:grid-cols-[1.05fr_1.05fr_0.7fr]">
+              <article>
+                <h2 className="mb-5 flex items-center gap-3 text-xl text-amber-100">
+                  <Heart size={20} />
+                  {avoidanceFallback ? "Why this safer pick fits" : whyItFitsLabel}
+                </h2>
+                <div className="space-y-4">
+                  {pick.whyItFits.slice(0, 3).map((reason, index) => (
+                    <div key={`${index}-${reason}`} className="flex gap-4">
+                      <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full border border-white/14 bg-white/[0.055] text-sm text-white/70">{index + 1}</span>
+                      <p className="leading-6 text-white/72">{reason}</p>
+                    </div>
+                  ))}
+                </div>
+                {avoidanceFallback && (
+                  <p className="mt-4 text-sm text-amber-100/50">F.U.N protected your avoidances and chose a safer close match instead of forcing a risky result.</p>
+                )}
+              </article>
+
+              <article className="border-white/10 lg:border-l lg:pl-8">
+                <h2 className="mb-2 text-xl text-white">Before watching</h2>
+                <p className="mb-5 text-sm text-white/42">Only correct what you can already tell. Rate it after you watch.</p>
+                <div className="flex flex-wrap gap-3">
+                  {FEEDBACK_OPTIONS.map((option) => {
+                    const Icon = option.icon;
+                    const active = feedbackReason === option.reason;
+                    return (
+                      <button
+                        key={option.reason}
+                        type="button"
+                        onClick={() => handleFeedback(option.reason)}
+                        className={`inline-flex h-11 items-center gap-2 rounded-xl border px-4 text-sm transition ${
+                          active ? "border-amber-300/50 bg-amber-400/14 text-amber-100" : "border-white/12 bg-white/[0.045] text-white/68 hover:border-white/24 hover:text-white"
+                        }`}
+                      >
+                        <Icon size={17} /> {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-4 text-sm text-white/38">{feedbackReason ? "Saved. This improves your next pick." : "No account needed. Actual watch feedback can be added later in Memory."}</p>
+              </article>
+
+              <article className="rounded-xl border border-amber-300/18 bg-amber-400/[0.055] p-5">
+                <h2 className="flex items-center gap-3 text-xl text-amber-100"><SlidersHorizontal size={20} /> Refine this mood</h2>
+                <p className="mt-4 text-white/58">Tweak your preferences to get a sharper match.</p>
+                <Link href="/" className="mt-7 inline-flex items-center gap-2 text-amber-100 hover:text-white">
+                  Refine mood <ArrowRight size={17} />
+                </Link>
+              </article>
+            </div>
+          </section>
+        )}
+
+        {!noSubscriptionMatch && (
         <section className="mt-5 grid gap-5 lg:grid-cols-[0.75fr_1fr]">
           <article className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
-            <h2 className="mb-4 flex items-center gap-3 text-xl text-white"><BadgeCheck size={20} className={verified ? "text-emerald-300" : "text-white/38"} /> Available now</h2>
+            <h2 className="mb-4 flex items-center gap-3 text-xl text-white">
+              <StateIcon size={20} className={stateCopy.tone} />
+              {verified ? "Available now" : "Check availability"}
+            </h2>
             {providers.length > 0 ? (
               <div className="grid gap-3 sm:grid-cols-2">
                 {[...subProviders, ...rentBuyProviders].slice(0, 4).map((provider, index) => (
@@ -735,8 +819,9 @@ export default function RecommendationPage() {
             )}
           </article>
         </section>
+        )}
 
-        {similar.length > 0 && (
+        {!noSubscriptionMatch && similar.length > 0 && (
           <section className="mt-5 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
             <div className="grid gap-5 lg:grid-cols-[220px_1fr]">
               <div>

@@ -52,6 +52,10 @@ export function requestText(input: RecommendRequest): string {
     input.mood?.join(" "),
     input.wants?.join(" "),
     input.avoids?.join(" "),
+    input.time,
+    input.energy,
+    input.viewingContext,
+    input.contextHint,
   ].filter(Boolean).join(" ");
 }
 

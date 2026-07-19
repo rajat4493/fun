@@ -10,6 +10,12 @@ export type FeedbackSignal =
   | "quit-halfway"
   | "could-not-find";
 
+export type RecommendationDisplayState =
+  | "verified"
+  | "unverified"
+  | "avoidance-fallback"
+  | "no-subscription-match";
+
 export type RecommendationFeedbackContext = {
   lastReason?: FeedbackSignal;
   wrongVibeTitles?: string[];

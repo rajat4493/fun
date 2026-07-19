@@ -7,11 +7,14 @@ const OMDB_TIMEOUT_MS = 2500;
 
 type OmdbResponse = {
   Response: "True" | "False";
+  Title?: string;
+  Year?: string;
   Poster?: string;
 };
 
 type TmdbMovie = {
   id: number;
+  matchedTitle?: string;
   poster_path: string | null;
   media_type: "movie" | "tv";
   original_language?: string;
@@ -78,6 +81,10 @@ async function tmdbFetch<T>(path: string): Promise<T | null> {
 
 type TmdbSearchResult = {
   id: number;
+  title?: string;
+  name?: string;
+  original_title?: string;
+  original_name?: string;
   poster_path: string | null;
   original_language?: string;
   origin_country?: string[];
@@ -85,6 +92,48 @@ type TmdbSearchResult = {
   release_date?: string;
   first_air_date?: string;
 };
+
+function titleCandidates(result: TmdbSearchResult): string[] {
+  return [result.title, result.name, result.original_title, result.original_name].filter((value): value is string => Boolean(value));
+}
+
+function withMediaType(result: TmdbSearchResult, mediaType: "movie" | "tv"): TmdbMovie {
+  return {
+    ...result,
+    matchedTitle: titleCandidates(result)[0],
+    media_type: mediaType,
+  };
+}
+
+function titleTokens(value: string): string[] {
+  return value
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\b(19|20)\d{2}\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token && !["a", "an", "the"].includes(token));
+}
+
+function titleSimilarity(a: string, b: string): number {
+  const aTokens = titleTokens(a);
+  const bTokens = titleTokens(b);
+  if (!aTokens.length || !bTokens.length) return 0;
+  const bSet = new Set(bTokens);
+  const overlap = aTokens.filter((token) => bSet.has(token)).length;
+  return overlap / Math.max(aTokens.length, bTokens.length);
+}
+
+function posterTitleMatches(requestedTitle: string, matchedTitle?: string): boolean {
+  if (!matchedTitle) return false;
+  const requested = titleTokens(requestedTitle).join(" ");
+  const matched = titleTokens(matchedTitle).join(" ");
+  if (!requested || !matched) return false;
+  if (requested === matched) return true;
+  if (requested.length >= 8 && matched.length >= 8 && (requested.includes(matched) || matched.includes(requested))) return true;
+  return titleSimilarity(requestedTitle, matchedTitle) >= 0.7;
+}
 
 function yearMatchesResult(result: TmdbSearchResult, dateField: "release_date" | "first_air_date", expectedYear: string): boolean {
   const resultYear = parseInt((result[dateField] ?? "").slice(0, 4));
@@ -103,25 +152,25 @@ async function tmdbSearch(title: string, year: string): Promise<TmdbMovie | null
   // Year-filtered search first — TMDB applies the filter server-side, results are trustworthy.
   if (year) {
     const movieData = await tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/movie?query=${q}&primary_release_year=${year}&language=en-US&page=1`);
-    if (movieData?.results?.[0]) return { ...movieData.results[0], media_type: "movie" };
+    if (movieData?.results?.[0]) return withMediaType(movieData.results[0], "movie");
   }
 
   // Unfiltered movie fallback — only accept if the result's year roughly matches.
   // Returning null here means the pick is treated as "unknown" rather than trusted with wrong genre data.
   const movieFallback = await tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/movie?query=${q}&language=en-US&page=1`);
   const movieMatch = pickResult(movieFallback?.results ?? [], year, "release_date");
-  if (movieMatch) return { ...movieMatch, media_type: "movie" };
+  if (movieMatch) return withMediaType(movieMatch, "movie");
 
   // Year-filtered TV search.
   if (year) {
     const tvData = await tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/tv?query=${q}&first_air_date_year=${year}&language=en-US&page=1`);
-    if (tvData?.results?.[0]) return { ...tvData.results[0], media_type: "tv" };
+    if (tvData?.results?.[0]) return withMediaType(tvData.results[0], "tv");
   }
 
   // Unfiltered TV fallback — same year validation.
   const tvFallback = await tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/tv?query=${q}&language=en-US&page=1`);
   const tvMatch = pickResult(tvFallback?.results ?? [], year, "first_air_date");
-  if (tvMatch) return { ...tvMatch, media_type: "tv" };
+  if (tvMatch) return withMediaType(tvMatch, "tv");
 
   return null;
 }
@@ -220,12 +269,19 @@ export async function enrichRecommendation(
         notOnUserPlatforms: false,
       };
 
-  const tmdbPoster = mainMovie?.poster_path ? `https://image.tmdb.org/t/p/w500${mainMovie.poster_path}` : undefined;
-  const omdbPoster = omdbMain?.Response === "True" && omdbMain.Poster && omdbMain.Poster !== "N/A" ? omdbMain.Poster : undefined;
+  const tmdbPoster = mainMovie?.poster_path && posterTitleMatches(raw.title, mainMovie.matchedTitle)
+    ? `https://image.tmdb.org/t/p/w500${mainMovie.poster_path}`
+    : undefined;
+  const omdbPoster = omdbMain?.Response === "True" &&
+    omdbMain.Poster &&
+    omdbMain.Poster !== "N/A" &&
+    posterTitleMatches(raw.title, omdbMain.Title)
+    ? omdbMain.Poster
+    : undefined;
 
-  const alternativePosterUrls = altTitles.map((_, i) => {
+  const alternativePosterUrls = altTitles.map((alt, i) => {
     const m = altMovies[i];
-    return m?.poster_path ? `https://image.tmdb.org/t/p/w342${m.poster_path}` : "";
+    return m?.poster_path && posterTitleMatches(alt.title, m.matchedTitle) ? `https://image.tmdb.org/t/p/w342${m.poster_path}` : "";
   });
 
   const hiddenLayerTitles: HiddenLayerTitle[] = hiddenRaw.map((hidden, i) => {
@@ -233,7 +289,7 @@ export async function enrichRecommendation(
     return {
       title: hidden.title,
       year: hidden.year,
-      posterUrl: m?.poster_path ? `https://image.tmdb.org/t/p/w342${m.poster_path}` : undefined,
+      posterUrl: m?.poster_path && posterTitleMatches(hidden.title, m.matchedTitle) ? `https://image.tmdb.org/t/p/w342${m.poster_path}` : undefined,
     };
   });
 
