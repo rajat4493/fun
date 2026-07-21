@@ -135,6 +135,51 @@ function posterTitleMatches(requestedTitle: string, matchedTitle?: string): bool
   return titleSimilarity(requestedTitle, matchedTitle) >= 0.7;
 }
 
+function relatedKey(value: string): string {
+  return titleTokens(value).join("");
+}
+
+function isUsableRelatedTitle(title: string): boolean {
+  const normalized = title.trim().toLowerCase();
+  return Boolean(normalized) &&
+    normalized !== "title" &&
+    normalized !== "untitled" &&
+    !/^title\s*\d*$/i.test(normalized) &&
+    !/^placeholder/i.test(normalized);
+}
+
+function cleanHiddenTitles(raw: Array<{ title: string; year: string }>, mainTitle: string): Array<{ title: string; year: string }> {
+  const seen = new Set([relatedKey(mainTitle)]);
+  const out: Array<{ title: string; year: string }> = [];
+
+  for (const item of raw) {
+    const title = item.title?.trim();
+    if (!isUsableRelatedTitle(title)) continue;
+    const key = relatedKey(title);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ title, year: item.year?.trim() ?? "" });
+  }
+
+  return out;
+}
+
+function cleanAlternativeTitles(raw: string[], mainTitle: string, hiddenTitles: Array<{ title: string }>): Array<{ title: string; year: string }> {
+  const seen = new Set([relatedKey(mainTitle), ...hiddenTitles.map((item) => relatedKey(item.title))]);
+  const out: Array<{ title: string; year: string }> = [];
+
+  for (const item of raw) {
+    const alt = parseAltTitle(item);
+    if (!isUsableRelatedTitle(alt.title)) continue;
+    const key = relatedKey(alt.title);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(alt);
+  }
+
+  return out;
+}
+
 function yearMatchesResult(result: TmdbSearchResult, dateField: "release_date" | "first_air_date", expectedYear: string): boolean {
   const resultYear = parseInt((result[dateField] ?? "").slice(0, 4));
   return !isNaN(resultYear) && Math.abs(resultYear - parseInt(expectedYear)) <= 1;
@@ -212,8 +257,8 @@ export async function enrichRecommendation(
   platforms: string[],
 ): Promise<Recommendation> {
   const localAvailability = checkAvailability(raw.title, raw.year, country);
-  const altTitles = raw.alternatives.map(parseAltTitle);
-  const hiddenRaw = raw.hiddenTitles ?? [];
+  const hiddenRaw = cleanHiddenTitles(raw.hiddenTitles ?? [], raw.title);
+  const altTitles = cleanAlternativeTitles(raw.alternatives ?? [], raw.title, hiddenRaw);
   const countryCode = toCountryCode(country);
 
   const posterAltTitles = altTitles.slice(0, 4);
@@ -298,6 +343,7 @@ export async function enrichRecommendation(
 
   return {
     ...rest,
+    alternatives: altTitles.map((alt) => alt.year ? `${alt.title} (${alt.year})` : alt.title),
     omdbPosterUrl: tmdbPoster ?? omdbPoster,
     whereToWatch,
     alternativePosterUrls,

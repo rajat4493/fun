@@ -233,6 +233,19 @@ function titleSize(title: string) {
   return "clamp(4.6rem,8.6vw,9rem)";
 }
 
+function relatedTitleKey(value: string) {
+  return value.toLowerCase().replace(/\b(19|20)\d{2}\b/g, "").replace(/[^a-z0-9]+/g, "");
+}
+
+function isDisplayableRelatedTitle(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return Boolean(normalized) &&
+    normalized !== "title" &&
+    normalized !== "untitled" &&
+    !/^title\s*\d*$/i.test(normalized) &&
+    !/^placeholder/i.test(normalized);
+}
+
 function scoreClass(score: number) {
   if (score >= 85) return "text-emerald-300 border-emerald-400/45";
   if (score >= 70) return "text-amber-200 border-amber-300/45";
@@ -251,6 +264,7 @@ export default function RecommendationPage() {
   const [searchIdx, setSearchIdx] = useState(0);
   const [shareState, setShareState] = useState<"idle" | "copied">("idle");
   const [watchOptionsOpen, setWatchOptionsOpen] = useState(false);
+  const [showMorePicks, setShowMorePicks] = useState(false);
 
   useEffect(() => {
     if (!fetchLoading) return;
@@ -320,6 +334,7 @@ export default function RecommendationPage() {
     setSession(next);
     setBatchIndex(0);
     setFeedbackReason(null);
+    setShowMorePicks(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
     captureEvent("recommendation", {
       title: batch[0].title,
@@ -484,25 +499,31 @@ export default function RecommendationPage() {
       };
   const StateIcon = stateCopy.icon;
   const primaryVibe = toTitleCase(pick.vibe.split(",")[0] || pick.format);
-  const hiddenTitles = pick.hiddenLayer.titles ?? [];
-  const similar = pick.alternatives.slice(0, 4).map((item, index) => {
+  const mainTitleKey = relatedTitleKey(pick.title);
+  const hiddenTitles = (pick.hiddenLayer.titles ?? [])
+    .filter((title) => isDisplayableRelatedTitle(title.title) && relatedTitleKey(title.title) !== mainTitleKey)
+    .slice(0, 3);
+  const hiddenTitleKeys = new Set(hiddenTitles.map((title) => relatedTitleKey(title.title)));
+  const seenSimilarKeys = new Set<string>();
+  const similar = pick.alternatives.map((item, index) => {
     const [titlePart] = item.split(" (");
+    const title = titlePart.trim();
     const year = item.match(/\((\d{4})\)/)?.[1] ?? "";
-    return { title: titlePart, year, posterUrl: pick.alternativePosterUrls?.[index] };
-  });
+    return { title, year, posterUrl: pick.alternativePosterUrls?.[index] };
+  }).filter((item) => {
+    const key = relatedTitleKey(item.title);
+    if (!isDisplayableRelatedTitle(item.title) || !key || key === mainTitleKey || hiddenTitleKeys.has(key) || seenSimilarKeys.has(key)) return false;
+    seenSimilarKeys.add(key);
+    return true;
+  }).slice(0, 4);
+  const hasMorePicks = hiddenTitles.length > 0 || similar.length > 0;
 
   const artworkPosition = useMemo(() => {
     const seed = `${pick.title}-${pick.year}`.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
     return `${seed % 2 === 0 ? "center" : "top"}`;
   }, [pick.title, pick.year]);
 
-  const whyItFitsLabel = useMemo(() => {
-    const hour = new Date().getHours();
-    if (hour >= 5 && hour < 12) return "Why it fits your morning";
-    if (hour >= 12 && hour < 17) return "Why it fits your afternoon";
-    if (hour >= 17 && hour < 21) return "Why it fits your evening";
-    return "Why it fits tonight";
-  }, []);
+  const whyItFitsLabel = "Why it fits";
 
   if (fetchLoading) {
     return (
@@ -607,7 +628,6 @@ export default function RecommendationPage() {
               <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-amber-300/20 bg-amber-400/[0.07] px-3 py-1.5 text-sm text-amber-100">
                 <Sparkles size={15} />
                 {stateCopy.eyebrow}
-                <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-white/68">{batchIndex + 1} of {batch.length}</span>
               </div>
               <h1 className="font-serif font-normal leading-[0.88] tracking-normal text-white" style={{ fontSize: titleSize(pick.title) }}>
                 {pick.title}
@@ -771,7 +791,7 @@ export default function RecommendationPage() {
         )}
 
         {!noSubscriptionMatch && (
-        <section className="mt-5 grid gap-5 lg:grid-cols-[0.75fr_1fr]">
+        <section className={`mt-5 grid gap-5 ${showMorePicks && hiddenTitles.length > 0 ? "lg:grid-cols-[0.75fr_1fr]" : ""}`}>
           <article className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
             <h2 className="mb-4 flex items-center gap-3 text-xl text-white">
               <StateIcon size={20} className={stateCopy.tone} />
@@ -799,29 +819,41 @@ export default function RecommendationPage() {
             )}
           </article>
 
+          {showMorePicks && hiddenTitles.length > 0 && (
           <article className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
             <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-amber-200/70"><Layers size={16} /> Related discoveries</p>
             <h2 className="mb-3 text-xl text-amber-100">{pick.hiddenLayer.headline}</h2>
             <p className="text-white/58">{pick.hiddenLayer.insight}</p>
-            {hiddenTitles.length > 0 && (
-              <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                {hiddenTitles.slice(0, 3).map((title) => (
-                  <a key={`${title.title}-${title.year}`} href={justWatchUrl(title.title, region)} target="_blank" rel="noopener noreferrer" className="relative h-40 overflow-hidden rounded-xl border border-amber-300/18 bg-amber-400/[0.05]">
-                    <MovieImage posterUrl={title.posterUrl} title={title.title} className="absolute inset-0 h-full w-full opacity-82" objectPosition="top" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/16 to-transparent" />
-                    <div className="absolute inset-x-0 bottom-0 p-3">
-                      <p className="line-clamp-2 text-sm font-medium text-white">{title.title}</p>
-                      <p className="text-xs text-amber-200/72">{title.platform ?? title.year}</p>
-                    </div>
-                  </a>
-                ))}
-              </div>
-            )}
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              {hiddenTitles.map((title) => (
+                <a key={`${title.title}-${title.year}`} href={justWatchUrl(title.title, region)} target="_blank" rel="noopener noreferrer" className="relative h-40 overflow-hidden rounded-xl border border-amber-300/18 bg-amber-400/[0.05]">
+                  <MovieImage posterUrl={title.posterUrl} title={title.title} className="absolute inset-0 h-full w-full opacity-82" objectPosition="top" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/16 to-transparent" />
+                  <div className="absolute inset-x-0 bottom-0 p-3">
+                    <p className="line-clamp-2 text-sm font-medium text-white">{title.title}</p>
+                    <p className="text-xs text-amber-200/72">{title.platform ?? title.year}</p>
+                  </div>
+                </a>
+              ))}
+            </div>
           </article>
+          )}
         </section>
         )}
 
-        {!noSubscriptionMatch && similar.length > 0 && (
+        {!noSubscriptionMatch && hasMorePicks && !showMorePicks && (
+          <div className="mt-5">
+            <button
+              type="button"
+              onClick={() => setShowMorePicks(true)}
+              className="inline-flex h-12 items-center gap-3 rounded-xl border border-white/12 bg-white/[0.04] px-5 text-sm font-medium text-white/68 transition hover:border-white/24 hover:text-white"
+            >
+              Need another option? <ArrowRight size={16} />
+            </button>
+          </div>
+        )}
+
+        {!noSubscriptionMatch && showMorePicks && similar.length > 0 && (
           <section className="mt-5 rounded-2xl border border-white/10 bg-white/[0.035] p-5">
             <div className="grid gap-5 lg:grid-cols-[220px_1fr]">
               <div>

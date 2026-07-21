@@ -1,5 +1,5 @@
 import { RawRecommendation, RecommendRequest, Recommendation } from "@/lib/types";
-import { requestText } from "@/lib/recommendation-utils";
+import { hasNegatedConcept, requestText } from "@/lib/recommendation-utils";
 
 export type TrustRejection = {
   title: string;
@@ -30,9 +30,7 @@ function contentText(rec: RawRecommendation | Recommendation): string {
 }
 
 function requestHasNegated(input: RecommendRequest, pattern: RegExp): boolean {
-  const text = requestText(input);
-  const negation = /\b(no|not|avoid|without|don't want|do not want|less|skip|hate)\b/i;
-  return negation.test(text) && pattern.test(text);
+  return hasNegatedConcept(requestText(input), pattern);
 }
 
 function wantsFamilySafe(input: RecommendRequest): boolean {
@@ -59,6 +57,10 @@ function activeHardAvoids(input: RecommendRequest): Set<string> {
     avoids.add("graphic violence");
   }
   return avoids;
+}
+
+export function activeHardAvoidanceKeys(input: RecommendRequest): string[] {
+  return [...activeHardAvoids(input)];
 }
 
 function explicitlyWantsIntensity(input: RecommendRequest): boolean {
@@ -88,15 +90,24 @@ const knownHorrorOrGoreTitles = new Set([
   "funnygames",
   "irreversible",
   "saloor120daysofsodom",
+  "aserbianfilm",
+  "antichrist",
+  "eraserhead",
+  "enterthevoid",
+  "tetsuo",
+  "tetsuotheironman",
 ]);
 
 const goreTerms = /\b(gore|gory|bloody|blood-soaked|blood soaked|splatter|body horror|visceral violence|graphic violence|mutilation|dismember|cannibal|extreme horror|brutal horror|torture)\b/i;
 const horrorTerms = /\b(horror|scary|haunted|ghost|possession|demonic|supernatural terror|slasher|zombie|evil dead|nightmare|occult|creature feature)\b/i;
-const violenceTerms = /\b(violent|violence|brutal|brutality|blood|killer|serial killer|murder|revenge|war|combat|massacre|assassin|gangster|crime thriller|survival horror|torture)\b/i;
+const violenceTerms = /\b(violent|violence|disturbing violence|brutal|brutality|blood|killer|serial killer|murder|revenge|war|combat|massacre|assassin|gangster|crime thriller|survival horror|torture)\b/i;
 const graphicViolenceTerms = /\b(graphic violence|visceral violence|brutal killing|mutilation|dismember|massacre|torture|blood-soaked|blood soaked|extreme horror|brutal horror)\b/i;
 const sexualTerms = /\b(explicit sex|sexual content|sex scene|sex scenes|nudity|nude|erotic|raunchy|pornographic|awkward sexual content)\b/i;
 const weirdTerms = /\b(weird|strange|unusual|offbeat|quirky|absurd|surreal|experimental|cult|wildly inventive|formally strange|bizarre|odd|unhinged)\b/i;
-const funnyTerms = /\b(funny|comedy|comic|witty|satire|satirical|slapstick|banter|absurd|laugh|playful|farce)\b/i;
+const funnyTerms = /\b(funny|comedy|comic|humor|humour|humorous|witty|satire|satirical|slapstick|banter|absurd|laugh|playful|farce)\b/i;
+const thrillerTerms = /\b(thriller|suspense|mystery|crime|noir|detective|investigation|paranoid|tense|whodunit|conspiracy|killer|murder|cat-and-mouse|cat and mouse)\b/i;
+const romanceTerms = /\b(romance|romantic|love story|love|chemistry|relationship|date|courtship|tender|flirt|heartfelt)\b/i;
+const fearTerms = /\b(scary|scare|scared|terrify|terrified|terrifying|frighten|frightened|frightening|horror|dread|nightmare|haunted|ghost|possession|demonic|supernatural terror|jump scare|jumpscare|creepy|panic|fear)\b/i;
 
 function parseRuntimeMinutes(runtime: string): number | null {
   const value = runtime.toLowerCase();
@@ -167,11 +178,86 @@ function confidenceViolation(rec: RawRecommendation | Recommendation): string | 
   return typeof rec.confidence === "number" && rec.confidence < 60 ? `confidence: ${rec.confidence} below minimum` : null;
 }
 
-// Positive-fit checks removed: keyword matching on recommendation text is too brittle.
-// A weird film can say "formally inventive" not "weird"; a comedy can say "sharp wit" not "funny".
-// The LLM is trusted to match the request. Hard avoidances and memory are the only hard gates.
-function positiveFitViolations(_input: RecommendRequest, _rec: RawRecommendation | Recommendation): string[] {
-  return [];
+const overRecommendedHiddenGemTitles = new Set([
+  "andhadhun",
+  "drishyam",
+  "drishyam2",
+  "kahaani",
+  "masaan",
+  "tumbbad",
+  "se7en",
+  "seven",
+  "gonegirl",
+  "zodiac",
+  "knivesout",
+  "getout",
+  "thesilenceofthelambs",
+]);
+
+const softScareFalsePositiveTitles = new Set([
+  "imthinkingofendingthings",
+  "imthinkingofendingthings2020",
+  "thelobster",
+  "beingjohnmalkovich",
+  "synecdochenewyork",
+  "anomalisa",
+]);
+
+function explicitFormatViolation(input: RecommendRequest, rec: RawRecommendation | Recommendation): string | null {
+  const request = requestText(input);
+  const format = `${rec.format} ${rec.runtime}`.toLowerCase();
+  const asksForFilm = /\b(movie|film|feature)\b/i.test(request);
+  const asksForSeries = /\b(series|show|season|episode|episodes|binge)\b/i.test(request);
+
+  if (asksForFilm && /\b(series|episode|season)\b/.test(format)) return "intent: requested a film/movie, got series/episode";
+  if (asksForSeries && rec.format === "Film") return "intent: requested a series/show/episode, got film";
+  return null;
+}
+
+function explicitGenreViolations(input: RecommendRequest, rec: RawRecommendation | Recommendation): string[] {
+  const request = requestText(input);
+  const text = contentText(rec);
+  const reasons: string[] = [];
+
+  if (/\b(thriller|suspense|mystery|crime thriller|tense and clever)\b/i.test(request) && !thrillerTerms.test(text)) {
+    reasons.push("intent: requested thriller/suspense");
+  }
+  if (/\b(comedy|funny|laugh|hilarious|witty)\b/i.test(request) && !funnyTerms.test(text)) {
+    reasons.push("intent: requested comedy/funny");
+  }
+  if (/\b(romance|romantic|love story|date night)\b/i.test(request) && !romanceTerms.test(text)) {
+    reasons.push("intent: requested romance");
+  }
+  if (/\b(shit scared|scare|scared|scary|terrify|terrified|terrifying|frighten|frightened|frightening|creep out|creepy|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i.test(request) &&
+    !requestHasNegated(input, /\b(scary|scare|scared|terrify|terrified|frighten|frightened|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i)) {
+    if (softScareFalsePositiveTitles.has(normalize(rec.title)) || !fearTerms.test(text)) {
+      reasons.push("intent: requested genuinely scary/fear-inducing");
+    }
+  }
+  if (/\b(weird|strange|offbeat|surreal|absurd|bizarre)\b/i.test(request) && !weirdTerms.test(text)) {
+    reasons.push("intent: requested weird/offbeat");
+  }
+
+  return reasons;
+}
+
+function hiddenGemViolation(input: RecommendRequest, rec: RawRecommendation | Recommendation): string | null {
+  const request = requestText(input);
+  if (!/\b(hidden\s+gem|underrated|overlooked|buried|less\s+obvious|probably haven't seen|probably have not seen)\b/i.test(request)) {
+    return null;
+  }
+
+  return overRecommendedHiddenGemTitles.has(normalize(rec.title))
+    ? "intent: hidden gem request got an over-recommended title"
+    : null;
+}
+
+function positiveFitViolations(input: RecommendRequest, rec: RawRecommendation | Recommendation): string[] {
+  return [
+    explicitFormatViolation(input, rec),
+    hiddenGemViolation(input, rec),
+    ...explicitGenreViolations(input, rec),
+  ].filter((reason): reason is string => Boolean(reason));
 }
 
 export function validateRecommendation<T extends RawRecommendation | Recommendation>(
@@ -218,6 +304,7 @@ export function rejectionPrompt(rejections: TrustRejection[]): string {
   const avoidanceViolations = rejections.flatMap((r) => r.reasons.filter((reason) => reason.startsWith("avoidance:")));
   const memoryViolations = rejections.flatMap((r) => r.reasons.filter((reason) => reason.startsWith("memory:")));
   const runtimeViolations = rejections.flatMap((r) => r.reasons.filter((reason) => reason.startsWith("time:")));
+  const intentViolations = rejections.flatMap((r) => r.reasons.filter((reason) => reason.startsWith("intent:")));
 
   const avoidanceNote = avoidanceViolations.length
     ? `\n⛔ Avoidance violations found: ${[...new Set(avoidanceViolations)].join(", ")}. Do NOT recommend anything in these categories or adjacent genres — this is absolute regardless of Taste Risk or craziness level.`
@@ -228,16 +315,20 @@ export function rejectionPrompt(rejections: TrustRejection[]): string {
   const runtimeNote = runtimeViolations.length
     ? `\n⛔ Runtime violations: ${[...new Set(runtimeViolations)].join(", ")}. Stay within the user's stated time preference.`
     : "";
+  const intentNote = intentViolations.length
+    ? `\n⛔ Intent violations: ${[...new Set(intentViolations)].join(", ")}. The replacement must satisfy the explicit genre/type/discovery request, not just the broad mood.`
+    : "";
 
   return `\n\nBackend trust filter REJECTED the previous candidates. These are hard-boundary failures — not preference suggestions. Do not repeat any rejected title, do not pick thematically adjacent titles that would hit the same boundary:
 ${rejections.slice(0, 8).map((item) => `- "${item.title}" rejected: ${item.reasons.join("; ")}`).join("\n")}
-${avoidanceNote}${memoryNote}${runtimeNote}
+${avoidanceNote}${memoryNote}${runtimeNote}${intentNote}
 Return three completely different valid candidates that preserve the emotional job while staying strictly inside all boundaries.`;
 }
 
 export function safeFallback(input: RecommendRequest): RawRecommendation {
   const text = requestText(input);
   const wantsHindi = /\bhindi\b/i.test(text) || (input.languagePreferences ?? []).some((language) => /hindi/i.test(language));
+  const wantsThriller = /\b(thriller|suspense|mystery|crime thriller|tense and clever)\b/i.test(text);
   const wantsWeirdSafe = /\b(weird|strange|unusual|offbeat|quirky|absurd|surreal|funny|comedy)\b/i.test(text) || (input.craziness ?? 0) >= 2;
   const isExcluded = (title: string) => {
     const key = normalize(title);
@@ -257,6 +348,72 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
       classyJab: "A perfect pick should not break trust.",
     },
   };
+
+  if (wantsHindi && wantsThriller) {
+    const hindiThrillers: RawRecommendation[] = [
+      {
+        title: "Aamir",
+        year: "2008",
+        runtime: "99 min",
+        vibe: "Hindi thriller, tense, compact",
+        confidence: 76,
+        oneLine: "Watch Aamir for a lean Hindi thriller built around pressure, movement, and moral panic.",
+        whyItFits: [
+          "It stays in the Hindi thriller lane instead of drifting into family drama.",
+          "The runtime is compact enough for a focused night.",
+          "It feels less over-recommended than the usual discovery-thriller defaults.",
+        ],
+        hiddenTitles: [
+          { title: "Kaun", year: "1999" },
+          { title: "A Death in the Gunj", year: "2017" },
+          { title: "Ek Hasina Thi", year: "2004" },
+        ],
+        alternatives: ["Kaun (1999)", "A Death in the Gunj (2017)", "Ek Hasina Thi (2004)"],
+        ...base,
+      },
+      {
+        title: "Kaun",
+        year: "1999",
+        runtime: "90 min",
+        vibe: "Hindi thriller, claustrophobic, tense",
+        confidence: 74,
+        oneLine: "Watch Kaun for a tight Hindi suspense chamber piece that keeps the mood sharp.",
+        whyItFits: [
+          "It is unmistakably a thriller, not a broad emotional serial.",
+          "The contained setup keeps the watch focused and direct.",
+          "Its cult reputation makes it feel like a real discovery pick.",
+        ],
+        hiddenTitles: [
+          { title: "Aamir", year: "2008" },
+          { title: "A Death in the Gunj", year: "2017" },
+          { title: "404: Error Not Found", year: "2011" },
+        ],
+        alternatives: ["Aamir (2008)", "A Death in the Gunj (2017)", "404: Error Not Found (2011)"],
+        ...base,
+      },
+      {
+        title: "A Death in the Gunj",
+        year: "2017",
+        runtime: "110 min",
+        vibe: "Indian thriller, uneasy, intimate",
+        confidence: 72,
+        oneLine: "Watch A Death in the Gunj for an Indian slow-burn thriller with quiet menace and real emotional control.",
+        whyItFits: [
+          "It is an Indian-market thriller with unease built into the social setting.",
+          "The tension is character-led rather than generic crime noise.",
+          "It is acclaimed without being the default Hindi-thriller answer.",
+        ],
+        hiddenTitles: [
+          { title: "Aamir", year: "2008" },
+          { title: "Kaun", year: "1999" },
+          { title: "Ek Hasina Thi", year: "2004" },
+        ],
+        alternatives: ["Aamir (2008)", "Kaun (1999)", "Ek Hasina Thi (2004)"],
+        ...base,
+      },
+    ];
+    return hindiThrillers.find((rec) => !isExcluded(rec.title)) ?? hindiThrillers[0];
+  }
 
   if (wantsHindi) {
     const hindiFallbacks: RawRecommendation[] = [

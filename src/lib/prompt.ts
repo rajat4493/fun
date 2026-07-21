@@ -1,3 +1,4 @@
+import { hasNegatedConcept } from "@/lib/recommendation-utils";
 import { RecommendRequest } from "./types";
 
 function buildTasteFingerprint(userContext: string) {
@@ -130,7 +131,7 @@ function buildSituationClause(input: RecommendRequest): string {
 }
 
 function hasNegated(text: string, pattern: RegExp): boolean {
-  return /\b(no|not|avoid|without|don't want|do not want|less|skip|hate)\b/i.test(text) && pattern.test(text);
+  return hasNegatedConcept(text, pattern);
 }
 
 function buildAvoidanceTiers(input: RecommendRequest, userContext: string) {
@@ -325,15 +326,19 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
   // --- Intensity/gore detection (must come before language clauses) ---
   // Checks structured avoids AND natural language negation (handles "I do not want: violence, gore")
   const goreInAvoids = (input.avoids ?? []).some((a) => /gore|gory|blood|violent|violence/i.test(a));
-  const goreNegatedInText = /\b(no|not|avoid|without|don't want|do not want|less)\b[\s\S]{0,40}\b(gore|gory|blood|bloody|violence|violent)\b/i.test(userContext);
+  const goreNegatedInText = hasNegatedConcept(userContext, /\b(gore|gory|blood|bloody|violence|violent)\b/i);
   const goreSignalPresent = /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror|violence)\b/i.test(userContext) ||
     (input.wants ?? []).some((w) => /gore|bloody|violent|extreme/i.test(w));
   const explicitGoreWant = goreSignalPresent && !goreInAvoids && !goreNegatedInText;
 
   const crazinessLevel = input.craziness ?? 0;
+  const fearSignalPresent = /\b(shit scared|scare|scared|scary|terrify|terrified|terrifying|frighten|frightened|frightening|creep out|creepy|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i.test(userContext);
+  const fearNegatedOrAvoided = hasNegatedConcept(userContext, /\b(scary|scare|scared|terrify|terrified|frighten|frightened|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i) ||
+    (input.avoids ?? []).some((a) => /\b(horror|scary|scare|ghost|haunted|supernatural)\b/i.test(a));
+  const explicitFearWant = fearSignalPresent && !fearNegatedOrAvoided;
   const intensityKeywordInText = /\b(horror|extreme|violent|brutal|disturbing|transgressive)\b/i.test(userContext);
   const intensityNegatedOrAvoided =
-    /\b(no|not|avoid|without|don't want|do not want|less)\b[\s\S]{0,60}\b(horror|extreme|violent|brutal|disturbing|transgressive)\b/i.test(userContext) ||
+    hasNegatedConcept(userContext, /\b(horror|extreme|violent|brutal|disturbing|transgressive)\b/i) ||
     (input.avoids ?? []).some((a) => /\b(horror|extreme|violent|brutal|disturbing|transgressive)\b/i.test(a));
   const highIntensityMode = crazinessLevel >= 2 &&
     (explicitGoreWant || (intensityKeywordInText && !intensityNegatedOrAvoided));
@@ -359,6 +364,9 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
 
   const intensityClause = explicitGoreWant
     ? "\n- Explicit intensity intent: The user is asking FOR gore/violent/extreme content. Recommend intense horror, body horror, splatter, brutal survival horror, or extreme transgressive cinema with visible violence and body threat. Examples in range: Martyrs, Inside, The Sadness, Terrifier 2, Raw, Mandy, Possessor, When Evil Lurks. Do not soften this into quiet drama, romance, gentle arthouse, or merely sad prestige cinema. A safe pick is a failure."
+    : "";
+  const fearIntentClause = explicitFearWant
+    ? "\n- Explicit fear intent: The user wants to genuinely scare someone. Prioritize frightening horror, dread, supernatural terror, psychological fear, or high-tension nightmare cinema. Do NOT soften this into merely surreal, quirky, thoughtful, romantic, or gently unsettling drama. The oneLine and why-it-fits must make clear why it will actually scare the viewing partner while still respecting any hard avoidances."
     : "";
   const tasteFingerprint = buildTasteFingerprint(userContext);
   const emotionalJobProtocol = buildEmotionalJobProtocol(userContext);
@@ -447,7 +455,7 @@ User context:
 - Time context: ${input.contextHint ?? "not provided"}
 - Energy level: ${input.energy ?? "not provided"}
 - Viewing context: ${input.viewingContext ?? "not provided"}
-- Mood/request: ${userContext}${seenClause}${recentClause}${hiddenGemClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${crazinessClause}${softMoodDirectionClause}${feedbackRepairClause}${emotionalJobProtocol}${signalPriorityProtocol}${contextAmplifier}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
+  - Mood/request: ${userContext}${seenClause}${recentClause}${hiddenGemClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${fearIntentClause}${crazinessClause}${softMoodDirectionClause}${feedbackRepairClause}${emotionalJobProtocol}${signalPriorityProtocol}${contextAmplifier}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
 - Discovery mode: ${indieMode ? "Indie / hidden cinema" : "Standard"}${indieClause}
 
 Return an array of exactly THREE JSON objects (not a wrapper object) with this schema, no markdown:
@@ -459,8 +467,8 @@ Return an array of exactly THREE JSON objects (not a wrapper object) with this s
     "runtime": "string",
     "vibe": "string (comma-separated descriptors)",
     "confidence": number between 0 and 100,
-    "oneLine": "one classy sentence telling the user to watch it ${momentLabel}",
-    "whyItFits": ["3 concise reasons why this matches the user's mood ${momentLabel}"],
+    "oneLine": "one classy sentence telling the user why this is the right pick",
+    "whyItFits": ["3 concise reasons why this matches the user's stated mood, constraints, and situation"],
     "whereToWatch": {
       "status": "unverified",
       "primary": "Availability not verified",
@@ -487,6 +495,7 @@ For each recommendation:
 - ${hiddenLayerInstruction}
 - Alternatives: 3 related mood-adjacent picks
 - Why-it-fits must prove the match: each reason should name a concrete shared trait from the request/reference, not generic praise like "strong characters" or "great story".
+- Do not mention morning, afternoon, evening, late night, low energy, high energy, alone, partner, friends, or family in visible copy unless the user explicitly typed it or the selected control clearly makes it relevant. Never contradict a typed situation such as bedtime by saying afternoon.
 
 ${detectedLanguage
   ? `The 3 recommendations should offer variety WITHIN ${detectedLanguage} cinema: if pick 1 is a film, pick 2 could be a series; if pick 1 is recent, pick 2 could be classic; range from mainstream to cult. All three MUST be ${detectedLanguage}-language or ${detectedLanguage}-market. Do NOT use "American" or "global" as variety.`

@@ -3,7 +3,7 @@ import { filterFalsePositiveRecommendations, localFallback } from "@/lib/fallbac
 import { recommendWithAnthropic, recommendWithGenericLLM, recommendWithOpenAI } from "@/lib/llm";
 import { enrichRecommendation } from "@/lib/metadata";
 import { buildRecommendationPrompt } from "@/lib/prompt";
-import { applyTrustFilter, rejectionPrompt, safeFallback, TrustRejection } from "@/lib/recommendation-trust";
+import { activeHardAvoidanceKeys, applyTrustFilter, rejectionPrompt, safeFallback, TrustRejection } from "@/lib/recommendation-trust";
 import { RawRecommendation, RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
 
 // TMDB genre IDs that map to user avoidances.
@@ -16,8 +16,10 @@ const AVOIDANCE_GENRE_MAP: Record<string, number[]> = {
 // Text keywords used as a secondary safety net when TMDB has no genre data.
 // Deliberately narrow — only flag obvious matches, not borderline ones.
 const AVOIDANCE_SUSPICION_KEYWORDS: Record<string, string[]> = {
-  horror: ["horror", "haunted", "ghost", "demon", "slasher", "zombie", "terrifying", "supernatural horror"],
+  horror: ["horror", "haunted", "haunting", "ghost", "demon", "slasher", "zombie", "terrifying", "nightmarish", "supernatural horror"],
   gore: ["gore", "gory", "torture", "visceral", "graphic violence", "brutal killing"],
+  violence: ["disturbing violence", "graphic violence", "brutal", "brutality", "torture", "massacre"],
+  "graphic violence": ["disturbing violence", "graphic violence", "brutal", "brutality", "torture", "massacre"],
 };
 
 function genreViolatesAvoidance(avoids: string[], genreIds: number[]): boolean {
@@ -60,6 +62,73 @@ function matchesLanguageRequest(input: RecommendRequest, recommendation: Recomme
 
 function normalizeTitle(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function parseRelatedTitle(value: string): { title: string; year: string } {
+  const match = value.match(/^(.+?)\s*\((\d{4})\)$/);
+  return match ? { title: match[1].trim(), year: match[2] } : { title: value.trim(), year: "" };
+}
+
+const unsafeRelatedWhenAvoidingDarkness = new Set([
+  "aserbianfilm",
+  "antichrist",
+  "eraserhead",
+  "enterthevoid",
+  "tetsuo",
+  "tetsuotheironman",
+  "thecookthethiefhiswifeherlover",
+  "martyrs",
+  "inside",
+  "thesadness",
+  "terrifier2",
+  "raw",
+  "titane",
+  "dogtooth",
+]);
+
+const tenseRelatedWhenFunnyGroup = new Set([
+  "coherence",
+  "theinvitation",
+  "blueruin",
+  "calibre",
+  "theclovehitchkiller",
+  "theguilty",
+]);
+
+function shouldHideRelatedTitle(input: RecommendRequest, title: string): boolean {
+  const key = normalizeTitle(title);
+  const request = [
+    input.selfText,
+    input.mood?.join(" "),
+    input.wants?.join(" "),
+    input.avoids?.join(" "),
+    input.viewingContext,
+  ].filter(Boolean).join(" ");
+  const hardAvoids = activeHardAvoidanceKeys(input);
+  const avoidingDarkness = hardAvoids.some((avoid) => ["horror", "gore", "violence", "graphic violence"].includes(avoid));
+  if (avoidingDarkness && unsafeRelatedWhenAvoidingDarkness.has(key)) return true;
+
+  const funnyOrGroup = /\b(funny|comedy|laugh|friends|group|party|hangout)\b/i.test(request);
+  if (funnyOrGroup && tenseRelatedWhenFunnyGroup.has(key)) return true;
+
+  return false;
+}
+
+function sanitizeRelatedForRequest(input: RecommendRequest, recommendation: Recommendation): Recommendation {
+  const hiddenTitles = (recommendation.hiddenLayer.titles ?? []).filter((item) => !shouldHideRelatedTitle(input, item.title));
+  const alternatives = recommendation.alternatives
+    .map((item, index) => ({ ...parseRelatedTitle(item), posterUrl: recommendation.alternativePosterUrls?.[index] }))
+    .filter((item) => !shouldHideRelatedTitle(input, item.title));
+
+  return {
+    ...recommendation,
+    alternatives: alternatives.map((item) => item.year ? `${item.title} (${item.year})` : item.title),
+    alternativePosterUrls: alternatives.map((item) => item.posterUrl ?? ""),
+    hiddenLayer: {
+      ...recommendation.hiddenLayer,
+      titles: hiddenTitles.length > 0 ? hiddenTitles : undefined,
+    },
+  };
 }
 
 function hash(value: string): number {
@@ -271,7 +340,7 @@ export async function POST(req: Request) {
     const input = (await req.json()) as RecommendRequest;
     const country = input.country || "Poland";
     const platforms = input.platforms ?? [];
-    const avoids = input.avoids ?? [];
+    const avoids = activeHardAvoidanceKeys(input);
     const subscriptionOnly = input.platformFilter === "mine";
     const prompt = buildRecommendationPrompt(input);
 
@@ -355,6 +424,8 @@ export async function POST(req: Request) {
         },
       }));
     }
+
+    enrichedBatch = enrichedBatch.map((item) => sanitizeRelatedForRequest(input, item));
 
     const firstPick = enrichedBatch[0];
     if (displayState !== "no-subscription-match" && displayState !== "avoidance-fallback") {

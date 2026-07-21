@@ -59,6 +59,31 @@ export function requestText(input: RecommendRequest): string {
   ].filter(Boolean).join(" ");
 }
 
+function cloneGlobalRegex(pattern: RegExp): RegExp {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  return new RegExp(pattern.source, flags);
+}
+
+export function hasNegatedConcept(text: string, pattern: RegExp): boolean {
+  const clauses = text.split(/\b(?:but|however|though|although|except)\b/i);
+
+  return clauses.some((clause) => {
+    const negation = /\b(no|not|avoid|without|don't want|do not want|less|skip|hate)\b/gi;
+    const concept = cloneGlobalRegex(pattern);
+    const negationMatches = [...clause.matchAll(negation)];
+    if (negationMatches.length === 0) return false;
+
+    const conceptMatches = [...clause.matchAll(concept)];
+    return conceptMatches.some((conceptMatch) =>
+      negationMatches.some((negationMatch) => {
+        const negationIndex = negationMatch.index ?? 0;
+        const conceptIndex = conceptMatch.index ?? 0;
+        return Math.abs(conceptIndex - negationIndex) <= 48;
+      }),
+    );
+  });
+}
+
 export function parseAltTitle(alt: string): { title: string; year: string } {
   const match = alt.match(/^(.+?)\s*\((\d{4})\)$/);
   return match ? { title: match[1].trim(), year: match[2] } : { title: alt, year: "" };

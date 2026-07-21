@@ -1,4 +1,4 @@
-import { requestText } from "@/lib/recommendation-utils";
+import { hasNegatedConcept, requestText } from "@/lib/recommendation-utils";
 import { RawRecommendation, RecommendRequest } from "@/lib/types";
 
 function normalizeForMatch(value: string): string {
@@ -71,7 +71,7 @@ function isKnownFalsePositiveForRequest(input: RecommendRequest, rec: RawRecomme
   }
 
   const wantsGore = /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(text) &&
-    !/\b(no|not|avoid|without|don't want|do not want|less)\s+(gore|gory|blood|bloody|violence|violent)\b/i.test(text);
+    !hasNegatedConcept(text, /\b(gore|gory|blood|bloody|violence|violent)\b/i);
 
   if (wantsGore) {
     return [
@@ -94,7 +94,7 @@ export function filterFalsePositiveRecommendations(input: RecommendRequest, batc
   const filtered = batch.filter((rec) => !isKnownFalsePositiveForRequest(input, rec));
   const text = requestText(input);
   const wantsGore = /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(text) &&
-    !/\b(no|not|avoid|without|don't want|do not want|less)\s+(gore|gory|blood|bloody|violence|violent)\b/i.test(text);
+    !hasNegatedConcept(text, /\b(gore|gory|blood|bloody|violence|violent)\b/i);
   const hasRepeatExclusions = (input.recentTitles?.length ?? 0) > 0 || (input.seenTitles?.length ?? 0) > 0;
   if (hasRepeatExclusions) return filtered;
   if (wantsGore) return filtered;
@@ -111,7 +111,9 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
   const wantsRomance = /\b(romance|romantic|love|date)\b/i.test(text);
   const wantsEmotional = /\b(emotional|moving|heartfelt|feel|feeling|sad|bittersweet)\b/i.test(text);
   const wantsGore = /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(text) &&
-    !/\b(no|not|avoid|without|don't want|do not want|less)\s+(gore|gory|blood|bloody|violence|violent)\b/i.test(text);
+    !hasNegatedConcept(text, /\b(gore|gory|blood|bloody|violence|violent)\b/i);
+  const wantsScare = /\b(shit scared|scare|scared|scary|terrify|terrified|terrifying|frighten|frightened|frightening|creep out|creepy|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i.test(text) &&
+    !hasNegatedConcept(text, /\b(scary|scare|scared|terrify|terrified|frighten|frightened|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i);
 
   if (wantsFriends && wantsHindi) {
     const baseRec = {
@@ -508,7 +510,7 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
     ];
   }
 
-  if (wantsGore) {
+  if (wantsScare || wantsGore) {
     if (input.platformFilter === "mine" && (input.platforms ?? []).some((platform) => /netflix/i.test(platform))) {
       const netflixRec = {
         format: "Film" as const,
@@ -518,74 +520,80 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
           note: "F.U.N will verify this in real time. Check your apps before watching.",
         },
         hiddenLayer: {
-          headline: "Gore inside your queue",
-          insight: "The right match should be bloody, direct, and recognisably horror, not a quiet prestige detour.",
-          classyJab: "Your night asked for blood, not whispers.",
+          headline: wantsGore ? "Gore inside your queue" : "Fear inside your queue",
+          insight: wantsGore
+            ? "The right match should be bloody, direct, and recognisably horror, not a quiet prestige detour."
+            : "The right match should create real dread and shared nerves, not just a clever surreal mood.",
+          classyJab: wantsGore ? "Your night asked for blood, not whispers." : "A good scare should not feel like homework.",
         },
       };
 
-      return [
-        {
-          title: "Evil Dead Rise",
-          year: "2023",
-          runtime: "96 min",
-          vibe: "bloody, demonic, survival horror",
-          confidence: 88,
-          oneLine: "Watch Evil Dead Rise for a tight, blood-soaked possession nightmare that gets straight to the point.",
-          whyItFits: [
-            "It is explicitly gory and built around physical horror.",
-            "The runtime is lean, so it does not waste the mood.",
-            "It has the splatter energy a quiet drama completely misses.",
-          ],
-          hiddenTitles: [
-            { title: "Apostle", year: "2018" },
-            { title: "Fear Street Part 2: 1978", year: "2021" },
-            { title: "Nobody Sleeps in the Woods Tonight", year: "2020" },
-          ],
-          alternatives: ["Apostle (2018)", "Fear Street Part 2: 1978 (2021)", "Nobody Sleeps in the Woods Tonight (2020)"],
-          ...netflixRec,
-        },
+      const netflixScares: RawRecommendation[] = [
         {
           title: "Apostle",
           year: "2018",
           runtime: "130 min",
-          vibe: "folk horror, gory, violent",
-          confidence: 82,
-          oneLine: "Watch Apostle if you want folk-horror dread that eventually turns properly brutal.",
+          vibe: wantsGore ? "folk horror, gory, violent" : "folk horror, dread, cult terror",
+          confidence: wantsGore ? 82 : 84,
+          oneLine: wantsGore
+            ? "Watch Apostle if you want folk-horror dread that eventually turns properly brutal."
+            : "Watch Apostle if you want your partner properly tense, uneasy, and waiting for the island to turn nasty.",
           whyItFits: [
-            "It has explicit violence and gore rather than implied menace only.",
-            "The cult-island setting gives the bloodshed a nasty ritual texture.",
-            "It is darker and more physical than a standard mystery thriller.",
+            wantsGore ? "It has explicit violence and gore rather than implied menace only." : "It is recognisably horror, not just a surreal drama wearing a scary coat.",
+            "The cult-island setting gives the fear a nasty ritual texture.",
+            wantsGore ? "It is darker and more physical than a standard mystery thriller." : "It gives a partner-watch night real dread and reaction moments.",
           ],
           hiddenTitles: [
-            { title: "Evil Dead Rise", year: "2023" },
+            { title: "Fear Street Part 2: 1978", year: "2021" },
+            { title: "Nobody Sleeps in the Woods Tonight", year: "2020" },
             { title: "Demons", year: "1985" },
-            { title: "Slasher", year: "2019" },
           ],
-          alternatives: ["Evil Dead Rise (2023)", "Demons (1985)", "Slasher (2019)"],
+          alternatives: ["Fear Street Part 2: 1978 (2021)", "Nobody Sleeps in the Woods Tonight (2020)", "Demons (1985)"],
           ...netflixRec,
         },
         {
           title: "Fear Street Part 2: 1978",
           year: "2021",
           runtime: "111 min",
-          vibe: "gory, slasher, summer-camp horror",
-          confidence: 80,
-          oneLine: "Watch Fear Street Part 2: 1978 for clean slasher momentum and visible camp-night carnage.",
+          vibe: "slasher, scary, summer-camp horror",
+          confidence: wantsGore ? 80 : 82,
+          oneLine: "Watch Fear Street Part 2: 1978 for an accessible slasher night that is built for shared jumps and nervous fun.",
           whyItFits: [
-            "It is a slasher built around bloody kills, not just eerie atmosphere.",
-            "The summer-camp setup gives the gore a classic horror shape.",
-            "It stays accessible while still satisfying the gory brief.",
+            "It answers the scare request directly with slasher momentum and clear horror stakes.",
+            "The summer-camp setup makes it easy to watch together without needing arthouse patience.",
+            "It creates reaction moments a partner can actually feel in the room.",
           ],
           hiddenTitles: [
+            { title: "Apostle", year: "2018" },
             { title: "Nobody Sleeps in the Woods Tonight", year: "2020" },
             { title: "Demons", year: "1985" },
-            { title: "Apostle", year: "2018" },
           ],
-          alternatives: ["Nobody Sleeps in the Woods Tonight (2020)", "Demons (1985)", "Apostle (2018)"],
+          alternatives: ["Apostle (2018)", "Nobody Sleeps in the Woods Tonight (2020)", "Demons (1985)"],
+          ...netflixRec,
+        },
+        {
+          title: "Nobody Sleeps in the Woods Tonight",
+          year: "2020",
+          runtime: "103 min",
+          vibe: "Polish horror, forest dread, slasher",
+          confidence: 80,
+          oneLine: "Watch Nobody Sleeps in the Woods Tonight for a Polish forest-horror pick that is blunt, scary, and easy to react to together.",
+          whyItFits: [
+            "It is built as horror first, so the scare request does not get diluted into surreal mood.",
+            "The forest setup gives the partner-watch a clear threat and fast tension.",
+            "It fits Poland/Netflix better than a random global scare pick.",
+          ],
+          hiddenTitles: [
+            { title: "Apostle", year: "2018" },
+            { title: "Fear Street Part 2: 1978", year: "2021" },
+            { title: "Demons", year: "1985" },
+          ],
+          alternatives: ["Apostle (2018)", "Fear Street Part 2: 1978 (2021)", "Demons (1985)"],
           ...netflixRec,
         },
       ];
+
+      return netflixScares;
     }
 
     const baseRec = {
@@ -661,6 +669,85 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
           { title: "Hatching", year: "2022" },
         ],
         alternatives: ["Titane (2021)", "Martyrs (2008)", "Possessor (2020)"],
+        ...baseRec,
+      },
+    ];
+  }
+
+  if (wantsHindi && wantsThriller) {
+    const baseRec = {
+      format: "Film" as const,
+      whereToWatch: {
+        status: "unverified" as const,
+        primary: "Availability not verified",
+        note: "F.U.N will verify this in real time. Check your apps before watching.",
+      },
+      hiddenLayer: {
+        headline: "Hindi suspense beyond the obvious",
+        insight: "The right discovery thriller should stay tense and specific, not drift into generic family drama.",
+        classyJab: "A sharper map finds quieter danger.",
+      },
+    };
+
+    return [
+      {
+        title: "Aamir",
+        year: "2008",
+        runtime: "99 min",
+        vibe: "Hindi thriller, tense, compact",
+        confidence: 78,
+        oneLine: "Watch Aamir for a lean Hindi thriller built around pressure, movement, and moral panic.",
+        whyItFits: [
+          "It stays in the Hindi thriller lane instead of drifting into family drama.",
+          "The runtime is compact enough for a focused night.",
+          "It feels less over-recommended than the usual discovery-thriller defaults.",
+        ],
+        hiddenTitles: [
+          { title: "Kaun", year: "1999" },
+          { title: "A Death in the Gunj", year: "2017" },
+          { title: "Ek Hasina Thi", year: "2004" },
+        ],
+        alternatives: ["Kaun (1999)", "A Death in the Gunj (2017)", "Ek Hasina Thi (2004)"],
+        ...baseRec,
+      },
+      {
+        title: "Kaun",
+        year: "1999",
+        runtime: "90 min",
+        vibe: "Hindi thriller, claustrophobic, tense",
+        confidence: 76,
+        oneLine: "Watch Kaun for a tight Hindi suspense chamber piece that keeps the mood sharp.",
+        whyItFits: [
+          "It is unmistakably a thriller, not a broad emotional serial.",
+          "The contained setup keeps the watch focused and direct.",
+          "Its cult reputation makes it feel like a real discovery pick.",
+        ],
+        hiddenTitles: [
+          { title: "Aamir", year: "2008" },
+          { title: "A Death in the Gunj", year: "2017" },
+          { title: "404: Error Not Found", year: "2011" },
+        ],
+        alternatives: ["Aamir (2008)", "A Death in the Gunj (2017)", "404: Error Not Found (2011)"],
+        ...baseRec,
+      },
+      {
+        title: "A Death in the Gunj",
+        year: "2017",
+        runtime: "110 min",
+        vibe: "Indian thriller, uneasy, intimate",
+        confidence: 74,
+        oneLine: "Watch A Death in the Gunj for an Indian slow-burn thriller with quiet menace and real emotional control.",
+        whyItFits: [
+          "It is an Indian-market thriller with unease built into the social setting.",
+          "The tension is character-led rather than generic crime noise.",
+          "It is acclaimed without being the default Hindi-thriller answer.",
+        ],
+        hiddenTitles: [
+          { title: "Aamir", year: "2008" },
+          { title: "Kaun", year: "1999" },
+          { title: "Ek Hasina Thi", year: "2004" },
+        ],
+        alternatives: ["Aamir (2008)", "Kaun (1999)", "Ek Hasina Thi (2004)"],
         ...baseRec,
       },
     ];
@@ -746,12 +833,11 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
   }
 
   const avoids = new Set((input.avoids ?? []).map((avoid) => avoid.toLowerCase()));
-  const negated = /\b(no|not|avoid|without|don't want|do not want|less|skip|hate)\b/i.test(text);
-  if (negated && /\bgore|gory|blood|bloody|splatter|body horror\b/i.test(text)) avoids.add("gore");
-  if (negated && /\bviolence|violent|brutal|action\b/i.test(text)) avoids.add("violence");
-  if (negated && /\bhorror|scary|ghost|haunted|supernatural\b/i.test(text)) avoids.add("horror");
-  if (negated && /\bheavy drama|heavy|trauma|depressing|bleak\b/i.test(text)) avoids.add("heavy drama");
-  if (negated && /\bslow|slow burn|slow-burn\b/i.test(text)) avoids.add("slow");
+  if (hasNegatedConcept(text, /\bgore|gory|blood|bloody|splatter|body horror\b/i)) avoids.add("gore");
+  if (hasNegatedConcept(text, /\bviolence|violent|brutal|action\b/i)) avoids.add("violence");
+  if (hasNegatedConcept(text, /\bhorror|scary|ghost|haunted|supernatural\b/i)) avoids.add("horror");
+  if (hasNegatedConcept(text, /\bheavy drama|heavy|trauma|depressing|bleak\b/i)) avoids.add("heavy drama");
+  if (hasNegatedConcept(text, /\bslow|slow burn|slow-burn\b/i)) avoids.add("slow");
   const light = avoids.has("violence") || avoids.has("gore") || avoids.has("heavy drama") || wantsComedy || wantsRomance;
   const strictNoDarkness = avoids.has("violence") || avoids.has("gore") || avoids.has("horror");
   const wantsWeird = /\b(weird|strange|unusual|offbeat|quirky|absurd|surreal|unhinged)\b/i.test(text) || (input.craziness ?? 0) >= 2;
@@ -912,7 +998,7 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
       whyItFits: [
         "It matches the mood-first request instead of forcing a genre.",
         "It is strong enough to feel special, but not mentally exhausting.",
-        "It fits F.U.N's promise: one decision, not another endless list.",
+        "Its humor and self-reinvention arc give the night a clear, satisfying shape.",
       ],
       hiddenTitles: [
         { title: "Columbus", year: "2017" },
@@ -930,7 +1016,7 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
       confidence: 72,
       oneLine: light ? "Watch Support the Girls for humane comedy that sneaks up on you." : "Watch Columbus for quiet beauty and unusually precise feeling.",
       whyItFits: [
-        "It avoids the usual homepage picks.",
+        "It finds humor in everyday pressure rather than big set-piece comedy.",
         "The storytelling is specific rather than broadly generic.",
         "It gives the night a clear mood instead of another scroll.",
       ],
@@ -952,7 +1038,7 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
       whyItFits: [
         "It is distinctive without being difficult for the sake of it.",
         "The emotional register is clear and controlled.",
-        "It feels like a recommendation, not a default list filler.",
+        "Its quiet rhythm creates feeling through behavior, place, and small choices.",
       ],
       hiddenTitles: [
         { title: "Columbus", year: "2017" },
