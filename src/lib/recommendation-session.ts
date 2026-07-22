@@ -21,6 +21,10 @@ export function getOrCreateSessionId(): string {
   }
 }
 
+export function createRecommendationRunId(): string {
+  return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
 export type FeedbackReason =
   | "perfect"
   | "good-not-perfect"
@@ -36,6 +40,7 @@ export type FeedbackPhase = "pre-watch" | "post-watch";
 
 export type RecommendationFeedback = {
   id: string;
+  runId?: string;
   reason: FeedbackReason;
   phase?: FeedbackPhase;
   title: string;
@@ -52,6 +57,7 @@ export type RecommendationFeedback = {
 
 export type RecommendationHistoryItem = {
   id: string;
+  runId?: string;
   title: string;
   year: string;
   format: Recommendation["format"];
@@ -128,10 +134,11 @@ export function loadRecommendationHistory(): RecommendationHistoryItem[] {
   }
 }
 
-export function rememberRecommendationHistory(recommendations: Recommendation[], request: RecommendRequest): RecommendationHistoryItem[] {
+export function rememberRecommendationHistory(recommendations: Recommendation[], request: RecommendRequest, runId?: string): RecommendationHistoryItem[] {
   const existing = loadRecommendationHistory();
   const nextItems = recommendations.map((recommendation) => ({
     id: `${recommendation.title}-${recommendation.year}`.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+    runId,
     title: recommendation.title,
     year: recommendation.year,
     format: recommendation.format,
@@ -171,6 +178,7 @@ export function saveRecommendationFeedback(
   const recommendation = session.recommendation;
   const feedback: RecommendationFeedback = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    runId: session.runId,
     reason,
     phase,
     title: recommendation.title,
@@ -207,6 +215,7 @@ export function savePostWatchFeedback(
   );
   const feedback: RecommendationFeedback = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    runId: item.runId,
     reason,
     phase: "post-watch",
     title: item.title,
@@ -270,6 +279,7 @@ export function loadRecommendationFeedbackContext(): RecommendationFeedbackConte
 }
 
 export type RecommendationSession = {
+  runId?: string;
   recommendation: Recommendation;
   request: RecommendRequest;
   generatedAt: string;
@@ -309,8 +319,10 @@ export function createRecommendationSession(
   request: RecommendRequest,
   batch?: Recommendation[],
   displayState?: RecommendationDisplayState,
+  runId?: string,
 ): RecommendationSession {
   return {
+    runId,
     recommendation,
     request,
     generatedAt: new Date().toISOString(),

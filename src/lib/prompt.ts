@@ -1,6 +1,6 @@
 import { hasNegatedConcept } from "@/lib/recommendation-utils";
 import { extractIntent, RecommendationIntent } from "@/lib/intent";
-import { RecommendRequest } from "./types";
+import { IntentContract, RecommendRequest } from "./types";
 
 function buildTasteFingerprint(userContext: string) {
   const hasReferenceIntent = /\b(similar|like|vibe|reminds me|same as|after watching|watching|reference)\b/i.test(userContext);
@@ -245,7 +245,26 @@ function timeLabel(contextHint?: string): string {
   return "right now";
 }
 
-export function buildRecommendationPrompt(input: RecommendRequest, options?: { strictSubscription?: boolean }) {
+function intentContractClause(intentContract?: IntentContract): string {
+  if (!intentContract) return "";
+  return `
+
+AUTHORITATIVE INTENT CONTRACT
+- Primary emotional outcome: ${intentContract.primary}
+- Secondary signals: ${intentContract.secondary.length ? intentContract.secondary.join(", ") : "none"}
+- Hard avoids: ${intentContract.hardAvoids.length ? intentContract.hardAvoids.join(", ") : "none"}
+- Soft avoids: ${intentContract.softAvoids.length ? intentContract.softAvoids.join(", ") : "none"}
+- Format: ${intentContract.format}
+- Language/culture lane: ${intentContract.language}
+- Situation: ${intentContract.situation.length ? intentContract.situation.join(", ") : "none"}
+- Intensity: ${intentContract.intensity}
+- Emotional goal: ${intentContract.emotionalGoal}
+- Ambiguity note: ${intentContract.ambiguity || "none"}
+
+Use this contract as the source of truth for what the user means. Do not re-infer the opposite from a single word in the raw text.`;
+}
+
+export function buildRecommendationPrompt(input: RecommendRequest, options?: { strictSubscription?: boolean; intentContract?: IntentContract }) {
   const momentLabel = timeLabel(input.contextHint);
   const userContext = input.mode === "self"
     ? input.selfText || "The user gave no extra context."
@@ -260,6 +279,8 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
       ].filter(Boolean).join(". ");
 
   const intent = extractIntent(input);
+  const contract = options?.intentContract;
+  const contractClause = intentContractClause(contract);
   const country = input.country || "not provided";
   const languagePreferences = input.languagePreferences?.length ? input.languagePreferences.join(", ") : "no preference";
   const platforms = input.platforms?.length ? input.platforms.join(", ") : "not specified";
@@ -367,6 +388,9 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
   if (intent.primaryIntents.length) {
     hardConstraintLines.push(`❌ Explicit user intent — the main pick must satisfy: ${intent.primaryIntents.join(", ")}. Situation, context, Taste Risk, and availability must shape this request, not replace it.`);
   }
+  if (contract && contract.primary !== "unknown" && contract.confidence >= 0.6) {
+    hardConstraintLines.push(`❌ Intent contract — the main pick must satisfy the interpreted primary outcome: ${contract.primary}. The recommendation's parsedIntent, contentCategory, and emotionalEffect must support this.`);
+  }
   if (avoidanceTiers.hard.length) {
     hardConstraintLines.push(`❌ Hard content gates — NEVER recommend content with or containing: ${avoidanceTiers.hard.join(", ")}. Taste Risk, craziness level, mood signals, novelty, and cinematic quality do NOT override these.`);
   }
@@ -422,7 +446,7 @@ User context:
 - Time context: ${input.contextHint ?? "not provided"}
 - Energy level: ${input.energy ?? "not provided"}
 - Viewing context: muted for this version unless the user typed it directly
-  - Mood/request: ${userContext}${seenClause}${recentClause}${hiddenGemClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${fearIntentClause}${crazinessClause}${softMoodDirectionClause}${feedbackRepairClause}${emotionalJobProtocol}${signalPriorityProtocol}${contextAmplifier}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
+  - Mood/request: ${userContext}${contractClause}${seenClause}${recentClause}${hiddenGemClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${fearIntentClause}${crazinessClause}${softMoodDirectionClause}${feedbackRepairClause}${emotionalJobProtocol}${signalPriorityProtocol}${contextAmplifier}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
 - Discovery mode: ${indieMode ? "Indie / hidden cinema" : "Standard"}${indieClause}
 
 Return an array of exactly THREE JSON objects (not a wrapper object) with this schema, no markdown:
@@ -444,6 +468,8 @@ Return an array of exactly THREE JSON objects (not a wrapper object) with this s
     "format": "Film|Series|Episode|Documentary|Unknown",
     "runtime": "string",
     "vibe": "string (comma-separated descriptors)",
+    "contentCategory": ["structured labels for what the title IS, e.g. horror, romance, comedy, drama, thriller, comfort"],
+    "emotionalEffect": ["structured labels for what the title DOES to the viewer, e.g. fear, dread, catharsis, warmth, laughter, tension"],
     "confidence": number between 0 and 100,
     "oneLine": "one classy sentence telling the user why this is the right pick",
     "whyItFits": ["3 concise reasons why this matches the user's stated mood, constraints, and situation"],
@@ -470,6 +496,7 @@ Return an array of exactly THREE JSON objects (not a wrapper object) with this s
 
 For each recommendation:
 - Fill parsedIntent BEFORE choosing the title. It is the contract you are satisfying, not post-rationalization. If the user says someone hates horror or does not want scary content, do NOT set primary to scare.
+- Fill contentCategory and emotionalEffect as factual structured labels for the chosen title. These fields describe the title, not the user's avoidances. Do not include avoided labels just to say the film avoids them.
 - Main pick: Your best match for the user's mood
 - ${hiddenLayerInstruction}
 - Alternatives: 3 related mood-adjacent picks
@@ -504,7 +531,7 @@ type CompactRejection = {
   reasons: string[];
 };
 
-export function buildCompactRetryPrompt(input: RecommendRequest, rejections: CompactRejection[]) {
+export function buildCompactRetryPrompt(input: RecommendRequest, rejections: CompactRejection[], intentContract?: IntentContract) {
   const intent = extractIntent(input);
   const country = input.country || "not provided";
   const platforms = input.platforms?.length ? input.platforms.join(", ") : "not specified";
@@ -526,6 +553,7 @@ User contract:
 - Language preference: ${languagePreferences}
 - Platform scope: ${platformScope}
 - Primary intent(s): ${intent.primaryIntents.length ? intent.primaryIntents.join(", ") : "infer from request"}
+- Interpreted intent contract: ${intentContract ? `${intentContract.primary} — ${intentContract.emotionalGoal}` : "not available"}
 - Hard avoids: ${intent.hardAvoids.length ? intent.hardAvoids.join(", ") : "none"}
 - Soft avoids: ${intent.softAvoids.length ? intent.softAvoids.join(", ") : "none"}
 - Requested format: ${intent.requestedFormat ?? "any"}
@@ -563,6 +591,8 @@ Schema:
     "format": "Film|Series|Episode|Documentary|Unknown",
     "runtime": "string",
     "vibe": "string",
+    "contentCategory": ["structured labels for what the title is"],
+    "emotionalEffect": ["structured labels for what the title does emotionally"],
     "confidence": 75,
     "oneLine": "one sentence",
     "whyItFits": ["reason 1", "reason 2", "reason 3"],

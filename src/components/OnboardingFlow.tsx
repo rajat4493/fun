@@ -1,7 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight, Check, ChevronDown, MapPin, Tv } from "lucide-react";
+import ArrowRight from "lucide-react/dist/esm/icons/arrow-right.js";
+import Check from "lucide-react/dist/esm/icons/check.js";
+import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.js";
+import MapPin from "lucide-react/dist/esm/icons/map-pin.js";
+import Tv from "lucide-react/dist/esm/icons/tv.js";
 
 export const ONBOARDING_KEY = "fun:onboarding";
 

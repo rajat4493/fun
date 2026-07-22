@@ -2,22 +2,20 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import {
-  ArrowRight,
-  BarChart3,
-  CheckCircle2,
-  ChevronDown,
-  Flame,
-  Globe2,
-  Heart,
-  Info,
-  Lock,
-  PauseCircle,
-  RefreshCw,
-  Search,
-  Shield,
-  Sparkles,
-} from "lucide-react";
+import ArrowRight from "lucide-react/dist/esm/icons/arrow-right.js";
+import BarChart3 from "lucide-react/dist/esm/icons/bar-chart-3.js";
+import CheckCircle2 from "lucide-react/dist/esm/icons/circle-check.js";
+import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.js";
+import Flame from "lucide-react/dist/esm/icons/flame.js";
+import Globe2 from "lucide-react/dist/esm/icons/globe-2.js";
+import Heart from "lucide-react/dist/esm/icons/heart.js";
+import Info from "lucide-react/dist/esm/icons/info.js";
+import Lock from "lucide-react/dist/esm/icons/lock.js";
+import PauseCircle from "lucide-react/dist/esm/icons/circle-pause.js";
+import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
+import Search from "lucide-react/dist/esm/icons/search.js";
+import Shield from "lucide-react/dist/esm/icons/shield.js";
+import Sparkles from "lucide-react/dist/esm/icons/sparkles.js";
 import { loadOnboarding, OnboardingData, platformOptionsForCountry } from "@/components/OnboardingFlow";
 import {
   loadRecommendationFeedback,

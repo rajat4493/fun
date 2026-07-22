@@ -6,18 +6,12 @@
     "node": "20.x"
   },
   "scripts": {
-    "predev": "node scripts/check-node-version.mjs",
-    "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --webpack -H 127.0.0.1",
-    "prebuild": "node scripts/check-node-version.mjs",
-    "build": "NEXT_TELEMETRY_DISABLED=1 next build",
-    "prestart": "node scripts/check-node-version.mjs",
-    "start": "NEXT_TELEMETRY_DISABLED=1 next start",
-    "prelint": "node scripts/check-node-version.mjs",
-    "lint": "tsc -p tsconfig.lint.json --noEmit --pretty false",
-    "pretest:availability": "node scripts/check-node-version.mjs",
-    "test:availability": "node scripts/check-availability.mjs",
-    "pretest:recommendation": "node scripts/check-node-version.mjs",
-    "test:recommendation": "node scripts/recommendation-regression.mjs"
+    "dev": "sh scripts/with-node-20.sh next dev . --webpack -H 127.0.0.1",
+    "build": "sh scripts/with-node-20.sh next build .",
+    "start": "sh scripts/with-node-20.sh next start",
+    "lint": "sh scripts/with-node-20.sh tsc -p tsconfig.lint.json --noEmit --pretty false",
+    "test:availability": "sh scripts/with-node-20.sh node scripts/check-availability.mjs",
+    "test:recommendation": "sh scripts/with-node-20.sh node scripts/recommendation-regression.mjs"
   },
   "dependencies": {
     "lucide-react": "0.562.0",

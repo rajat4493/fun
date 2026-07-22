@@ -28,6 +28,21 @@ export type ParsedRecommendationIntent = {
   ambiguity?: string;
 };
 
+export type IntentContract = {
+  primary: string;
+  secondary: string[];
+  hardAvoids: string[];
+  softAvoids: string[];
+  format: "film" | "series" | "episode" | "any";
+  language: string;
+  situation: string[];
+  intensity: "safe" | "curious" | "bold" | "unhinged";
+  emotionalGoal: string;
+  confidence: number;
+  ambiguity: string;
+  source: "llm" | "local";
+};
+
 export type RecommendationFeedbackContext = {
   lastReason?: FeedbackSignal;
   wrongVibeTitles?: string[];
@@ -116,6 +131,8 @@ export type Recommendation = {
     genreIds?: number[];
   };
   parsedIntent?: ParsedRecommendationIntent;
+  contentCategory?: string[];
+  emotionalEffect?: string[];
 };
 
 export type RecommendationBatch = {

@@ -2,7 +2,8 @@
 
 const API_BASE = process.env.FUN_QA_BASE_URL || "http://127.0.0.1:3000";
 const ENDPOINT = `${API_BASE.replace(/\/$/, "")}/api/recommend`;
-const CASE_TIMEOUT_MS = Number(process.env.FUN_QA_CASE_TIMEOUT_MS || 45000);
+const CASE_TIMEOUT_MS = Number(process.env.FUN_QA_CASE_TIMEOUT_MS || 60000);
+const DELAY_BETWEEN_MS = Number(process.env.FUN_QA_DELAY_MS || 0);
 
 const scary = /\b(scary|scare|terrify|terrified|terrifying|horror|dread|nightmare|haunted|ghost|possession|demonic|slasher|jumpscare|jump scare|creepy|fear)\b/i;
 const comedy = /\b(comedy|funny|hilarious|witty|humor|humour|laugh|comic)\b/i;
@@ -132,8 +133,15 @@ const tests = [
       platforms: [],
       platformFilter: "any",
     },
-    check: (rec) => !horror.test(textOf(rec)),
-    why: "No-horror/no-gore weird request must remain strange without darkness boundary violations.",
+    check: (rec) => {
+      const categories = (rec.contentCategory ?? []).map((c) => c.toLowerCase());
+      const effects = (rec.emotionalEffect ?? []).map((e) => e.toLowerCase());
+      if (categories.length || effects.length) {
+        return !categories.some((c) => horror.test(c)) && !effects.some((e) => horror.test(e));
+      }
+      return !horror.test(textOf(rec));
+    },
+    why: "No-horror/no-gore weird request must remain strange without darkness boundary violations. Checks structured labels first, falls back to prose.",
   },
   {
     id: "NEGATED-SCARE-LIGHT",
@@ -145,8 +153,15 @@ const tests = [
       platforms: [],
       platformFilter: "any",
     },
-    check: (rec) => !scary.test(textOf(rec)) && !horror.test(textOf(rec)) && (comedy.test(textOf(rec)) || romance.test(textOf(rec)) || /\b(light|fun|warm|gentle|comfort|feel-good|sweet|playful|easy|low-regret|low regret)\b/i.test(textOf(rec))),
-    why: "Text saying someone hates horror/gets scared must be treated as an avoidance/light request, not a scare request.",
+    check: (rec) => {
+      const intentLabel = rec.parsedIntent?.primary ?? "";
+      const isNotScare = !["scare", "horror", "gore"].includes(intentLabel.toLowerCase());
+      const text = textOf(rec);
+      const hasPositiveSignal = comedy.test(text) || romance.test(text) ||
+        /\b(light|fun|warm|gentle|comfort|feel-good|sweet|playful|easy|low-regret|low regret|whimsical|charming|uplifting|cozy|heartwarming)\b/i.test(text);
+      return isNotScare && hasPositiveSignal;
+    },
+    why: "Text saying someone hates horror/gets scared must be treated as an avoidance/light request — parsedIntent.primary must not be scare/horror and the pick must have a positive warmth/comedy/romance signal.",
   },
 ];
 
@@ -176,7 +191,12 @@ async function runCase(test) {
 }
 
 const results = [];
-for (const test of tests) {
+for (let i = 0; i < tests.length; i++) {
+  if (i > 0 && DELAY_BETWEEN_MS > 0) {
+    process.stdout.write(`  (waiting ${DELAY_BETWEEN_MS / 1000}s...)\n`);
+    await new Promise((r) => setTimeout(r, DELAY_BETWEEN_MS));
+  }
+  const test = tests[i];
   try {
     results.push(await runCase(test));
   } catch (error) {

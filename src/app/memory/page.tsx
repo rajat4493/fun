@@ -2,7 +2,15 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Ban, CheckCircle2, Database, Heart, Lock, RefreshCw, Shield, Trash2 } from "lucide-react";
+import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left.js";
+import Ban from "lucide-react/dist/esm/icons/ban.js";
+import CheckCircle2 from "lucide-react/dist/esm/icons/circle-check.js";
+import Database from "lucide-react/dist/esm/icons/database.js";
+import Heart from "lucide-react/dist/esm/icons/heart.js";
+import Lock from "lucide-react/dist/esm/icons/lock.js";
+import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
+import Shield from "lucide-react/dist/esm/icons/shield.js";
+import Trash2 from "lucide-react/dist/esm/icons/trash-2.js";
 import { ONBOARDING_KEY } from "@/components/OnboardingFlow";
 import {
   dismissedPostWatchPromptKey,
@@ -221,7 +229,7 @@ export default function MemoryPage() {
             <h2 className="flex items-center gap-3 text-2xl text-amber-100"><Lock size={23} /> Control</h2>
             <div className="mt-5 space-y-3 text-white/62">
               <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> No streaming passwords are needed.</p>
-              <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> Free text is not sent in feedback analytics.</p>
+              <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> Private preview analytics may store recommendation prompts when enabled, so do not enter sensitive personal information.</p>
               <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> You can clear local memory anytime.</p>
             </div>
           </article>

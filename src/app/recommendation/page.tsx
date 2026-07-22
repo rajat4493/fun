@@ -2,33 +2,32 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import {
-  ArrowLeft,
-  ArrowRight,
-  BadgeCheck,
-  Bookmark,
-  Calendar,
-  ChevronDown,
-  Clock3,
-  ExternalLink,
-  Film,
-  Globe2,
-  Heart,
-  Layers,
-  Monitor,
-  Play,
-  RefreshCw,
-  Search,
-  Share2,
-  Shield,
-  SlidersHorizontal,
-  Sparkles,
-  Star,
-  type LucideIcon,
-  Zap,
-} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left.js";
+import ArrowRight from "lucide-react/dist/esm/icons/arrow-right.js";
+import BadgeCheck from "lucide-react/dist/esm/icons/badge-check.js";
+import Bookmark from "lucide-react/dist/esm/icons/bookmark.js";
+import Calendar from "lucide-react/dist/esm/icons/calendar.js";
+import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.js";
+import Clock3 from "lucide-react/dist/esm/icons/clock-3.js";
+import ExternalLink from "lucide-react/dist/esm/icons/external-link.js";
+import Film from "lucide-react/dist/esm/icons/film.js";
+import Globe2 from "lucide-react/dist/esm/icons/globe-2.js";
+import Heart from "lucide-react/dist/esm/icons/heart.js";
+import Layers from "lucide-react/dist/esm/icons/layers.js";
+import Monitor from "lucide-react/dist/esm/icons/monitor.js";
+import Play from "lucide-react/dist/esm/icons/play.js";
+import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
+import Search from "lucide-react/dist/esm/icons/search.js";
+import Share2 from "lucide-react/dist/esm/icons/share-2.js";
+import Shield from "lucide-react/dist/esm/icons/shield.js";
+import SlidersHorizontal from "lucide-react/dist/esm/icons/sliders-horizontal.js";
+import Sparkles from "lucide-react/dist/esm/icons/sparkles.js";
+import Star from "lucide-react/dist/esm/icons/star.js";
+import Zap from "lucide-react/dist/esm/icons/zap.js";
 import {
   addSeenTitle,
+  createRecommendationRunId,
   createRecommendationSession,
   defaultRecommendation,
   FeedbackReason,
@@ -42,6 +41,7 @@ import {
   saveRecommendationFeedback,
   toTitleCase,
 } from "@/lib/recommendation-session";
+import { captureRecommendationRun } from "@/lib/recommendation-analytics";
 import { Recommendation, RecommendationDisplayState, WatchProvider } from "@/lib/types";
 
 const LOADING_KEY = "fun:loading";
@@ -327,9 +327,10 @@ export default function RecommendationPage() {
     if (!response.ok) throw new Error("failed");
     const data = await response.json() as Recommendation & { _batch?: Recommendation[]; _trust?: { displayState?: RecommendationDisplayState } };
     const batch = data._batch ?? [data];
+    const runId = createRecommendationRunId();
     rememberRecommendationTitles(batch.map((item) => item.title));
-    rememberRecommendationHistory(batch, request);
-    const next = createRecommendationSession(batch[0], request, batch, data._trust?.displayState);
+    rememberRecommendationHistory(batch, request, runId);
+    const next = createRecommendationSession(batch[0], request, batch, data._trust?.displayState, runId);
     localStorage.setItem(recommendationStorageKey, JSON.stringify(next));
     setSession(next);
     setBatchIndex(0);
@@ -342,6 +343,14 @@ export default function RecommendationPage() {
       confidence: batch[0].confidence,
       parsedIntent: batch[0].parsedIntent,
       source: "reroll",
+    });
+    captureRecommendationRun({
+      runId,
+      source: request.platformFilter === "any" ? "search-all-cinema" : "reroll",
+      request,
+      recommendation: batch[0],
+      batch,
+      displayState: data._trust?.displayState,
     });
   }
 
@@ -380,6 +389,7 @@ export default function RecommendationPage() {
     setFeedbackReason(reason);
     const request = session.request;
     const payload = {
+      runId: session.runId,
       reason,
       title: session.recommendation.title,
       year: session.recommendation.year,

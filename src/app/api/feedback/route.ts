@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 type FeedbackEvent = {
   sessionId: string;
+  runId?: string;
   reason: string;
   phase?: string;
   title: string;
@@ -43,6 +44,7 @@ export async function POST(req: Request) {
 
     const event: FeedbackEvent = {
       sessionId: body.sessionId ?? "unknown",
+      runId: body.runId,
       reason: body.reason ?? "unknown",
       phase: body.phase,
       title: body.title ?? "",

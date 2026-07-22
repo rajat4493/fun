@@ -1,4 +1,4 @@
-import { ParsedRecommendationIntent, RawRecommendation, RecommendRequest, Recommendation } from "@/lib/types";
+import { IntentContract, ParsedRecommendationIntent, RawRecommendation, RecommendRequest, Recommendation } from "@/lib/types";
 import { requestText } from "@/lib/recommendation-utils";
 import { extractIntent, RecommendationIntent } from "@/lib/intent";
 
@@ -115,7 +115,51 @@ function parsedIntentTerms(parsedIntent?: ParsedRecommendationIntent): Set<strin
   return new Set(values);
 }
 
-function parsedIntentContradictions(input: RecommendRequest, rec: RawRecommendation | Recommendation): string[] {
+function labelTerms(values: Array<string | undefined> | undefined): string[] {
+  return (values ?? [])
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.toLowerCase().trim().replace(/[^a-z0-9-]+/g, "-"))
+    .filter(Boolean);
+}
+
+const knownTitleSignals: Record<string, string[]> = {
+  abouttime: ["romance", "comfort", "warm", "feel-good"],
+  amelie: ["romance", "comedy", "whimsy", "warm"],
+  nottinghill: ["romance", "comedy", "warm"],
+  thelunchbox: ["romance", "drama", "warm", "bittersweet"],
+  theintouchables: ["comfort", "comedy", "feel-good", "warm"],
+  thefortyyearoldversion: ["comedy", "drama", "creative", "warm"],
+  thegreatbeauty: ["drama", "arthouse", "melancholy"],
+  paterson: ["drama", "comfort", "quiet", "poetic"],
+};
+
+function structuredTerms(rec: RawRecommendation | Recommendation): Set<string> {
+  const terms = new Set([
+    ...parsedIntentTerms(rec.parsedIntent),
+    ...labelTerms(rec.contentCategory),
+    ...labelTerms(rec.emotionalEffect),
+    ...(knownTitleSignals[normalize(rec.title)] ?? []),
+  ]);
+  return terms;
+}
+
+function hasStructuredSignals(rec: RawRecommendation | Recommendation): boolean {
+  return Boolean(
+    rec.parsedIntent ||
+    rec.contentCategory?.length ||
+    rec.emotionalEffect?.length ||
+    knownTitleSignals[normalize(rec.title)]?.length,
+  );
+}
+
+function effectivePrimaryIntents(local: RecommendationIntent, contract?: IntentContract): string[] {
+  if (contract && contract.source === "llm" && contract.confidence >= 0.6 && contract.primary !== "unknown") {
+    return [contract.primary, ...contract.secondary].filter(Boolean);
+  }
+  return local.primaryIntents;
+}
+
+function parsedIntentContradictions(input: RecommendRequest, rec: RawRecommendation | Recommendation, contract?: IntentContract): string[] {
   const local = extractIntent(input);
   const declared = parsedIntentPrimary(rec.parsedIntent);
   const terms = parsedIntentTerms(rec.parsedIntent);
@@ -131,7 +175,7 @@ function parsedIntentContradictions(input: RecommendRequest, rec: RawRecommendat
     new RegExp(`\\b${intent}\\b`, "i").test(ambiguity);
   const requires = (intent: string, allowed: string[]) => {
     if (ambiguityTreatsAsAvoidance(intent)) return;
-    if (local.primaryIntents.includes(intent) && !declaredAs(allowed)) {
+    if (effectivePrimaryIntents(local, contract).includes(intent) && !declaredAs(allowed)) {
       reasons.push(`parsedIntent: missed explicit ${intent} intent`);
     }
   };
@@ -205,6 +249,19 @@ function avoidanceViolations(input: RecommendRequest, rec: RawRecommendation | R
   const reasons: string[] = [];
 
   const isKnownHorror = knownHorrorOrGoreTitles.has(titleKey);
+  const terms = structuredTerms(rec);
+  const hasStructured = hasStructuredSignals(rec);
+  const hasAny = (labels: string[]) => labels.some((label) => terms.has(label));
+
+  if (hasStructured) {
+    if (!allowIntensity && avoids.has("gore") && (isKnownHorror || hasAny(["gore", "gory", "body-horror", "splatter", "graphic-violence"]))) reasons.push("avoidance: gore");
+    if (!allowIntensity && avoids.has("horror") && (isKnownHorror || hasAny(["horror", "gore", "body-horror", "haunted", "supernatural", "nightmare"]))) reasons.push("avoidance: horror");
+    if (!allowIntensity && avoids.has("violence") && (isKnownHorror || hasAny(["violence", "violent", "graphic-violence", "brutal", "war", "combat"]))) reasons.push("avoidance: violence");
+    if (!allowIntensity && avoids.has("graphic violence") && (isKnownHorror || hasAny(["graphic-violence", "gore", "body-horror", "brutal"]))) reasons.push("avoidance: graphic violence");
+    if (avoids.has("sex") && hasAny(["sex", "sexual", "erotic", "nudity", "raunchy"])) reasons.push("avoidance: explicit sexual content");
+    return [...new Set(reasons)];
+  }
+
   if (!allowIntensity && avoids.has("gore") && (isKnownHorror || goreTerms.test(text))) reasons.push("avoidance: gore");
   if (!allowIntensity && avoids.has("horror") && (isKnownHorror || horrorTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: horror");
   if (!allowIntensity && avoids.has("violence") && (isKnownHorror || violenceTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: violence");
@@ -265,32 +322,60 @@ function explicitFormatViolation(input: RecommendRequest, rec: RawRecommendation
   return null;
 }
 
-function explicitGenreViolations(input: RecommendRequest, rec: RawRecommendation | Recommendation, intent = extractIntent(input)): string[] {
+const structuredAllowedTerms: Record<string, string[]> = {
+  scare: ["scare", "horror", "fear", "dread", "terror", "frightening", "haunted", "supernatural", "thriller", "tension", "nightmare"],
+  cry: ["cry", "tearjerker", "catharsis", "cathartic", "emotional", "devastating", "heartbreak", "heartbreaking", "moving", "grief", "poignant", "drama"],
+  comedy: ["comedy", "funny", "humor", "humour", "laughter", "laugh", "witty", "slapstick", "satire", "playful"],
+  thriller: ["thriller", "suspense", "mystery", "crime", "noir", "detective", "investigation", "paranoid", "tension", "tense", "conspiracy"],
+  romance: ["romance", "romantic", "love", "relationship", "chemistry", "tender", "warm"],
+  weird: ["weird", "strange", "offbeat", "surreal", "absurd", "bizarre", "experimental", "quirky", "odd"],
+  gore: ["gore", "gory", "body-horror", "splatter", "brutal", "visceral", "graphic-violence"],
+  drama: ["drama", "dramatic", "character-study", "serious", "emotional", "prestige", "melodrama"],
+};
+
+function structuredIntentViolation(primary: string, rec: RawRecommendation | Recommendation): string | null {
+  if (!hasStructuredSignals(rec)) return null;
+  const allowed = structuredAllowedTerms[primary];
+  if (!allowed) return null;
+  const terms = structuredTerms(rec);
+  return allowed.some((term) => terms.has(term))
+    ? null
+    : `intent: requested ${primary}, structured labels do not support it`;
+}
+
+function explicitGenreViolations(input: RecommendRequest, rec: RawRecommendation | Recommendation, intent = extractIntent(input), contract?: IntentContract): string[] {
   const request = intent.requestText || requestText(input);
   const text = contentText(rec);
   const reasons: string[] = [];
+  const primaryIntents = effectivePrimaryIntents(intent, contract);
 
-  if (intent.primaryIntents.includes("thriller") && !thrillerTerms.test(text)) {
+  for (const primary of primaryIntents) {
+    const structuredViolation = structuredIntentViolation(primary, rec);
+    if (structuredViolation) reasons.push(structuredViolation);
+  }
+  if (reasons.length > 0 || hasStructuredSignals(rec)) return reasons;
+
+  if (primaryIntents.includes("thriller") && !thrillerTerms.test(text)) {
     reasons.push("intent: requested thriller/suspense");
   }
-  if (intent.primaryIntents.includes("comedy") && !funnyTerms.test(text)) {
+  if (primaryIntents.includes("comedy") && !funnyTerms.test(text)) {
     reasons.push("intent: requested comedy/funny");
   }
-  if (intent.primaryIntents.includes("romance") && !romanceTerms.test(text)) {
+  if (primaryIntents.includes("romance") && !romanceTerms.test(text)) {
     reasons.push("intent: requested romance");
   }
-  if (intent.primaryIntents.includes("scare")) {
+  if (primaryIntents.includes("scare")) {
     if (softScareFalsePositiveTitles.has(normalize(rec.title)) || !fearTerms.test(text)) {
       reasons.push("intent: requested genuinely scary/fear-inducing");
     }
   }
-  if (intent.primaryIntents.includes("cry") && !cryTerms.test(text)) {
+  if (primaryIntents.includes("cry") && !cryTerms.test(text)) {
     reasons.push("intent: requested tearjerker/catharsis");
   }
   if (/\bdrama\b/i.test(request) && !dramaTerms.test(text)) {
     reasons.push("intent: requested drama");
   }
-  if (intent.primaryIntents.includes("weird") && !weirdTerms.test(text)) {
+  if (primaryIntents.includes("weird") && !weirdTerms.test(text)) {
     reasons.push("intent: requested weird/offbeat");
   }
 
@@ -307,26 +392,27 @@ function hiddenGemViolation(input: RecommendRequest, rec: RawRecommendation | Re
     : null;
 }
 
-function positiveFitViolations(input: RecommendRequest, rec: RawRecommendation | Recommendation): string[] {
+function positiveFitViolations(input: RecommendRequest, rec: RawRecommendation | Recommendation, contract?: IntentContract): string[] {
   const intent = extractIntent(input);
   return [
-    ...parsedIntentContradictions(input, rec),
+    ...parsedIntentContradictions(input, rec, contract),
     explicitFormatViolation(input, rec, intent),
     hiddenGemViolation(input, rec, intent),
-    ...explicitGenreViolations(input, rec, intent),
+    ...explicitGenreViolations(input, rec, intent, contract),
   ].filter((reason): reason is string => Boolean(reason));
 }
 
 export function validateRecommendation<T extends RawRecommendation | Recommendation>(
   input: RecommendRequest,
   rec: T,
+  contract?: IntentContract,
 ): TrustRejection | null {
   const reasons = [
     memoryViolation(input, rec),
     confidenceViolation(rec),
     runtimeViolation(input, rec),
     ...avoidanceViolations(input, rec),
-    ...positiveFitViolations(input, rec),
+    ...positiveFitViolations(input, rec, contract),
   ].filter((reason): reason is string => Boolean(reason));
 
   return reasons.length ? { title: rec.title, reasons } : null;
@@ -335,6 +421,7 @@ export function validateRecommendation<T extends RawRecommendation | Recommendat
 export function applyTrustFilter<T extends RawRecommendation | Recommendation>(
   input: RecommendRequest,
   batch: T[],
+  contract?: IntentContract,
 ): TrustResult<T> {
   const accepted: T[] = [];
   const rejected: TrustRejection[] = [];
@@ -347,7 +434,7 @@ export function applyTrustFilter<T extends RawRecommendation | Recommendation>(
       continue;
     }
     seen.add(titleKey);
-    const rejection = validateRecommendation(input, rec);
+    const rejection = validateRecommendation(input, rec, contract);
     if (rejection) rejected.push(rejection);
     else accepted.push(rec);
   }

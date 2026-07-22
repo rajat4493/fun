@@ -1,6 +1,6 @@
 import { hasNegatedConcept, requestText } from "@/lib/recommendation-utils";
 import { extractIntent } from "@/lib/intent";
-import { RawRecommendation, RecommendRequest } from "@/lib/types";
+import { IntentContract, RawRecommendation, RecommendRequest } from "@/lib/types";
 
 function normalizeForMatch(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -102,21 +102,30 @@ export function filterFalsePositiveRecommendations(input: RecommendRequest, batc
   return filtered.length > 0 ? filtered : batch;
 }
 
-export function localFallback(input: RecommendRequest): RawRecommendation[] {
+export function localFallback(input: RecommendRequest, intentContract?: IntentContract): RawRecommendation[] {
   const intent = extractIntent(input);
   const text = requestText(input);
+  const contractIntents = new Set(
+    [
+      intentContract?.primary,
+      ...(intentContract?.secondary ?? []),
+    ]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.toLowerCase().trim().replace(/[^a-z0-9-]+/g, "-")),
+  );
+  const contractHas = (...values: string[]) => values.some((value) => contractIntents.has(value));
   const wantsShameless = /shameless/i.test(text);
   const wantsFriends = /\bfriends\b/i.test(text);
   const wantsHindi = /\bhindi\b/i.test(text) || (input.languagePreferences ?? []).some((language) => /hindi/i.test(language));
-  const wantsThriller = /\b(thriller|tense|suspense|mystery|crime)\b/i.test(text);
-  const wantsComedy = /\b(comedy|funny|laugh|comfort|sitcom|light)\b/i.test(text);
-  const wantsRomance = /\b(romance|romantic|love|date)\b/i.test(text);
-  const wantsEmotional = /\b(emotional|moving|heartfelt|feel|feeling|sad|bittersweet)\b/i.test(text);
-  const wantsGore = (intent.primaryIntents.includes("gore") || /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(text)) &&
+  const wantsThriller = contractHas("thriller") || /\b(thriller|tense|suspense|mystery|crime)\b/i.test(text);
+  const wantsComedy = contractHas("comedy") || /\b(comedy|funny|laugh|comfort|sitcom|light)\b/i.test(text);
+  const wantsRomance = contractHas("romance") || /\b(romance|romantic|love|date)\b/i.test(text);
+  const wantsEmotional = contractHas("cry", "drama", "comfort") || /\b(emotional|moving|heartfelt|feel|feeling|sad|bittersweet)\b/i.test(text);
+  const wantsGore = (contractHas("gore") || intent.primaryIntents.includes("gore") || /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(text)) &&
     !hasNegatedConcept(text, /\b(gore|gory|blood|bloody|violence|violent)\b/i);
-  const wantsScare = (intent.primaryIntents.includes("scare") || /\b(shit scared|scare|scared|scary|terrify|terrified|terrifying|frighten|frightened|frightening|creep out|creepy|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i.test(text)) &&
+  const wantsScare = (contractHas("scare") || intent.primaryIntents.includes("scare") || /\b(shit scared|scare|scared|scary|terrify|terrified|terrifying|frighten|frightened|frightening|creep out|creepy|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i.test(text)) &&
     !hasNegatedConcept(text, /\b(scary|scare|scared|terrify|terrified|frighten|frightened|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i);
-  const wantsCry = intent.primaryIntents.includes("cry");
+  const wantsCry = contractHas("cry") || intent.primaryIntents.includes("cry");
 
   if (wantsFriends && wantsHindi) {
     const baseRec = {

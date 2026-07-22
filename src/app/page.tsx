@@ -3,30 +3,28 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  ArrowRight,
-  Ban,
-  CheckCircle2,
-  ChevronDown,
-  Clock3,
-  Compass,
-  Drama,
-  Flame,
-  Globe2,
-  Heart,
-  Lock,
-  Monitor,
-  PenLine,
-  PlayCircle,
-  Search,
-  Shield,
-  Smile,
-  Sparkles,
-  Star,
-  type LucideIcon,
-  User,
-  Zap,
-} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import ArrowRight from "lucide-react/dist/esm/icons/arrow-right.js";
+import Ban from "lucide-react/dist/esm/icons/ban.js";
+import CheckCircle2 from "lucide-react/dist/esm/icons/circle-check.js";
+import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.js";
+import Clock3 from "lucide-react/dist/esm/icons/clock-3.js";
+import Compass from "lucide-react/dist/esm/icons/compass.js";
+import Drama from "lucide-react/dist/esm/icons/drama.js";
+import Flame from "lucide-react/dist/esm/icons/flame.js";
+import Globe2 from "lucide-react/dist/esm/icons/globe-2.js";
+import Heart from "lucide-react/dist/esm/icons/heart.js";
+import Lock from "lucide-react/dist/esm/icons/lock.js";
+import Monitor from "lucide-react/dist/esm/icons/monitor.js";
+import PenLine from "lucide-react/dist/esm/icons/pen-line.js";
+import PlayCircle from "lucide-react/dist/esm/icons/circle-play.js";
+import Search from "lucide-react/dist/esm/icons/search.js";
+import Shield from "lucide-react/dist/esm/icons/shield.js";
+import Smile from "lucide-react/dist/esm/icons/smile.js";
+import Sparkles from "lucide-react/dist/esm/icons/sparkles.js";
+import Star from "lucide-react/dist/esm/icons/star.js";
+import User from "lucide-react/dist/esm/icons/user.js";
+import Zap from "lucide-react/dist/esm/icons/zap.js";
 import OnboardingFlow, {
   COUNTRIES,
   defaultPlatformsForCountry,
@@ -37,6 +35,7 @@ import OnboardingFlow, {
   saveOnboarding,
 } from "@/components/OnboardingFlow";
 import {
+  createRecommendationRunId,
   createRecommendationSession,
   dismissPostWatchPrompt,
   FeedbackReason,
@@ -54,6 +53,7 @@ import {
   rememberRecommendationTitles,
   savePostWatchFeedback,
 } from "@/lib/recommendation-session";
+import { captureRecommendationRun } from "@/lib/recommendation-analytics";
 import { CrazinessLevel, RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
 
 type Option = {
@@ -391,6 +391,7 @@ export default function Home() {
     dismissPostWatchPrompt(postWatchCandidate.title, postWatchCandidate.year);
     captureEvent("feedback", {
       phase: "post-watch",
+      runId: postWatchCandidate.runId,
       reason,
       title: postWatchCandidate.title,
       year: postWatchCandidate.year,
@@ -411,6 +412,7 @@ export default function Home() {
       body: JSON.stringify({
         sessionId: getOrCreateSessionId(),
         phase: "post-watch",
+        runId: postWatchCandidate.runId,
         reason,
         title: postWatchCandidate.title,
         year: postWatchCandidate.year,
@@ -511,9 +513,10 @@ export default function Home() {
       if (!response.ok) throw new Error("Could not generate a pick.");
       const data = await response.json() as Recommendation & { _batch?: Recommendation[]; _trust?: { displayState?: RecommendationDisplayState } };
       const batch = data._batch ?? [data];
+      const runId = createRecommendationRunId();
       rememberRecommendationTitles(batch.map((item) => item.title));
-      rememberRecommendationHistory(batch, requestInput);
-      localStorage.setItem(recommendationStorageKey, JSON.stringify(createRecommendationSession(batch[0], requestInput, batch, data._trust?.displayState)));
+      rememberRecommendationHistory(batch, requestInput, runId);
+      localStorage.setItem(recommendationStorageKey, JSON.stringify(createRecommendationSession(batch[0], requestInput, batch, data._trust?.displayState, runId)));
       captureEvent("recommendation", {
         title: batch[0].title,
         year: batch[0].year,
@@ -522,6 +525,14 @@ export default function Home() {
         batch: batch.map((item) => ({ title: item.title, year: item.year, confidence: item.confidence })),
         availabilityStatus: batch[0].whereToWatch.status,
         providerCount: batch[0].whereToWatch.providers?.length ?? 0,
+      });
+      captureRecommendationRun({
+        runId,
+        source: "initial",
+        request: requestInput,
+        recommendation: batch[0],
+        batch,
+        displayState: data._trust?.displayState,
       });
     } catch (error) {
       localStorage.setItem(
