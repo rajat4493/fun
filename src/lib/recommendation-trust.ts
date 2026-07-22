@@ -414,6 +414,7 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
   if (intent.requestedFormat === "episode") {
     const episodeFallbacks: RawRecommendation[] = [
       {
+        ...base,
         title: "The Good Place: Everything Is Fine",
         year: "2016",
         format: "Episode",
@@ -438,10 +439,9 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
           { title: "Brooklyn Nine-Nine", year: "2013" },
         ],
         alternatives: ["Derry Girls (2018)", "Abbott Elementary (2021)", "Brooklyn Nine-Nine (2013)"],
-        ...base,
-        format: "Episode",
       },
       {
+        ...base,
         title: "Derry Girls: Episode 1",
         year: "2018",
         format: "Episode",
@@ -466,8 +466,6 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
           { title: "Parks and Recreation", year: "2009" },
         ],
         alternatives: ["The Good Place (2016)", "Abbott Elementary (2021)", "Parks and Recreation (2009)"],
-        ...base,
-        format: "Episode",
       },
     ];
     return episodeFallbacks.find((candidate) => !isExcluded(candidate.title)) ?? episodeFallbacks[0];
