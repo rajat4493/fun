@@ -102,16 +102,13 @@ function parsedIntentPrimary(parsedIntent?: ParsedRecommendationIntent): string 
   return parsedIntent?.primary?.toLowerCase().trim().replace(/[^a-z0-9-]+/g, "-") ?? "";
 }
 
+// Only includes what the LLM declared the film IS (primary + secondary).
+// hardAvoids/softAvoids are what the USER wants to avoid — including them caused false
+// contradiction fires when the LLM correctly echoes the user's avoidances in parsedIntent.
 function parsedIntentTerms(parsedIntent?: ParsedRecommendationIntent): Set<string> {
   const values = [
     parsedIntent?.primary,
     ...(parsedIntent?.secondary ?? []),
-    ...(parsedIntent?.hardAvoids ?? []),
-    ...(parsedIntent?.softAvoids ?? []),
-    parsedIntent?.format,
-    parsedIntent?.language,
-    ...(parsedIntent?.situation ?? []),
-    parsedIntent?.intensity,
   ]
     .filter((value): value is string => Boolean(value))
     .map((value) => value.toLowerCase().trim().replace(/[^a-z0-9-]+/g, "-"));
@@ -392,6 +389,8 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
   const wantsThriller = /\b(thriller|suspense|mystery|crime thriller|tense and clever)\b/i.test(text);
   const wantsDrama = /\bdrama\b/i.test(text);
   const wantsWeirdSafe = /\b(weird|strange|unusual|offbeat|quirky|absurd|surreal|funny|comedy)\b/i.test(text) || (input.craziness ?? 0) >= 2;
+  const wantsScare = intent.primaryIntents.includes("scare") && !intent.hardAvoids.includes("horror");
+  const wantsGore = intent.primaryIntents.includes("gore") && !intent.hardAvoids.some((avoid) => ["gore", "horror", "violence", "graphic violence"].includes(avoid));
   const isExcluded = (title: string) => {
     const key = normalize(title);
     return [...(input.recentTitles ?? []), ...(input.seenTitles ?? [])].some((item) => normalize(item) === key);
@@ -411,8 +410,151 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
     },
   };
 
+  if ((wantsScare || wantsGore) && intent.requestedFormat !== "episode") {
+    const scaryFallbacks: RawRecommendation[] = [
+      {
+        ...base,
+        title: "Apostle",
+        year: "2018",
+        runtime: "130 min",
+        vibe: wantsGore ? "folk horror, brutal, gory" : "folk horror, dread, cult terror",
+        confidence: wantsGore ? 82 : 84,
+        parsedIntent: {
+          primary: wantsGore ? "gore" : "scare",
+          format: "film",
+          language: "any",
+          intensity: (input.craziness ?? 1) >= 2 ? "bold" : "curious",
+        },
+        oneLine: wantsGore
+          ? "Watch Apostle when you want a horror pick that turns ritual dread into something properly brutal."
+          : "Watch Apostle when the brief is real dread, not a sad or quirky detour.",
+        whyItFits: [
+          wantsGore ? "It has physical horror and brutal moments, not just implied menace." : "It is recognisably horror first, so the scare request stays intact.",
+          "The isolated cult setting gives the fear a clear, escalating engine.",
+          "It works as a last-resort fallback because it answers the intent directly instead of becoming a comfort pick.",
+        ],
+        hiddenTitles: [
+          { title: "His House", year: "2020" },
+          { title: "The Babadook", year: "2014" },
+          { title: "The Conjuring", year: "2013" },
+        ],
+        alternatives: ["His House (2020)", "The Babadook (2014)", "The Conjuring (2013)"],
+      },
+      {
+        ...base,
+        title: "The Babadook",
+        year: "2014",
+        runtime: "94 min",
+        vibe: "psychological horror, grief, dread",
+        confidence: 80,
+        parsedIntent: {
+          primary: "scare",
+          format: "film",
+          language: "any",
+          intensity: "curious",
+        },
+        oneLine: "Watch The Babadook for a scary film that makes the room feel wrong through atmosphere and dread.",
+        whyItFits: [
+          "It satisfies the fear intent through dread and psychological pressure.",
+          "The runtime is compact enough for a direct horror night.",
+          "It is a better fallback for scare requests than a surreal drama or warm romance.",
+        ],
+        hiddenTitles: [
+          { title: "His House", year: "2020" },
+          { title: "The Conjuring", year: "2013" },
+          { title: "Apostle", year: "2018" },
+        ],
+        alternatives: ["His House (2020)", "The Conjuring (2013)", "Apostle (2018)"],
+      },
+      {
+        ...base,
+        title: "His House",
+        year: "2020",
+        runtime: "93 min",
+        vibe: "haunted, political, frightening",
+        confidence: 79,
+        parsedIntent: {
+          primary: "scare",
+          format: "film",
+          language: "any",
+          intensity: "curious",
+        },
+        oneLine: "Watch His House for a haunted-house film with real dread and a sharp emotional core.",
+        whyItFits: [
+          "It is scary in the plain sense: haunted spaces, threat, and sustained unease.",
+          "The emotional layer deepens the fear without replacing it.",
+          "It avoids the fallback mistake of treating fear as general moodiness.",
+        ],
+        hiddenTitles: [
+          { title: "The Babadook", year: "2014" },
+          { title: "The Conjuring", year: "2013" },
+          { title: "Apostle", year: "2018" },
+        ],
+        alternatives: ["The Babadook (2014)", "The Conjuring (2013)", "Apostle (2018)"],
+      },
+    ];
+
+    if ((input.craziness ?? 0) >= 2 && wantsGore) {
+      scaryFallbacks.unshift({
+        ...base,
+        title: "Raw",
+        year: "2016",
+        runtime: "99 min",
+        vibe: "body horror, gruesome, controlled",
+        confidence: 82,
+        parsedIntent: {
+          primary: "gore",
+          format: "film",
+          language: "any",
+          intensity: "bold",
+        },
+        oneLine: "Watch Raw when the request is body horror with teeth, not just a horror label.",
+        whyItFits: [
+          "It answers gore through flesh, appetite, and bodily transformation.",
+          "The shock has craft and character psychology behind it.",
+          "It is intense without becoming a random fallback title.",
+        ],
+        hiddenTitles: [
+          { title: "Titane", year: "2021" },
+          { title: "The Sadness", year: "2021" },
+          { title: "Possessor", year: "2020" },
+        ],
+        alternatives: ["Titane (2021)", "The Sadness (2021)", "Possessor (2020)"],
+      });
+    }
+
+    return scaryFallbacks.find((candidate) => !isExcluded(candidate.title)) ?? scaryFallbacks[0];
+  }
+
   if (intent.requestedFormat === "episode") {
     const episodeFallbacks: RawRecommendation[] = [
+      ...(wantsScare ? [{
+        ...base,
+        title: "The Haunting of Hill House: The Bent-Neck Lady",
+        year: "2018",
+        format: "Episode" as const,
+        runtime: "57 min",
+        vibe: "scary, emotional, haunted",
+        confidence: 80,
+        parsedIntent: {
+          primary: "scare",
+          format: "episode" as const,
+          language: "any",
+          intensity: "curious" as const,
+        },
+        oneLine: "Watch The Bent-Neck Lady when you want one self-contained episode that actually scares.",
+        whyItFits: [
+          "It satisfies the one-episode request rather than suggesting a whole season.",
+          "The horror is direct and memorable, not just vaguely moody.",
+          "It has enough emotional weight to land without needing a binge.",
+        ],
+        hiddenTitles: [
+          { title: "Black Mirror: Playtest", year: "2016" },
+          { title: "Cabinet of Curiosities: The Autopsy", year: "2022" },
+          { title: "Inside No. 9: The Riddle of the Sphinx", year: "2017" },
+        ],
+        alternatives: ["Black Mirror: Playtest (2016)", "Cabinet of Curiosities: The Autopsy (2022)", "Inside No. 9: The Riddle of the Sphinx (2017)"],
+      }] : []),
       {
         ...base,
         title: "The Good Place: Everything Is Fine",
@@ -423,9 +565,9 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
         confidence: 78,
         parsedIntent: {
           primary: "comedy",
-          format: "episode",
+          format: "episode" as const,
           language: "any",
-          intensity: "safe",
+          intensity: "safe" as const,
         },
         oneLine: "Watch the pilot of The Good Place when you need one clean, funny episode with an actual ending point.",
         whyItFits: [
@@ -450,9 +592,9 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
         confidence: 76,
         parsedIntent: {
           primary: "comedy",
-          format: "episode",
+          format: "episode" as const,
           language: "any",
-          intensity: "safe",
+          intensity: "safe" as const,
         },
         oneLine: "Watch the first episode of Derry Girls for a short, high-energy comedy hit.",
         whyItFits: [
@@ -605,7 +747,7 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
         confidence: 72,
         oneLine: "Watch Do Dooni Chaar for an easy Hindi comfort pick that protects your avoidances.",
         whyItFits: [
-          "It keeps the evening human and accessible without leaning on gore, horror, or heavy violence.",
+          "It keeps the evening human, accessible, and emotionally low-stakes.",
           "The emotional weight stays everyday and low-regret rather than punishing.",
           "It is a safer close match when the stricter mood could not be satisfied cleanly.",
         ],
@@ -651,7 +793,7 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
         confidence: 76,
         oneLine: "Watch Hundreds of Beavers when you want something truly odd without breaking your avoidances.",
         whyItFits: [
-          "It gives adventurous Taste Risk a strange, memorable shape without leaning on gore or horror.",
+          "It gives adventurous Taste Risk a strange, memorable shape while staying in absurdist comedy territory.",
           "The comedy is physical and group-reactive, so it works when the mood wants energy rather than homework.",
           "It is a safer close match when stricter candidates crossed your boundaries.",
         ],
@@ -716,7 +858,7 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
       confidence: 76,
       oneLine: "Watch The Fundamentals of Caring when you want something gentle, human, and easy to say yes to.",
       whyItFits: [
-        "It avoids gore, horror, and heavy violence while still feeling like a real film, not filler.",
+        "It keeps the mood warm and human while still feeling like a real film, not filler.",
         "The runtime respects a short evening and keeps the effort budget low.",
         "It is a safer close match when the stricter mood could not be satisfied cleanly.",
       ],

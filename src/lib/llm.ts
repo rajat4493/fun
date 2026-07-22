@@ -1,7 +1,9 @@
 import { RawRecommendation } from "@/lib/types";
 import { extractJson, uniqueValues, withTimeout } from "@/lib/recommendation-utils";
 
-const LLM_TIMEOUT_MS = 25000;
+const ANTHROPIC_TIMEOUT_MS = 25000;
+const FALLBACK_LLM_TIMEOUT_MS = 15000;
+const LLM_MAX_OUTPUT_TOKENS = 3000;
 
 type AnthropicTextBlock = {
   type: "text";
@@ -62,10 +64,11 @@ export async function recommendWithGenericLLM(prompt: string, temperature = 0.85
       body: JSON.stringify({
         model,
         temperature,
+        max_tokens: LLM_MAX_OUTPUT_TOKENS,
         messages: [{ role: "user", content: prompt }],
       }),
     }),
-    LLM_TIMEOUT_MS,
+    FALLBACK_LLM_TIMEOUT_MS,
     `Generic LLM (${model})`,
   );
 
@@ -89,12 +92,12 @@ export async function recommendWithAnthropic(prompt: string, temperature = 0.85)
       },
       body: JSON.stringify({
         model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
-        max_tokens: 4000,
+        max_tokens: LLM_MAX_OUTPUT_TOKENS,
         temperature,
         messages: [{ role: "user", content: prompt }],
       }),
     }),
-    LLM_TIMEOUT_MS,
+    ANTHROPIC_TIMEOUT_MS,
     "Anthropic",
   );
 
@@ -130,9 +133,10 @@ export async function recommendWithOpenAI(prompt: string, temperature = 0.85): P
             model,
             input: prompt,
             temperature,
+            max_output_tokens: LLM_MAX_OUTPUT_TOKENS,
           }),
         }),
-        LLM_TIMEOUT_MS,
+        FALLBACK_LLM_TIMEOUT_MS,
         `OpenAI ${model}`,
       );
 

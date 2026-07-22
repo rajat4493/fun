@@ -945,11 +945,11 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
         runtime: "108 min",
         vibe: "absurd, slapstick, wildly inventive",
         confidence: 82,
-        oneLine: "Watch Hundreds of Beavers when you want something genuinely strange without crossing into gore or horror.",
+        oneLine: "Watch Hundreds of Beavers when you want something genuinely strange that stays in absurdist slapstick territory.",
         whyItFits: [
-          "It gives Taste Risk a wild formal shape while staying closer to slapstick than darkness.",
+          "It gives Taste Risk a wild formal shape while staying entirely in comedy territory.",
           "The energy is group-reactive and funny, so it works better for friends than a quiet prestige pick.",
-          "It respects the no-gore/no-horror boundary while still feeling like a discovery.",
+          "It is weird enough to feel like a real discovery while keeping the mood light.",
         ],
         hiddenTitles: [
           { title: "Marcel the Shell with Shoes On", year: "2021" },
@@ -967,7 +967,7 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
         confidence: 80,
         oneLine: "Watch Marcel the Shell with Shoes On for a tiny, strange comfort film that does not punish the mood.",
         whyItFits: [
-          "It is unusual without becoming violent, gory, or horror-coded.",
+          "It is unusual without ever demanding emotional toughness from the viewer.",
           "The emotional payoff is gentle and easy to receive when energy is low.",
           "It feels specific enough to avoid the generic comfort-pick trap.",
         ],

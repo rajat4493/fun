@@ -498,3 +498,91 @@ Constraints:
 - The response must be valid JSON only, no markdown fences.
 `;
 }
+
+type CompactRejection = {
+  title: string;
+  reasons: string[];
+};
+
+export function buildCompactRetryPrompt(input: RecommendRequest, rejections: CompactRejection[]) {
+  const intent = extractIntent(input);
+  const country = input.country || "not provided";
+  const platforms = input.platforms?.length ? input.platforms.join(", ") : "not specified";
+  const languagePreferences = input.languagePreferences?.length ? input.languagePreferences.join(", ") : "no preference";
+  const platformScope = input.platformFilter === "mine"
+    ? `Only recommend titles you are highly confident are available on the user's subscriptions: ${platforms} in ${country}.`
+    : "Availability will be checked after recommendation; do not claim verified streaming.";
+  const rejectionsText = rejections.length
+    ? rejections.slice(0, 8).map((item) => `- ${item.title}: ${item.reasons.join("; ")}`).join("\n")
+    : "- none";
+
+  return `
+You are F.U.N. The first recommendation attempt failed backend trust checks.
+Return exactly THREE different recommendations as valid JSON only. No markdown.
+
+User contract:
+- Request text: ${intent.requestText || "not provided"}
+- Country: ${country}
+- Language preference: ${languagePreferences}
+- Platform scope: ${platformScope}
+- Primary intent(s): ${intent.primaryIntents.length ? intent.primaryIntents.join(", ") : "infer from request"}
+- Hard avoids: ${intent.hardAvoids.length ? intent.hardAvoids.join(", ") : "none"}
+- Soft avoids: ${intent.softAvoids.length ? intent.softAvoids.join(", ") : "none"}
+- Requested format: ${intent.requestedFormat ?? "any"}
+- Runtime limit: ${intent.runtimeLimitMinutes ? `${intent.runtimeLimitMinutes} minutes` : "none"}
+- Hidden-gem intent: ${intent.hiddenGem ? "yes" : "no"}
+- Recent titles to avoid: ${input.recentTitles?.slice(0, 10).join(", ") || "none"}
+- Already seen to avoid: ${input.seenTitles?.slice(0, 10).join(", ") || "none"}
+
+Rejected candidates:
+${rejectionsText}
+
+Rules:
+- Fix the rejection reason directly. Do not repeat rejected titles or obvious adjacent titles.
+- Explicit intent outranks situation and broad mood. If the user asks to be scared, pick real scary/horror. If they ask to cry, pick real catharsis. If they ask comedy, pick comedy.
+- Hard avoids are absolute. If horror/gore/violence/sex are avoided, do not recommend or hide those in related titles.
+- If a film is requested, do not return a series. If one episode is requested, return a specific episode.
+- Fill parsedIntent before choosing the title.
+
+Schema:
+[
+  {
+    "parsedIntent": {
+      "primary": "scare|cry|comedy|thriller|romance|weird|comfort|gore|drama|discovery|unknown",
+      "secondary": [],
+      "hardAvoids": [],
+      "softAvoids": [],
+      "format": "film|series|episode|any",
+      "language": "requested language/culture lane or 'any'",
+      "situation": [],
+      "intensity": "safe|curious|bold|unhinged",
+      "ambiguity": ""
+    },
+    "title": "string",
+    "year": "string",
+    "format": "Film|Series|Episode|Documentary|Unknown",
+    "runtime": "string",
+    "vibe": "string",
+    "confidence": 75,
+    "oneLine": "one sentence",
+    "whyItFits": ["reason 1", "reason 2", "reason 3"],
+    "whereToWatch": {
+      "status": "unverified",
+      "primary": "Availability not verified",
+      "note": "F.U.N will verify this in real time. Check your apps before watching."
+    },
+    "hiddenLayer": {
+      "headline": "short headline",
+      "insight": "factual taste insight",
+      "classyJab": "short tasteful line"
+    },
+    "hiddenTitles": [
+      { "title": "string", "year": "string" },
+      { "title": "string", "year": "string" },
+      { "title": "string", "year": "string" }
+    ],
+    "alternatives": ["Title (Year)", "Title (Year)", "Title (Year)"]
+  }
+]
+`;
+}
