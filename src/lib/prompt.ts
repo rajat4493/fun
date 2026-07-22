@@ -1,4 +1,5 @@
 import { hasNegatedConcept } from "@/lib/recommendation-utils";
+import { extractIntent, RecommendationIntent } from "@/lib/intent";
 import { RecommendRequest } from "./types";
 
 function buildTasteFingerprint(userContext: string) {
@@ -84,14 +85,14 @@ function situationSource(input: RecommendRequest): string {
     input.avoids?.join(" "),
     input.time,
     input.energy,
-    input.viewingContext,
     input.contextHint,
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
-function buildSituationClause(input: RecommendRequest): string {
+function buildSituationClause(input: RecommendRequest, intent: RecommendationIntent): string {
   const text = situationSource(input);
   const clauses: string[] = [];
+  const explicitIntents = new Set(intent.primaryIntents);
 
   if (/\b(journey|travel|travelling|traveling|train|flight|plane|airport|bus|cab|taxi|uber|commute|road trip|on the way|in transit)\b/i.test(text)) {
     clauses.push("In-transit viewing detected: favor interruption-tolerant, easy re-entry stories that work on a smaller screen. Prefer clear momentum, strong premise, and moderate runtime. Avoid subtitle-heavy visual slow burns, films that require perfect silence, or dense plots where missing two minutes ruins the experience.");
@@ -109,7 +110,10 @@ function buildSituationClause(input: RecommendRequest): string {
     clauses.push("Waiting-time viewing detected: the session length may be uncertain. Favor absorbing but interruptible stories with quick hooks. Avoid very slow setup, emotionally punishing arcs, or films that only pay off after a long final act.");
   }
 
-  if (/\b(date night|date-night|with my date|romantic night|watching with (my )?(partner|boyfriend|girlfriend|wife|husband))\b/i.test(text)) {
+  if (
+    /\b(date night|date-night|with my date|romantic night|watching with (my )?(partner|boyfriend|girlfriend|wife|husband))\b/i.test(text) &&
+    !["scare", "cry", "gore", "thriller"].some(i => explicitIntents.has(i))
+  ) {
     clauses.push("Date-night viewing detected: favor shared chemistry, emotional readability, conversational aftertaste, and endings that do not sour the room. If the user asks for romance or funny, avoid bleak endings and awkwardly explicit content unless explicitly requested.");
   }
 
@@ -130,75 +134,40 @@ function buildSituationClause(input: RecommendRequest): string {
   return `\n  - Situation context from free text: ${clauses.join(" ")} Why-it-fits reasons must reference this situation when it is central to the request.`;
 }
 
-function hasNegated(text: string, pattern: RegExp): boolean {
-  return hasNegatedConcept(text, pattern);
-}
-
-function buildAvoidanceTiers(input: RecommendRequest, userContext: string) {
-  const text = userContext.toLowerCase();
-  const hard = new Set<string>();
-  const soft = new Set<string>();
-
-  for (const avoid of input.avoids ?? []) {
-    const value = avoid.toLowerCase().trim();
-    if (/\bgore|gory|blood\b/.test(value)) hard.add("gore");
-    else if (/\bhorror|scary\b/.test(value)) hard.add("horror");
-    else if (/\bviolence|violent\b/.test(value)) hard.add("violence");
-    else if (/\bslow|slow burn|slow-burn\b/.test(value)) soft.add("slow pacing");
-    else if (/\bheavy drama|heavy\b/.test(value)) soft.add("heavy drama");
-    else if (/\bsad ending|tragic ending|sad\b/.test(value)) soft.add("sad ending");
-    else hard.add(avoid);
-  }
-
-  if (hasNegated(text, /\bgore|gory|blood|bloody|splatter|body horror\b/i)) hard.add("gore");
-  if (hasNegated(text, /\bviolence|violent|brutal|graphic violence\b/i)) hard.add("violence");
-  if (hasNegated(text, /\bhorror|scary|ghost|haunted|supernatural\b/i)) hard.add("horror");
-  if (hasNegated(text, /\bsex|sexual|nudity|erotic|explicit|raunchy|awkward sexual content\b/i)) hard.add("explicit sexual content");
-  if (/\b(family safe|family-safe|with family|with parents|parents|kids|children|work safe|work-safe|at work|office)\b/i.test(text)) {
-    hard.add("explicit sexual content");
-    hard.add("graphic violence");
-    hard.add("gore");
-    hard.add("horror");
-  }
-
-  if (hasNegated(text, /\bheavy drama|heavy|trauma|depressing|bleak\b/i)) soft.add("heavy drama");
-  if (hasNegated(text, /\bsad ending|tragic ending|sad\b/i)) soft.add("sad ending");
-  if (hasNegated(text, /\bslow|slow burn|slow-burn\b/i)) soft.add("slow pacing");
-
-  return { hard: [...hard], soft: [...soft] };
-}
-
-function buildPracticalConstraints(input: RecommendRequest, userContext: string): string[] {
+function buildPracticalConstraints(input: RecommendRequest, userContext: string, intent: RecommendationIntent): string[] {
   const constraints: string[] = [];
   const text = userContext.toLowerCase();
   const minuteLimit = text.match(/\b(?:under|less than|within|up to|max(?:imum)?|no more than)\s+(\d{1,3})\s*(?:min|mins|minutes)\b/);
   const plainMinutes = text.match(/\b(\d{1,3})\s*(?:min|mins|minutes)\b/);
 
-  if (/\b(one|1)\s+episode\b|\ban episode\b/i.test(text) || input.time?.toLowerCase().includes("one episode")) {
-    constraints.push("Format/time: recommend one episode, not a full film, unless the user explicitly asks for a movie.");
+  if (intent.requestedFormat === "episode" || /\b(one|1)\s+episode\b|\ban episode\b/i.test(text) || input.time?.toLowerCase().includes("one episode")) {
+    constraints.push("Format/time: recommend a specific one-episode watch. Set format to Episode or make runtime clearly say per episode. Do not return a general series/binge recommendation.");
+  } else if (intent.requestedFormat === "film") {
+    constraints.push("Format: recommend a movie/film, not a series or full-season suggestion.");
+  } else if (intent.requestedFormat === "series") {
+    constraints.push("Format: recommend a series/show, not a film, unless availability makes a film the only honest fit.");
   }
 
-  const limit = minuteLimit ? Number(minuteLimit[1]) : plainMinutes ? Number(plainMinutes[1]) : null;
+  const limit = intent.runtimeLimitMinutes ?? (minuteLimit ? Number(minuteLimit[1]) : plainMinutes ? Number(plainMinutes[1]) : null);
   if (limit && limit >= 10 && limit <= 240) {
     constraints.push(`Runtime: stay within ${limit} minutes.`);
   } else if (/\b(?:under|less than|within|up to|max(?:imum)?|no more than)\s+(?:two|2)\s+hours?\b/i.test(text) || input.time?.toLowerCase().includes("under 2")) {
     constraints.push("Runtime: stay under two hours.");
   }
 
-  if (/\b(family safe|family-safe|with family|with parents|parents|kids|children)\b/i.test(text)) {
+  if (intent.familySafe || /\b(family safe|family-safe|with family|with parents|parents|kids|children)\b/i.test(text)) {
     constraints.push("Content safety: suitable for family/parents; avoid explicit sex, graphic violence, horror, and awkward adult content.");
   }
-  if (/\b(work safe|work-safe|at work|office|lunch break|between meetings)\b/i.test(text)) {
+  if (intent.workSafe || /\b(work safe|work-safe|at work|office|lunch break|between meetings)\b/i.test(text)) {
     constraints.push("Content safety: work-safe; avoid explicit sex, graphic violence, and socially awkward material.");
   }
 
   return constraints;
 }
 
-// NEW: Time/day context was always passed but never instructed. Added explicit energy-to-complexity
-// mapping (zero brain → no exposition dumps) and viewing context psychology (partner → shared arcs,
-// friends → group-reactive, alone → introspective territory OK).
-function buildContextAmplifier(input: RecommendRequest) {
+// Time/day context and typed situation still shape the pick. Structured viewingContext is muted for this version
+// because QA showed it can override explicit typed intent.
+function buildContextAmplifier(input: RecommendRequest, intent: RecommendationIntent) {
   const energyMap: Record<string, string> = {
     "very low": "Content must feel like a reward, not a task. No complex exposition dumps, no demanding narrative grammar, no slow-burn that requires patience. The viewer needs to be carried by familiar storytelling grammar, forward momentum, and payoff without effort.",
     "low": "Moderate engagement is fine. Some narrative complexity is acceptable. The pick should be involving but not punishing; the viewer can miss a small detail and not lose the thread.",
@@ -209,16 +178,7 @@ function buildContextAmplifier(input: RecommendRequest) {
     ? `\n  - Energy mapping (${input.energy}): ${energyMap[input.energy.toLowerCase()] ?? "Calibrate narrative complexity to the stated energy level."}`
     : "";
 
-  const contextMap: Record<string, string> = {
-    "alone": "Solo watch — introspective, singular-POV narratives, intimate character studies, or immersive world-building are all appropriate. Content with ambiguous endings or demanding emotional territory is more tolerable alone.",
-    "partner": "Watching with a partner — favor shared emotional experiences: tension-and-release, conversation-starter narratives, content with clear emotional arcs that two people can react to together. Avoid slow solo-character studies or content so personal it feels odd to watch with someone else.",
-    "friends": "Group watch — kinetic, entertaining, quotable, social energy. Content that provokes group reaction can work best, but only inside the user's avoidances. Avoid deeply personal or slow introspective cinema.",
-    "family": "Family watch — accessible, shared reference points, avoiding heavy adult darkness, violence, or content that would create awkward silences. Broad enough for different generations without being generic.",
-  };
-  const viewingContextClause = input.viewingContext
-    ? `\n  - Viewing context (${input.viewingContext}): ${contextMap[input.viewingContext.toLowerCase()] ?? "Calibrate social dynamics of the pick to match the stated viewing context."}`
-    : "";
-  const situationClause = buildSituationClause(input);
+  const situationClause = buildSituationClause(input, intent);
 
   return `
 - Context amplifier:
@@ -227,7 +187,7 @@ function buildContextAmplifier(input: RecommendRequest) {
   - Friday/weekend evening + happy: celebratory, kinetic, social, or deliciously entertaining; avoid overly introspective picks.
   - Late night + anxious/lonely: either controlled catharsis or beautiful alienation; avoid loud crowd-pleasers unless the user asks for escape.
   - Morning/afternoon: cleaner energy, more focused, less punishing.
-  - Winter/autumn context can support cozy, gothic, reflective, or nocturnal choices; summer/spring can support kinetic, sensual, open-air, or lighter picks.${energyClause}${viewingContextClause}${situationClause}`;
+  - Winter/autumn context can support cozy, gothic, reflective, or nocturnal choices; summer/spring can support kinetic, sensual, open-air, or lighter picks.${energyClause}${situationClause}`;
 }
 
 // UPDATED: Added good-not-perfect (emotional register slightly off → adjust precision)
@@ -295,18 +255,19 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
         input.avoids?.length ? `I do not want: ${input.avoids.join(", ")}` : "",
         input.time ? `Time available: ${input.time}` : "",
         input.energy ? `Energy level: ${input.energy}` : "",
-        input.viewingContext ? `Watching context: ${input.viewingContext}` : "",
+        // Structured viewingContext is intentionally muted for this version.
         input.reference?.trim() ? `Reference title (use as taste anchor, do NOT recommend this exact title): "${input.reference.trim()}"` : "",
       ].filter(Boolean).join(". ");
 
+  const intent = extractIntent(input);
   const country = input.country || "not provided";
   const languagePreferences = input.languagePreferences?.length ? input.languagePreferences.join(", ") : "no preference";
   const platforms = input.platforms?.length ? input.platforms.join(", ") : "not specified";
   const mineMode = input.platformFilter === "mine";
   const indieMode = input.discoveryMode === "indie";
   const detectedLanguage = detectRequestedLanguage(userContext);
-  const avoidanceTiers = buildAvoidanceTiers(input, userContext);
-  const practicalConstraints = buildPracticalConstraints(input, userContext);
+  const avoidanceTiers = { hard: intent.hardAvoids, soft: intent.softAvoids };
+  const practicalConstraints = buildPracticalConstraints(input, userContext, intent);
 
   const seenClause = input.seenTitles?.length
     ? `\n- Already seen (do NOT recommend): ${input.seenTitles.join(", ")}`
@@ -325,17 +286,18 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
 
   // --- Intensity/gore detection (must come before language clauses) ---
   // Checks structured avoids AND natural language negation (handles "I do not want: violence, gore")
-  const goreInAvoids = (input.avoids ?? []).some((a) => /gore|gory|blood|violent|violence/i.test(a));
+  const goreInAvoids = intent.hardAvoids.some((a) => /gore|gory|blood|violent|violence/i.test(a));
   const goreNegatedInText = hasNegatedConcept(userContext, /\b(gore|gory|blood|bloody|violence|violent)\b/i);
   const goreSignalPresent = /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror|violence)\b/i.test(userContext) ||
     (input.wants ?? []).some((w) => /gore|bloody|violent|extreme/i.test(w));
-  const explicitGoreWant = goreSignalPresent && !goreInAvoids && !goreNegatedInText;
+  const explicitGoreWant = intent.primaryIntents.includes("gore") || (goreSignalPresent && !goreInAvoids && !goreNegatedInText);
 
-  const crazinessLevel = input.craziness ?? 0;
+  const selectedCrazinessLevel = typeof input.craziness === "number" ? input.craziness : null;
+  const crazinessLevel = selectedCrazinessLevel ?? 1;
   const fearSignalPresent = /\b(shit scared|scare|scared|scary|terrify|terrified|terrifying|frighten|frightened|frightening|creep out|creepy|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i.test(userContext);
   const fearNegatedOrAvoided = hasNegatedConcept(userContext, /\b(scary|scare|scared|terrify|terrified|frighten|frightened|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i) ||
     (input.avoids ?? []).some((a) => /\b(horror|scary|scare|ghost|haunted|supernatural)\b/i.test(a));
-  const explicitFearWant = fearSignalPresent && !fearNegatedOrAvoided;
+  const explicitFearWant = intent.primaryIntents.includes("scare") || (fearSignalPresent && !fearNegatedOrAvoided);
   const intensityKeywordInText = /\b(horror|extreme|violent|brutal|disturbing|transgressive)\b/i.test(userContext);
   const intensityNegatedOrAvoided =
     hasNegatedConcept(userContext, /\b(horror|extreme|violent|brutal|disturbing|transgressive)\b/i) ||
@@ -371,7 +333,7 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
   const tasteFingerprint = buildTasteFingerprint(userContext);
   const emotionalJobProtocol = buildEmotionalJobProtocol(userContext);
   const signalPriorityProtocol = buildSignalPriorityProtocol(input);
-  const contextAmplifier = buildContextAmplifier(input);
+  const contextAmplifier = buildContextAmplifier(input, intent);
   const feedbackRepairClause = buildFeedbackRepairClause(input);
   const crossLanguageReferenceClause = /\b(similar|like|vibe|reminds me|same as|after watching|watching)\b/i.test(userContext) && explicitLanguageRequest
     ? "\n- Cross-language reference request detected: preserve the reference title's viewer job and deep traits first; use the requested language/culture as the content lane second. Do not let the target language override the actual reason the user liked the reference."
@@ -383,7 +345,9 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
     "Bold — emotional appetite is stimulation and challenge. The user wants surprise, provocation, intensity, or a title with real teeth. Use festival picks, morally complex films, politically charged work, surrealism, or challenging genre cinema when it matches the emotional job. If the user's mood has explicit violence/gore/horror signals, go full extreme. A mainstream safe pick at this level is a failure.",
     `Unhinged — emotional appetite is aliveness through unfamiliarity and strangeness. Ignore mainstream appeal, but STAY INSIDE ALL HARD AVOIDANCES AND MOOD SIGNALS. The direction depends entirely on what the user actually asked for: ${highIntensityMode ? "(INTENSITY PATH) The user has explicit gore/horror/extreme signals — go transgressive, body horror, extreme cinema. A safe pick here is a failure." : "(STRANGE PATH) The user has NO gore or intensity signals. Go formally bizarre, avant-garde, absurdist, surrealist, or conceptually unprecedented. A film can be Unhinged without any darkness — it should make the user think 'I would never have found this myself.' A gore film when the user wanted funny or comforting is as much a failure as a safe mainstream pick."}`,
   ];
-  const crazinessClause = `\n- Taste Risk (${["Safe", "Curious", "Bold", "Unhinged"][crazinessLevel]}): ${CRAZINESS_PHILOSOPHY[crazinessLevel]}`;
+  const crazinessClause = selectedCrazinessLevel === null
+    ? ""
+    : `\n- Taste Risk (${["Safe", "Curious", "Bold", "Unhinged"][crazinessLevel]}): ${CRAZINESS_PHILOSOPHY[crazinessLevel]}`;
 
   const scopeClause = mineMode
     ? options?.strictSubscription
@@ -400,6 +364,9 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
   // Hard constraint block — placed before personality/craziness so the LLM reads
   // the non-negotiables first. LLMs weight earlier context more heavily.
   const hardConstraintLines: string[] = [];
+  if (intent.primaryIntents.length) {
+    hardConstraintLines.push(`❌ Explicit user intent — the main pick must satisfy: ${intent.primaryIntents.join(", ")}. Situation, context, Taste Risk, and availability must shape this request, not replace it.`);
+  }
   if (avoidanceTiers.hard.length) {
     hardConstraintLines.push(`❌ Hard content gates — NEVER recommend content with or containing: ${avoidanceTiers.hard.join(", ")}. Taste Risk, craziness level, mood signals, novelty, and cinematic quality do NOT override these.`);
   }
@@ -423,7 +390,7 @@ ${hardConstraintLines.join("\n")}
     ? `\n- Soft mood directions: User wants less ${avoidanceTiers.soft.join(", ")}. Treat these as tone/pacing guidance, not automatic title bans. Prefer lighter, cleaner, more resolving picks, but do not reject a brilliant match for having trace amounts unless it would clearly ruin the user's stated situation.`
     : "";
 
-  const tasteRiskHeader = crazinessLevel >= 2 ? `
+  const tasteRiskHeader = selectedCrazinessLevel !== null && crazinessLevel >= 2 ? `
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ACTIVE MODE: ${["", "", "BOLD", "UNHINGED"][crazinessLevel]} (user-selected, adult opt-in)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -454,13 +421,24 @@ User context:
 - Current streaming subscriptions: ${platforms}
 - Time context: ${input.contextHint ?? "not provided"}
 - Energy level: ${input.energy ?? "not provided"}
-- Viewing context: ${input.viewingContext ?? "not provided"}
+- Viewing context: muted for this version unless the user typed it directly
   - Mood/request: ${userContext}${seenClause}${recentClause}${hiddenGemClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${fearIntentClause}${crazinessClause}${softMoodDirectionClause}${feedbackRepairClause}${emotionalJobProtocol}${signalPriorityProtocol}${contextAmplifier}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
 - Discovery mode: ${indieMode ? "Indie / hidden cinema" : "Standard"}${indieClause}
 
 Return an array of exactly THREE JSON objects (not a wrapper object) with this schema, no markdown:
 [
   {
+    "parsedIntent": {
+      "primary": "one of: scare|cry|comedy|thriller|romance|weird|comfort|gore|drama|discovery|unknown",
+      "secondary": ["optional short intent labels"],
+      "hardAvoids": ["content boundaries the user clearly rejects"],
+      "softAvoids": ["tone/pacing directions the user prefers less of"],
+      "format": "film|series|episode|any",
+      "language": "requested language/culture lane or 'any'",
+      "situation": ["typed situation signals, e.g. partner, friends, bedtime, transit"],
+      "intensity": "safe|curious|bold|unhinged",
+      "ambiguity": "short note when text and selected controls conflict, otherwise empty string"
+    },
     "title": "string",
     "year": "string",
     "format": "Film|Series|Episode|Documentary|Unknown",
@@ -491,6 +469,7 @@ Return an array of exactly THREE JSON objects (not a wrapper object) with this s
 ]
 
 For each recommendation:
+- Fill parsedIntent BEFORE choosing the title. It is the contract you are satisfying, not post-rationalization. If the user says someone hates horror or does not want scary content, do NOT set primary to scare.
 - Main pick: Your best match for the user's mood
 - ${hiddenLayerInstruction}
 - Alternatives: 3 related mood-adjacent picks

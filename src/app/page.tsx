@@ -25,7 +25,6 @@ import {
   Star,
   type LucideIcon,
   User,
-  Users,
   Zap,
 } from "lucide-react";
 import OnboardingFlow, {
@@ -92,7 +91,6 @@ const wants: Option[] = [
 
 const timeOptions = ["90 min", "under 2 hours", "one episode", "no preference"];
 const energyOptions = ["Very low", "Low", "Medium", "High"];
-const contextOptions = ["Alone", "Partner", "Friends", "Family"];
 const riskOptions: Array<{ level: CrazinessLevel; label: string; helper: string; icon: LucideIcon }> = [
   { level: 0, label: "Safe", helper: "Feel-good & familiar", icon: Shield },
   { level: 1, label: "Curious", helper: "Try something new", icon: Search },
@@ -336,7 +334,6 @@ export default function Home() {
   const [selectedWants, setSelectedWants] = useState<string[]>([]);
   const [time, setTime] = useState("90 min");
   const [energy, setEnergy] = useState("Low");
-  const [viewingContext, setViewingContext] = useState("Alone");
   const [risk, setRisk] = useState<CrazinessLevel>(0);
   const [platformFilter, setPlatformFilter] = useState<"mine" | "any">("mine");
   const [indieMode, setIndieMode] = useState(false);
@@ -366,6 +363,7 @@ export default function Home() {
               year: session.recommendation.year,
               format: session.recommendation.format,
               confidence: session.recommendation.confidence,
+              parsedIntent: session.recommendation.parsedIntent,
               oneLine: session.recommendation.oneLine,
               posterUrl: session.recommendation.omdbPosterUrl,
               request: session.request ?? { mode: "choose" },
@@ -398,6 +396,7 @@ export default function Home() {
       year: postWatchCandidate.year,
       format: postWatchCandidate.format,
       confidence: postWatchCandidate.confidence,
+      parsedIntent: postWatchCandidate.parsedIntent,
       country: postWatchCandidate.request.country,
       mood: postWatchCandidate.request.mood,
       wants: postWatchCandidate.request.wants,
@@ -417,6 +416,7 @@ export default function Home() {
         year: postWatchCandidate.year,
         format: postWatchCandidate.format,
         confidence: postWatchCandidate.confidence,
+        parsedIntent: postWatchCandidate.parsedIntent,
         country: postWatchCandidate.request.country,
         mood: postWatchCandidate.request.mood,
         wants: postWatchCandidate.request.wants,
@@ -459,11 +459,11 @@ export default function Home() {
       mode: inputMode === "describe" ? "self" : "choose",
       mood: inputMode === "describe" ? undefined : selectedMoods,
       wants: inputMode === "describe" ? undefined : selectedWants,
-      // Avoidances are safety constraints, not mood signals — always pass them regardless of mode.
-      avoids: selectedAvoids.length > 0 ? selectedAvoids : undefined,
-      time: time !== "no preference" ? time : undefined,
-      energy,
-      viewingContext,
+      avoids: inputMode === "describe" ? undefined : selectedAvoids.length > 0 ? selectedAvoids : undefined,
+      time: inputMode === "describe" ? undefined : time !== "no preference" ? time : undefined,
+      energy: inputMode === "describe" ? undefined : energy,
+      // Structured viewingContext is intentionally muted for this version.
+      // If users need partner/friends/family context, they should type it in Describe mode.
       country: onboarding.country,
       languagePreferences: onboarding.languagePreferences,
       platforms: onboarding.platforms,
@@ -472,9 +472,9 @@ export default function Home() {
       seenTitles: loadSeenTitles(),
       recentTitles,
       platformFilter,
-      discoveryMode: indieMode ? "indie" : "standard",
-      contextHint: pickContextHint(),
-      craziness: risk,
+      discoveryMode: inputMode === "describe" ? "standard" : indieMode ? "indie" : "standard",
+      contextHint: inputMode === "describe" ? undefined : pickContextHint(),
+      craziness: inputMode === "describe" ? undefined : risk,
       feedbackContext: loadRecommendationFeedbackContext(),
     };
 
@@ -489,11 +489,10 @@ export default function Home() {
       wants: requestInput.wants,
       avoids: requestInput.avoids,
       time: requestInput.time,
-      energy,
-      viewingContext,
+      energy: requestInput.energy,
       platformFilter,
-      discoveryMode: indieMode ? "indie" : "standard",
-      craziness: risk,
+      discoveryMode: requestInput.discoveryMode,
+      craziness: requestInput.craziness,
       hasFreeText: inputMode === "describe" && Boolean(selfText.trim()),
       hasReference: Boolean(reference.trim()),
     });
@@ -519,6 +518,7 @@ export default function Home() {
         title: batch[0].title,
         year: batch[0].year,
         confidence: batch[0].confidence,
+        parsedIntent: batch[0].parsedIntent,
         batch: batch.map((item) => ({ title: item.title, year: item.year, confidence: item.confidence })),
         availabilityStatus: batch[0].whereToWatch.status,
         providerCount: batch[0].whereToWatch.providers?.length ?? 0,
@@ -687,18 +687,13 @@ export default function Home() {
                   </div>
                 </div>
               </>
-            ) : (
-              <div className="grid gap-5 rounded-2xl border border-white/10 bg-white/[0.035] p-5 lg:grid-cols-[1.2fr_0.8fr]">
-                <label>
-                  <span className="mb-3 flex items-center gap-2 text-lg"><PenLine size={18} /> Describe it your way</span>
-                  <textarea value={selfText} onChange={(event) => setSelfText(event.target.value)} rows={5} placeholder="I want a hidden gem thriller, or something like Friends but in Hindi..." className="w-full resize-none rounded-xl border border-white/12 bg-black/28 px-4 py-3 text-white outline-none placeholder:text-white/28 focus:border-red-300/45" />
-                  <span className="mt-2 block text-sm text-white/42">Describe mode ignores the mood buttons and uses your words directly.</span>
-                  {selectedAvoids.length > 0 && (
-                    <span className="mt-2 flex items-center gap-2 text-sm text-amber-200/70">
-                      <Shield size={13} /> Avoidances still active: {selectedAvoids.join(", ")}
-                    </span>
-                  )}
-                </label>
+	            ) : (
+	              <div className="grid gap-5 rounded-2xl border border-white/10 bg-white/[0.035] p-5 lg:grid-cols-[1.2fr_0.8fr]">
+	                <label>
+	                  <span className="mb-3 flex items-center gap-2 text-lg"><PenLine size={18} /> Describe it your way</span>
+	                  <textarea value={selfText} onChange={(event) => setSelfText(event.target.value)} rows={5} placeholder="I want a hidden gem thriller, or something like Friends but in Hindi..." className="w-full resize-none rounded-xl border border-white/12 bg-black/28 px-4 py-3 text-white outline-none placeholder:text-white/28 focus:border-red-300/45" />
+	                  <span className="mt-2 block text-sm text-white/42">Describe mode uses only your words, region, language, and where to search.</span>
+	                </label>
                 <label>
                   <span className="mb-3 flex items-center gap-2 text-lg"><FilmIcon /> Reference title</span>
                   <input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="Optional: Shameless, Parasite, Fleabag..." className="h-14 w-full rounded-xl border border-white/12 bg-black/28 px-4 text-white outline-none placeholder:text-white/28 focus:border-red-300/45" />
@@ -707,49 +702,43 @@ export default function Home() {
               </div>
             )}
 
-            <div className="grid gap-6 border-t border-white/8 pt-5 lg:grid-cols-[160px_1fr_1.1fr]">
-              <label className="block">
-                <span className="mb-3 flex items-center gap-2 text-lg"><Clock3 size={18} /> Time</span>
-                <select value={time} onChange={(event) => setTime(event.target.value)} className="h-14 w-full rounded-xl border border-white/12 bg-black/32 px-4 text-white outline-none">
-                  {timeOptions.map((option) => <option key={option}>{option}</option>)}
-                </select>
-              </label>
-              <div>
-                <span className="mb-3 flex items-center gap-2 text-lg"><Zap size={18} /> Energy</span>
-                <div className="grid grid-cols-2 rounded-xl border border-white/10 bg-black/26 p-1 sm:grid-cols-4">
-                  {energyOptions.map((option) => (
-                    <button key={option} type="button" onClick={() => setEnergy(option)} className={`min-h-12 rounded-lg px-2 py-2 text-sm leading-5 transition ${energy === option ? "bg-red-950/55 text-white shadow-[0_0_6px_rgba(248,113,113,0.8),0_0_18px_rgba(239,68,68,0.5),0_0_40px_rgba(239,68,68,0.2)]" : "text-white/48 hover:text-white"}`}>
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <span className="mb-3 flex items-center gap-2 text-lg"><Users size={18} /> Context</span>
-                <div className="grid grid-cols-2 rounded-xl border border-white/10 bg-black/26 p-1 sm:grid-cols-4">
-                  {contextOptions.map((option) => (
-                    <button key={option} type="button" onClick={() => setViewingContext(option)} className={`min-h-12 rounded-lg px-2 py-2 text-sm leading-5 transition ${viewingContext === option ? "bg-red-950/55 text-white shadow-[0_0_6px_rgba(248,113,113,0.8),0_0_18px_rgba(239,68,68,0.5),0_0_40px_rgba(239,68,68,0.2)]" : "text-white/48 hover:text-white"}`}>
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+	            {inputMode === "choose" && (
+	              <div className="grid gap-6 border-t border-white/8 pt-5 lg:grid-cols-[160px_1fr]">
+	                <label className="block">
+	                  <span className="mb-3 flex items-center gap-2 text-lg"><Clock3 size={18} /> Time</span>
+	                  <select value={time} onChange={(event) => setTime(event.target.value)} className="h-14 w-full rounded-xl border border-white/12 bg-black/32 px-4 text-white outline-none">
+	                    {timeOptions.map((option) => <option key={option}>{option}</option>)}
+	                  </select>
+	                </label>
+	                <div>
+	                  <span className="mb-3 flex items-center gap-2 text-lg"><Zap size={18} /> Energy</span>
+	                  <div className="grid grid-cols-2 rounded-xl border border-white/10 bg-black/26 p-1 sm:grid-cols-4">
+	                    {energyOptions.map((option) => (
+	                      <button key={option} type="button" onClick={() => setEnergy(option)} className={`min-h-12 rounded-lg px-2 py-2 text-sm leading-5 transition ${energy === option ? "bg-red-950/55 text-white shadow-[0_0_6px_rgba(248,113,113,0.8),0_0_18px_rgba(239,68,68,0.5),0_0_40px_rgba(239,68,68,0.2)]" : "text-white/48 hover:text-white"}`}>
+	                        {option}
+	                      </button>
+	                    ))}
+	                  </div>
+	                </div>
+	              </div>
+	            )}
 
-            <div className="border-t border-white/8 pt-5">
-              <span className="mb-3 flex items-center gap-2 text-lg"><Sparkles size={18} /> Taste Risk</span>
-              <div className="grid gap-2 rounded-xl border border-white/10 bg-black/26 p-1 sm:grid-cols-4">
-                {riskOptions.map((option) => {
-                  const Icon = option.icon;
-                  return (
-                    <button key={option.level} type="button" onClick={() => setRisk(option.level)} className={`min-h-20 rounded-lg border px-4 py-3 text-center transition-all duration-150 ${risk === option.level ? "border-red-400 bg-red-950/55 text-white shadow-[0_0_6px_rgba(248,113,113,0.8),0_0_18px_rgba(239,68,68,0.5),0_0_40px_rgba(239,68,68,0.2)]" : "border-transparent text-white/54 hover:bg-white/[0.04] hover:text-white"}`}>
-                      <span className="flex items-center justify-center gap-2"><Icon size={17} /> {option.label}</span>
-                      <span className="mt-1 block text-sm text-white/42">{option.helper}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+	            {inputMode === "choose" && (
+	              <div className="border-t border-white/8 pt-5">
+	                <span className="mb-3 flex items-center gap-2 text-lg"><Sparkles size={18} /> Taste Risk</span>
+	                <div className="grid gap-2 rounded-xl border border-white/10 bg-black/26 p-1 sm:grid-cols-4">
+	                  {riskOptions.map((option) => {
+	                    const Icon = option.icon;
+	                    return (
+	                      <button key={option.level} type="button" onClick={() => setRisk(option.level)} className={`min-h-20 rounded-lg border px-4 py-3 text-center transition-all duration-150 ${risk === option.level ? "border-red-400 bg-red-950/55 text-white shadow-[0_0_6px_rgba(248,113,113,0.8),0_0_18px_rgba(239,68,68,0.5),0_0_40px_rgba(239,68,68,0.2)]" : "border-transparent text-white/54 hover:bg-white/[0.04] hover:text-white"}`}>
+	                        <span className="flex items-center justify-center gap-2"><Icon size={17} /> {option.label}</span>
+	                        <span className="mt-1 block text-sm text-white/42">{option.helper}</span>
+	                      </button>
+	                    );
+	                  })}
+	                </div>
+	              </div>
+	            )}
 
             <div className="border-t border-white/8 pt-5">
               <div className="max-w-3xl">
@@ -762,23 +751,25 @@ export default function Home() {
                     {onboarding.platforms.slice(0, 7).map((platform) => <PlatformChip key={platform} name={platform} />)}
                     {onboarding.platforms.length > 7 && <span className="grid h-11 min-w-14 place-items-center rounded-lg border border-dashed border-white/20 text-white/58">+{onboarding.platforms.length - 7}</span>}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setIndieMode((value) => !value)}
-                    className={`mt-4 flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition ${
-                      indieMode
-                        ? "border-amber-300/45 bg-amber-400/[0.09] text-amber-100"
-                        : "border-white/10 bg-white/[0.04] text-white/60 hover:border-white/22 hover:text-white"
-                    }`}
-                  >
-                    <span>
-                      <span className="block font-medium">Go indie</span>
-                      <span className="mt-1 block text-sm text-white/42">Prefer smaller, under-marketed, discovery-first picks.</span>
-                    </span>
-                    <span className={`h-6 w-11 rounded-full border p-0.5 transition ${indieMode ? "border-amber-300/45 bg-amber-300/25" : "border-white/16 bg-black/30"}`}>
-                      <span className={`block h-4 w-4 rounded-full bg-white transition ${indieMode ? "translate-x-5" : ""}`} />
-                    </span>
-                  </button>
+	                  {inputMode === "choose" && (
+	                    <button
+	                      type="button"
+	                      onClick={() => setIndieMode((value) => !value)}
+	                      className={`mt-4 flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition ${
+	                        indieMode
+	                          ? "border-amber-300/45 bg-amber-400/[0.09] text-amber-100"
+	                          : "border-white/10 bg-white/[0.04] text-white/60 hover:border-white/22 hover:text-white"
+	                      }`}
+	                    >
+	                      <span>
+	                        <span className="block font-medium">Go indie</span>
+	                        <span className="mt-1 block text-sm text-white/42">Prefer smaller, under-marketed, discovery-first picks.</span>
+	                      </span>
+	                      <span className={`h-6 w-11 rounded-full border p-0.5 transition ${indieMode ? "border-amber-300/45 bg-amber-300/25" : "border-white/16 bg-black/30"}`}>
+	                        <span className={`block h-4 w-4 rounded-full bg-white transition ${indieMode ? "translate-x-5" : ""}`} />
+	                      </span>
+	                    </button>
+	                  )}
               </div>
             </div>
 

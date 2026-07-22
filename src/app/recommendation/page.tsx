@@ -340,6 +340,7 @@ export default function RecommendationPage() {
       title: batch[0].title,
       year: batch[0].year,
       confidence: batch[0].confidence,
+      parsedIntent: batch[0].parsedIntent,
       source: "reroll",
     });
   }
@@ -384,6 +385,7 @@ export default function RecommendationPage() {
       year: session.recommendation.year,
       format: session.recommendation.format,
       confidence: session.recommendation.confidence,
+      parsedIntent: session.recommendation.parsedIntent,
       country: request.country,
       mood: request.mood,
       wants: request.wants,
@@ -392,7 +394,6 @@ export default function RecommendationPage() {
       craziness: request.craziness,
       platformFilter: request.platformFilter,
       energy: request.energy,
-      viewingContext: request.viewingContext,
       batchIndex: session.batchIndex ?? 0,
       batchSize: session.batch?.length ?? 1,
     };

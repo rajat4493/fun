@@ -1,5 +1,6 @@
-import { RawRecommendation, RecommendRequest, Recommendation } from "@/lib/types";
-import { hasNegatedConcept, requestText } from "@/lib/recommendation-utils";
+import { ParsedRecommendationIntent, RawRecommendation, RecommendRequest, Recommendation } from "@/lib/types";
+import { requestText } from "@/lib/recommendation-utils";
+import { extractIntent, RecommendationIntent } from "@/lib/intent";
 
 export type TrustRejection = {
   title: string;
@@ -29,27 +30,13 @@ function contentText(rec: RawRecommendation | Recommendation): string {
   ].filter(Boolean).join(" ");
 }
 
-function requestHasNegated(input: RecommendRequest, pattern: RegExp): boolean {
-  return hasNegatedConcept(requestText(input), pattern);
-}
-
 function wantsFamilySafe(input: RecommendRequest): boolean {
-  const text = [requestText(input), input.viewingContext, input.contextHint].filter(Boolean).join(" ");
+  const text = [requestText(input), input.contextHint].filter(Boolean).join(" ");
   return /\b(family safe|family-safe|family|with family|with parents|parents|kids|children|work safe|work-safe|at work|office)\b/i.test(text);
 }
 
 function activeHardAvoids(input: RecommendRequest): Set<string> {
-  const avoids = new Set<string>();
-  for (const avoid of input.avoids ?? []) {
-    const value = avoid.toLowerCase().trim();
-    if (/\bgore|gory|blood\b/.test(value)) avoids.add("gore");
-    if (/\bhorror|scary\b/.test(value)) avoids.add("horror");
-    if (/\bviolence|violent\b/.test(value)) avoids.add("violence");
-  }
-  if (requestHasNegated(input, /\bgore|gory|blood|bloody|splatter|body horror\b/i)) avoids.add("gore");
-  if (requestHasNegated(input, /\bviolence|violent|brutal|action\b/i)) avoids.add("violence");
-  if (requestHasNegated(input, /\bhorror|scary|ghost|haunted|supernatural\b/i)) avoids.add("horror");
-  if (requestHasNegated(input, /\bsex|sexual|nudity|erotic|explicit|raunchy|awkward sexual content\b/i)) avoids.add("sex");
+  const avoids = new Set<string>(extractIntent(input).hardAvoids);
   if (wantsFamilySafe(input)) {
     avoids.add("sex");
     avoids.add("gore");
@@ -108,6 +95,71 @@ const funnyTerms = /\b(funny|comedy|comic|humor|humour|humorous|witty|satire|sat
 const thrillerTerms = /\b(thriller|suspense|mystery|crime|noir|detective|investigation|paranoid|tense|whodunit|conspiracy|killer|murder|cat-and-mouse|cat and mouse)\b/i;
 const romanceTerms = /\b(romance|romantic|love story|love|chemistry|relationship|date|courtship|tender|flirt|heartfelt)\b/i;
 const fearTerms = /\b(scary|scare|scared|terrify|terrified|terrifying|frighten|frightened|frightening|horror|dread|nightmare|haunted|ghost|possession|demonic|supernatural terror|jump scare|jumpscare|creepy|panic|fear)\b/i;
+const cryTerms = /\b(cry|crying|tearjerker|tear jerker|sob|weep|devastating|heartbreaking|heartbreak|cathartic|moving|emotionally wreck|grief|loss|melancholy|poignant)\b/i;
+const dramaTerms = /\b(drama|dramatic|character study|serious|emotional|prestige|social realist|melodrama)\b/i;
+
+function parsedIntentPrimary(parsedIntent?: ParsedRecommendationIntent): string {
+  return parsedIntent?.primary?.toLowerCase().trim().replace(/[^a-z0-9-]+/g, "-") ?? "";
+}
+
+function parsedIntentTerms(parsedIntent?: ParsedRecommendationIntent): Set<string> {
+  const values = [
+    parsedIntent?.primary,
+    ...(parsedIntent?.secondary ?? []),
+    ...(parsedIntent?.hardAvoids ?? []),
+    ...(parsedIntent?.softAvoids ?? []),
+    parsedIntent?.format,
+    parsedIntent?.language,
+    ...(parsedIntent?.situation ?? []),
+    parsedIntent?.intensity,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.toLowerCase().trim().replace(/[^a-z0-9-]+/g, "-"));
+  return new Set(values);
+}
+
+function parsedIntentContradictions(input: RecommendRequest, rec: RawRecommendation | Recommendation): string[] {
+  const local = extractIntent(input);
+  const declared = parsedIntentPrimary(rec.parsedIntent);
+  const terms = parsedIntentTerms(rec.parsedIntent);
+  const ambiguity = rec.parsedIntent?.ambiguity?.toLowerCase() ?? "";
+  const reasons: string[] = [];
+
+  if (!rec.parsedIntent) return reasons;
+
+  const declaredAs = (allowed: string[]) => allowed.some((item) => declared === item || terms.has(item));
+  const ambiguityTreatsAsAvoidance = (intent: string) =>
+    Boolean(ambiguity) &&
+    /\b(avoid|avoidance|boundary|reject|not a desire|not desired|does not want|don't want|hates?|can't stand|cannot stand|dislikes?|despises?)\b/i.test(ambiguity) &&
+    new RegExp(`\\b${intent}\\b`, "i").test(ambiguity);
+  const requires = (intent: string, allowed: string[]) => {
+    if (ambiguityTreatsAsAvoidance(intent)) return;
+    if (local.primaryIntents.includes(intent) && !declaredAs(allowed)) {
+      reasons.push(`parsedIntent: missed explicit ${intent} intent`);
+    }
+  };
+
+  requires("scare", ["scare", "horror", "thriller", "fear"]);
+  requires("cry", ["cry", "tearjerker", "drama", "emotional", "catharsis"]);
+  requires("comedy", ["comedy", "funny", "humor", "humour"]);
+  requires("thriller", ["thriller", "suspense", "mystery", "crime"]);
+  requires("romance", ["romance", "romantic"]);
+  requires("weird", ["weird", "strange", "offbeat", "surreal", "absurd"]);
+  requires("gore", ["gore", "horror", "body-horror"]);
+
+  const hardAvoids = new Set(local.hardAvoids);
+  if (hardAvoids.has("gore") && declaredAs(["gore", "body-horror", "splatter"])) {
+    reasons.push("parsedIntent: contradicts gore avoidance");
+  }
+  if (hardAvoids.has("horror") && declaredAs(["horror", "gore", "body-horror"]) && !local.primaryIntents.includes("scare")) {
+    reasons.push("parsedIntent: contradicts horror avoidance");
+  }
+  if (hardAvoids.has("sex") && declaredAs(["erotic", "sex", "sexual"])) {
+    reasons.push("parsedIntent: contradicts explicit sexual-content avoidance");
+  }
+
+  return reasons;
+}
 
 function parseRuntimeMinutes(runtime: string): number | null {
   const value = runtime.toLowerCase();
@@ -120,7 +172,7 @@ function parseRuntimeMinutes(runtime: string): number | null {
 
 function isEpisodeRuntime(rec: RawRecommendation | Recommendation): boolean {
   const value = `${rec.format} ${rec.runtime}`.toLowerCase();
-  return /\b(series|episode|per episode|season)\b/.test(value);
+  return /\b(episode|per episode)\b/.test(value);
 }
 
 function runtimeViolation(input: RecommendRequest, rec: RawRecommendation | Recommendation): string | null {
@@ -203,47 +255,53 @@ const softScareFalsePositiveTitles = new Set([
   "anomalisa",
 ]);
 
-function explicitFormatViolation(input: RecommendRequest, rec: RawRecommendation | Recommendation): string | null {
-  const request = requestText(input);
+function explicitFormatViolation(input: RecommendRequest, rec: RawRecommendation | Recommendation, intent = extractIntent(input)): string | null {
+  const request = intent.requestText || requestText(input);
   const format = `${rec.format} ${rec.runtime}`.toLowerCase();
-  const asksForFilm = /\b(movie|film|feature)\b/i.test(request);
-  const asksForSeries = /\b(series|show|season|episode|episodes|binge)\b/i.test(request);
+  const asksForFilm = intent.requestedFormat === "film" || /\b(movie|film|feature)\b/i.test(request);
+  const asksForSeries = intent.requestedFormat === "series" || /\b(series|show|season|episodes|binge)\b/i.test(request);
+  const asksForEpisode = intent.requestedFormat === "episode" || /\b(one|1)\s+episode\b|\ban episode\b/i.test(request);
 
+  if (asksForEpisode && !/\b(episode|per episode)\b/.test(format)) return "intent: requested one specific episode";
   if (asksForFilm && /\b(series|episode|season)\b/.test(format)) return "intent: requested a film/movie, got series/episode";
   if (asksForSeries && rec.format === "Film") return "intent: requested a series/show/episode, got film";
   return null;
 }
 
-function explicitGenreViolations(input: RecommendRequest, rec: RawRecommendation | Recommendation): string[] {
-  const request = requestText(input);
+function explicitGenreViolations(input: RecommendRequest, rec: RawRecommendation | Recommendation, intent = extractIntent(input)): string[] {
+  const request = intent.requestText || requestText(input);
   const text = contentText(rec);
   const reasons: string[] = [];
 
-  if (/\b(thriller|suspense|mystery|crime thriller|tense and clever)\b/i.test(request) && !thrillerTerms.test(text)) {
+  if (intent.primaryIntents.includes("thriller") && !thrillerTerms.test(text)) {
     reasons.push("intent: requested thriller/suspense");
   }
-  if (/\b(comedy|funny|laugh|hilarious|witty)\b/i.test(request) && !funnyTerms.test(text)) {
+  if (intent.primaryIntents.includes("comedy") && !funnyTerms.test(text)) {
     reasons.push("intent: requested comedy/funny");
   }
-  if (/\b(romance|romantic|love story|date night)\b/i.test(request) && !romanceTerms.test(text)) {
+  if (intent.primaryIntents.includes("romance") && !romanceTerms.test(text)) {
     reasons.push("intent: requested romance");
   }
-  if (/\b(shit scared|scare|scared|scary|terrify|terrified|terrifying|frighten|frightened|frightening|creep out|creepy|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i.test(request) &&
-    !requestHasNegated(input, /\b(scary|scare|scared|terrify|terrified|frighten|frightened|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i)) {
+  if (intent.primaryIntents.includes("scare")) {
     if (softScareFalsePositiveTitles.has(normalize(rec.title)) || !fearTerms.test(text)) {
       reasons.push("intent: requested genuinely scary/fear-inducing");
     }
   }
-  if (/\b(weird|strange|offbeat|surreal|absurd|bizarre)\b/i.test(request) && !weirdTerms.test(text)) {
+  if (intent.primaryIntents.includes("cry") && !cryTerms.test(text)) {
+    reasons.push("intent: requested tearjerker/catharsis");
+  }
+  if (/\bdrama\b/i.test(request) && !dramaTerms.test(text)) {
+    reasons.push("intent: requested drama");
+  }
+  if (intent.primaryIntents.includes("weird") && !weirdTerms.test(text)) {
     reasons.push("intent: requested weird/offbeat");
   }
 
   return reasons;
 }
 
-function hiddenGemViolation(input: RecommendRequest, rec: RawRecommendation | Recommendation): string | null {
-  const request = requestText(input);
-  if (!/\b(hidden\s+gem|underrated|overlooked|buried|less\s+obvious|probably haven't seen|probably have not seen)\b/i.test(request)) {
+function hiddenGemViolation(input: RecommendRequest, rec: RawRecommendation | Recommendation, intent = extractIntent(input)): string | null {
+  if (!intent.hiddenGem) {
     return null;
   }
 
@@ -253,10 +311,12 @@ function hiddenGemViolation(input: RecommendRequest, rec: RawRecommendation | Re
 }
 
 function positiveFitViolations(input: RecommendRequest, rec: RawRecommendation | Recommendation): string[] {
+  const intent = extractIntent(input);
   return [
-    explicitFormatViolation(input, rec),
-    hiddenGemViolation(input, rec),
-    ...explicitGenreViolations(input, rec),
+    ...parsedIntentContradictions(input, rec),
+    explicitFormatViolation(input, rec, intent),
+    hiddenGemViolation(input, rec, intent),
+    ...explicitGenreViolations(input, rec, intent),
   ].filter((reason): reason is string => Boolean(reason));
 }
 
@@ -326,9 +386,11 @@ Return three completely different valid candidates that preserve the emotional j
 }
 
 export function safeFallback(input: RecommendRequest): RawRecommendation {
+  const intent = extractIntent(input);
   const text = requestText(input);
   const wantsHindi = /\bhindi\b/i.test(text) || (input.languagePreferences ?? []).some((language) => /hindi/i.test(language));
   const wantsThriller = /\b(thriller|suspense|mystery|crime thriller|tense and clever)\b/i.test(text);
+  const wantsDrama = /\bdrama\b/i.test(text);
   const wantsWeirdSafe = /\b(weird|strange|unusual|offbeat|quirky|absurd|surreal|funny|comedy)\b/i.test(text) || (input.craziness ?? 0) >= 2;
   const isExcluded = (title: string) => {
     const key = normalize(title);
@@ -348,6 +410,126 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
       classyJab: "A perfect pick should not break trust.",
     },
   };
+
+  if (intent.requestedFormat === "episode") {
+    const episodeFallbacks: RawRecommendation[] = [
+      {
+        title: "The Good Place: Everything Is Fine",
+        year: "2016",
+        format: "Episode",
+        runtime: "22 min per episode",
+        vibe: "funny, easy, clever",
+        confidence: 78,
+        parsedIntent: {
+          primary: "comedy",
+          format: "episode",
+          language: "any",
+          intensity: "safe",
+        },
+        oneLine: "Watch the pilot of The Good Place when you need one clean, funny episode with an actual ending point.",
+        whyItFits: [
+          "It satisfies the one-episode request instead of turning into a binge assignment.",
+          "The premise is immediate, so the watch starts fast.",
+          "It stays light and funny while still feeling like a complete pick.",
+        ],
+        hiddenTitles: [
+          { title: "Derry Girls", year: "2018" },
+          { title: "Abbott Elementary", year: "2021" },
+          { title: "Brooklyn Nine-Nine", year: "2013" },
+        ],
+        alternatives: ["Derry Girls (2018)", "Abbott Elementary (2021)", "Brooklyn Nine-Nine (2013)"],
+        ...base,
+        format: "Episode",
+      },
+      {
+        title: "Derry Girls: Episode 1",
+        year: "2018",
+        format: "Episode",
+        runtime: "23 min per episode",
+        vibe: "fast, funny, chaotic",
+        confidence: 76,
+        parsedIntent: {
+          primary: "comedy",
+          format: "episode",
+          language: "any",
+          intensity: "safe",
+        },
+        oneLine: "Watch the first episode of Derry Girls for a short, high-energy comedy hit.",
+        whyItFits: [
+          "It is explicitly a one-episode watch, not a whole-series recommendation.",
+          "The comedy lands quickly without needing much setup.",
+          "The short runtime protects the time constraint.",
+        ],
+        hiddenTitles: [
+          { title: "The Good Place", year: "2016" },
+          { title: "Abbott Elementary", year: "2021" },
+          { title: "Parks and Recreation", year: "2009" },
+        ],
+        alternatives: ["The Good Place (2016)", "Abbott Elementary (2021)", "Parks and Recreation (2009)"],
+        ...base,
+        format: "Episode",
+      },
+    ];
+    return episodeFallbacks.find((candidate) => !isExcluded(candidate.title)) ?? episodeFallbacks[0];
+  }
+
+  if (wantsDrama && intent.runtimeLimitMinutes && intent.runtimeLimitMinutes <= 90) {
+    const shortDramaFallbacks: RawRecommendation[] = [
+      {
+        title: "The Party",
+        year: "2017",
+        runtime: "71 min",
+        vibe: "drama, sharp, compact",
+        confidence: 76,
+        parsedIntent: {
+          primary: "drama",
+          format: "film",
+          language: "any",
+          intensity: "curious",
+        },
+        oneLine: "Watch The Party for a short, contained drama that respects a tight time window.",
+        whyItFits: [
+          "It stays clearly under 90 minutes.",
+          "It is a drama first, not a comedy-series workaround.",
+          "The contained setup gives the watch focus without demanding a long evening.",
+        ],
+        hiddenTitles: [
+          { title: "Locke", year: "2013" },
+          { title: "Ida", year: "2013" },
+          { title: "Columbus", year: "2017" },
+        ],
+        alternatives: ["Locke (2013)", "Ida (2013)", "Columbus (2017)"],
+        ...base,
+      },
+      {
+        title: "Locke",
+        year: "2013",
+        runtime: "85 min",
+        vibe: "drama, tense, minimal",
+        confidence: 75,
+        parsedIntent: {
+          primary: "drama",
+          format: "film",
+          language: "any",
+          intensity: "curious",
+        },
+        oneLine: "Watch Locke for a compact drama built almost entirely from pressure and consequence.",
+        whyItFits: [
+          "It fits under 90 minutes cleanly.",
+          "The dramatic engine is focused and adult.",
+          "It avoids drifting into a longer, softer comfort pick.",
+        ],
+        hiddenTitles: [
+          { title: "The Party", year: "2017" },
+          { title: "Ida", year: "2013" },
+          { title: "Blue Jay", year: "2016" },
+        ],
+        alternatives: ["The Party (2017)", "Ida (2013)", "Blue Jay (2016)"],
+        ...base,
+      },
+    ];
+    return shortDramaFallbacks.find((candidate) => !isExcluded(candidate.title)) ?? shortDramaFallbacks[0];
+  }
 
   if (wantsHindi && wantsThriller) {
     const hindiThrillers: RawRecommendation[] = [

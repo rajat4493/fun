@@ -16,6 +16,18 @@ export type RecommendationDisplayState =
   | "avoidance-fallback"
   | "no-subscription-match";
 
+export type ParsedRecommendationIntent = {
+  primary?: string;
+  secondary?: string[];
+  hardAvoids?: string[];
+  softAvoids?: string[];
+  format?: "film" | "series" | "episode" | "any";
+  language?: string;
+  situation?: string[];
+  intensity?: "safe" | "curious" | "bold" | "unhinged";
+  ambiguity?: string;
+};
+
 export type RecommendationFeedbackContext = {
   lastReason?: FeedbackSignal;
   wrongVibeTitles?: string[];
@@ -103,6 +115,7 @@ export type Recommendation = {
     originCountry?: string[];
     genreIds?: number[];
   };
+  parsedIntent?: ParsedRecommendationIntent;
 };
 
 export type RecommendationBatch = {

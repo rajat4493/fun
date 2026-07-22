@@ -42,6 +42,7 @@ export type RecommendationFeedback = {
   year: string;
   format: Recommendation["format"];
   confidence: number;
+  parsedIntent?: Recommendation["parsedIntent"];
   request: RecommendRequest;
   whereToWatch: Recommendation["whereToWatch"];
   batchIndex: number;
@@ -55,6 +56,7 @@ export type RecommendationHistoryItem = {
   year: string;
   format: Recommendation["format"];
   confidence: number;
+  parsedIntent?: Recommendation["parsedIntent"];
   oneLine: string;
   posterUrl?: string;
   request: RecommendRequest;
@@ -134,6 +136,7 @@ export function rememberRecommendationHistory(recommendations: Recommendation[],
     year: recommendation.year,
     format: recommendation.format,
     confidence: recommendation.confidence,
+    parsedIntent: recommendation.parsedIntent,
     oneLine: recommendation.oneLine,
     posterUrl: recommendation.omdbPosterUrl,
     request,
@@ -174,6 +177,7 @@ export function saveRecommendationFeedback(
     year: recommendation.year,
     format: recommendation.format,
     confidence: recommendation.confidence,
+    parsedIntent: recommendation.parsedIntent,
     request: session.request,
     whereToWatch: recommendation.whereToWatch,
     batchIndex: session.batchIndex ?? 0,
@@ -209,6 +213,7 @@ export function savePostWatchFeedback(
     year: item.year,
     format: item.format,
     confidence: item.confidence,
+    parsedIntent: item.parsedIntent,
     request: item.request,
     whereToWatch: item.whereToWatch,
     batchIndex: 0,

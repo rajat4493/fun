@@ -102,7 +102,6 @@ function shouldHideRelatedTitle(input: RecommendRequest, title: string): boolean
     input.mood?.join(" "),
     input.wants?.join(" "),
     input.avoids?.join(" "),
-    input.viewingContext,
   ].filter(Boolean).join(" ");
   const hardAvoids = activeHardAvoidanceKeys(input);
   const avoidingDarkness = hardAvoids.some((avoid) => ["horror", "gore", "violence", "graphic violence"].includes(avoid));
@@ -148,7 +147,6 @@ function diversifyFallbackBatch(input: RecommendRequest, batch: RawRecommendatio
     input.avoids?.join(","),
     input.time,
     input.energy,
-    input.viewingContext,
     input.country,
     input.languagePreferences?.join(","),
     input.platformFilter,
@@ -290,7 +288,8 @@ async function subscriptionVerifiedChain(
 
   // Step 3 — curated fallback verified against subscription.
   // Check the full curated pool (not artificially capped at 3).
-  const curated = filteredLocalFallback(input);
+  const curatedTrusted = applyTrustFilter(input, filteredLocalFallback(input));
+  const curated = curatedTrusted.accepted.length > 0 ? curatedTrusted.accepted : [safeFallback(input)];
   const enrichedCurated = await enrichBatch(curated, country, platforms);
   const verifiedCurated = enrichedCurated.filter(hasSubscriptionProvider);
   if (verifiedCurated.length > 0) {

@@ -15,7 +15,9 @@
     "prelint": "node scripts/check-node-version.mjs",
     "lint": "tsc -p tsconfig.lint.json --noEmit --pretty false",
     "pretest:availability": "node scripts/check-node-version.mjs",
-    "test:availability": "node scripts/check-availability.mjs"
+    "test:availability": "node scripts/check-availability.mjs",
+    "pretest:recommendation": "node scripts/check-node-version.mjs",
+    "test:recommendation": "node scripts/recommendation-regression.mjs"
   },
   "dependencies": {
     "lucide-react": "0.562.0",

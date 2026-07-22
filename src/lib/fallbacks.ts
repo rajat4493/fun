@@ -1,4 +1,5 @@
 import { hasNegatedConcept, requestText } from "@/lib/recommendation-utils";
+import { extractIntent } from "@/lib/intent";
 import { RawRecommendation, RecommendRequest } from "@/lib/types";
 
 function normalizeForMatch(value: string): string {
@@ -102,6 +103,7 @@ export function filterFalsePositiveRecommendations(input: RecommendRequest, batc
 }
 
 export function localFallback(input: RecommendRequest): RawRecommendation[] {
+  const intent = extractIntent(input);
   const text = requestText(input);
   const wantsShameless = /shameless/i.test(text);
   const wantsFriends = /\bfriends\b/i.test(text);
@@ -110,10 +112,11 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
   const wantsComedy = /\b(comedy|funny|laugh|comfort|sitcom|light)\b/i.test(text);
   const wantsRomance = /\b(romance|romantic|love|date)\b/i.test(text);
   const wantsEmotional = /\b(emotional|moving|heartfelt|feel|feeling|sad|bittersweet)\b/i.test(text);
-  const wantsGore = /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(text) &&
+  const wantsGore = (intent.primaryIntents.includes("gore") || /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(text)) &&
     !hasNegatedConcept(text, /\b(gore|gory|blood|bloody|violence|violent)\b/i);
-  const wantsScare = /\b(shit scared|scare|scared|scary|terrify|terrified|terrifying|frighten|frightened|frightening|creep out|creepy|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i.test(text) &&
+  const wantsScare = (intent.primaryIntents.includes("scare") || /\b(shit scared|scare|scared|scary|terrify|terrified|terrifying|frighten|frightened|frightening|creep out|creepy|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i.test(text)) &&
     !hasNegatedConcept(text, /\b(scary|scare|scared|terrify|terrified|frighten|frightened|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i);
+  const wantsCry = intent.primaryIntents.includes("cry");
 
   if (wantsFriends && wantsHindi) {
     const baseRec = {
@@ -669,6 +672,85 @@ export function localFallback(input: RecommendRequest): RawRecommendation[] {
           { title: "Hatching", year: "2022" },
         ],
         alternatives: ["Titane (2021)", "Martyrs (2008)", "Possessor (2020)"],
+        ...baseRec,
+      },
+    ];
+  }
+
+  if (wantsCry) {
+    const baseRec = {
+      format: "Film" as const,
+      whereToWatch: {
+        status: "unverified" as const,
+        primary: "Availability not verified",
+        note: "F.U.N will verify this in real time. Check your apps before watching.",
+      },
+      hiddenLayer: {
+        headline: "Catharsis, not comfort filler",
+        insight: "A tearjerker should create emotional release, not just warm vibes.",
+        classyJab: "Some nights need the quiet flood.",
+      },
+    };
+
+    return [
+      {
+        title: "Past Lives",
+        year: "2023",
+        runtime: "106 min",
+        vibe: "romantic, devastating, restrained",
+        confidence: 86,
+        oneLine: "Watch Past Lives when you want quiet heartbreak that can make two people go very still together.",
+        whyItFits: [
+          "It is built for emotional catharsis rather than generic feel-good warmth.",
+          "The ache is intimate enough for a partner watch.",
+          "It earns tears through restraint, memory, and impossible timing.",
+        ],
+        hiddenTitles: [
+          { title: "Blue Jay", year: "2016" },
+          { title: "Aftersun", year: "2022" },
+          { title: "A Ghost Story", year: "2017" },
+        ],
+        alternatives: ["Blue Jay (2016)", "Aftersun (2022)", "A Ghost Story (2017)"],
+        ...baseRec,
+      },
+      {
+        title: "Aftersun",
+        year: "2022",
+        runtime: "102 min",
+        vibe: "grief, memory, devastating",
+        confidence: 84,
+        oneLine: "Watch Aftersun if you want a film whose emotional weight arrives quietly and then stays.",
+        whyItFits: [
+          "It is a true catharsis pick, not a soft comedy with sentimental edges.",
+          "The emotional reveal has the kind of delayed force that can break the room open.",
+          "It is intimate and shared without becoming manipulative.",
+        ],
+        hiddenTitles: [
+          { title: "Past Lives", year: "2023" },
+          { title: "Blue Jay", year: "2016" },
+          { title: "Close", year: "2022" },
+        ],
+        alternatives: ["Past Lives (2023)", "Blue Jay (2016)", "Close (2022)"],
+        ...baseRec,
+      },
+      {
+        title: "Blue Jay",
+        year: "2016",
+        runtime: "80 min",
+        vibe: "intimate, bittersweet, heartbreaking",
+        confidence: 80,
+        oneLine: "Watch Blue Jay for a short, intimate two-hander that turns old love into real ache.",
+        whyItFits: [
+          "It is compact but emotionally direct.",
+          "The partner-watch fit comes from memory, tenderness, and regret.",
+          "It aims for tears without needing melodrama or a huge runtime.",
+        ],
+        hiddenTitles: [
+          { title: "Past Lives", year: "2023" },
+          { title: "Aftersun", year: "2022" },
+          { title: "A Ghost Story", year: "2017" },
+        ],
+        alternatives: ["Past Lives (2023)", "Aftersun (2022)", "A Ghost Story (2017)"],
         ...baseRec,
       },
     ];
