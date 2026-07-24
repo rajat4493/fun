@@ -54,7 +54,7 @@ import {
   savePostWatchFeedback,
 } from "@/lib/recommendation-session";
 import { captureRecommendationRun } from "@/lib/recommendation-analytics";
-import { CrazinessLevel, RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
+import { CrazinessLevel, IntentContract, RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
 
 type Option = {
   label: string;
@@ -478,6 +478,9 @@ export default function Home() {
       contextHint: inputMode === "describe" ? undefined : pickContextHint(),
       craziness: inputMode === "describe" ? undefined : risk,
       feedbackContext: loadRecommendationFeedbackContext(),
+      // Two-phase fetch: ask for just 1 pick so it renders fast. recommendation/page.tsx fetches
+      // picks 2–3 in the background once this lands.
+      recommendationCount: 1,
     };
 
     localStorage.setItem("fun:loading", "true");
@@ -511,12 +514,26 @@ export default function Home() {
         signal: controller.signal,
       });
       if (!response.ok) throw new Error("Could not generate a pick.");
-      const data = await response.json() as Recommendation & { _batch?: Recommendation[]; _trust?: { displayState?: RecommendationDisplayState } };
+      const data = await response.json() as Recommendation & {
+        _batch?: Recommendation[];
+        _trust?: { displayState?: RecommendationDisplayState; batchComplete?: boolean; intentContract?: IntentContract };
+      };
       const batch = data._batch ?? [data];
       const runId = createRecommendationRunId();
       rememberRecommendationTitles(batch.map((item) => item.title));
       rememberRecommendationHistory(batch, requestInput, runId);
-      localStorage.setItem(recommendationStorageKey, JSON.stringify(createRecommendationSession(batch[0], requestInput, batch, data._trust?.displayState, runId)));
+      localStorage.setItem(
+        recommendationStorageKey,
+        JSON.stringify(createRecommendationSession(
+          batch[0],
+          requestInput,
+          batch,
+          data._trust?.displayState,
+          runId,
+          data._trust?.batchComplete,
+          data._trust?.intentContract,
+        )),
+      );
       captureEvent("recommendation", {
         title: batch[0].title,
         year: batch[0].year,

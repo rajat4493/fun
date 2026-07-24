@@ -10,8 +10,9 @@ import {
 } from "@/lib/llm";
 import { enrichRecommendation } from "@/lib/metadata";
 import { buildCompactRetryPrompt, buildRecommendationPrompt } from "@/lib/prompt";
-import { activeHardAvoidanceKeys, applyTrustFilter, safeFallback, TrustRejection } from "@/lib/recommendation-trust";
+import { activeHardAvoidanceKeys, applyTrustFilter, relatedTitleUnsafe, safeFallback, TrustRejection } from "@/lib/recommendation-trust";
 import { buildIntentContractPrompt, localIntentContract, normalizeIntentContract } from "@/lib/intent-contract";
+import { matchesLanguageRequest, wantsSpecificLanguage } from "@/lib/language-lane";
 import { IntentContract, RawRecommendation, RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
 
 // TMDB genre IDs that map to user avoidances.
@@ -52,21 +53,6 @@ function hasSubscriptionProvider(recommendation: Recommendation): boolean {
     (recommendation.whereToWatch.providers ?? []).some((provider) => provider.access === "subscription");
 }
 
-function wantsHindi(input: RecommendRequest): boolean {
-  const text = [input.selfText, input.reference, ...(input.languagePreferences ?? [])].filter(Boolean).join(" ");
-  return /\bhindi\b/i.test(text);
-}
-
-function matchesLanguageRequest(input: RecommendRequest, recommendation: Recommendation): boolean {
-  if (!wantsHindi(input)) return true;
-  const metadata = recommendation.contentMetadata;
-  if (metadata?.originalLanguage === "hi") return true;
-  if (metadata?.originCountry?.includes("IN")) return true;
-  // If TMDB had no data, give the pick benefit of the doubt; don't reject a valid Hindi title just because TMDB lookup failed.
-  if (!metadata?.originalLanguage && !metadata?.originCountry?.length) return true;
-  // TMDB found it and confirmed it's non-Indian.
-  return false;
-}
 
 function normalizeTitle(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -77,23 +63,6 @@ function parseRelatedTitle(value: string): { title: string; year: string } {
   return match ? { title: match[1].trim(), year: match[2] } : { title: value.trim(), year: "" };
 }
 
-const unsafeRelatedWhenAvoidingDarkness = new Set([
-  "aserbianfilm",
-  "antichrist",
-  "eraserhead",
-  "enterthevoid",
-  "tetsuo",
-  "tetsuotheironman",
-  "thecookthethiefhiswifeherlover",
-  "martyrs",
-  "inside",
-  "thesadness",
-  "terrifier2",
-  "raw",
-  "titane",
-  "dogtooth",
-]);
-
 const tenseRelatedWhenFunnyGroup = new Set([
   "coherence",
   "theinvitation",
@@ -103,7 +72,7 @@ const tenseRelatedWhenFunnyGroup = new Set([
   "theguilty",
 ]);
 
-function shouldHideRelatedTitle(input: RecommendRequest, title: string): boolean {
+function shouldHideRelatedTitle(input: RecommendRequest, title: string, intentContract?: IntentContract): boolean {
   const key = normalizeTitle(title);
   const request = [
     input.selfText,
@@ -111,21 +80,24 @@ function shouldHideRelatedTitle(input: RecommendRequest, title: string): boolean
     input.wants?.join(" "),
     input.avoids?.join(" "),
   ].filter(Boolean).join(" ");
-  const hardAvoids = activeHardAvoidanceKeys(input);
-  const avoidingDarkness = hardAvoids.some((avoid) => ["horror", "gore", "violence", "graphic violence"].includes(avoid));
-  if (avoidingDarkness && unsafeRelatedWhenAvoidingDarkness.has(key)) return true;
 
+  // Shared safety denylists (horror/gore avoidance, panic/grief sensitivity) — same trust checks
+  // applied to the main pick, now applied to hiddenTitles/alternatives too.
+  if (relatedTitleUnsafe(input, title, intentContract)) return true;
+
+  // Narrow tone check (not a safety concern, just avoids a tense/violent adjacent pick surfacing
+  // next to a funny/group-watch main pick) — kept separate from the safety denylists above.
   const funnyOrGroup = /\b(funny|comedy|laugh|friends|group|party|hangout)\b/i.test(request);
   if (funnyOrGroup && tenseRelatedWhenFunnyGroup.has(key)) return true;
 
   return false;
 }
 
-function sanitizeRelatedForRequest(input: RecommendRequest, recommendation: Recommendation): Recommendation {
-  const hiddenTitles = (recommendation.hiddenLayer.titles ?? []).filter((item) => !shouldHideRelatedTitle(input, item.title));
+function sanitizeRelatedForRequest(input: RecommendRequest, recommendation: Recommendation, intentContract?: IntentContract): Recommendation {
+  const hiddenTitles = (recommendation.hiddenLayer.titles ?? []).filter((item) => !shouldHideRelatedTitle(input, item.title, intentContract));
   const alternatives = recommendation.alternatives
     .map((item, index) => ({ ...parseRelatedTitle(item), posterUrl: recommendation.alternativePosterUrls?.[index] }))
-    .filter((item) => !shouldHideRelatedTitle(input, item.title));
+    .filter((item) => !shouldHideRelatedTitle(input, item.title, intentContract));
 
   return {
     ...recommendation,
@@ -181,6 +153,18 @@ type ProviderTrace = {
 };
 
 async function resolveIntentContract(input: RecommendRequest, trace: ProviderTrace[]): Promise<IntentContract> {
+  // Background fill calls (recommendationCount: 2) pass back phase 1's already-resolved contract —
+  // skip re-running intent classification entirely rather than paying for a second LLM call.
+  if (input.precomputedIntentContract) {
+    trace.push({
+      provider: "Intent precomputed (reused from phase 1)",
+      durationMs: 0,
+      ok: true,
+      promptChars: 0,
+    });
+    return input.precomputedIntentContract;
+  }
+
   const local = localIntentContract(input);
   const prompt = buildIntentContractPrompt(input);
   const started = Date.now();
@@ -360,29 +344,49 @@ function withStructuredFallbackLabels(rec: RawRecommendation): RawRecommendation
   };
 }
 
-function fallbackIntentScore(rec: RawRecommendation, intentContract?: IntentContract): number {
-  if (!intentContract || intentContract.primary === "unknown") return 0;
-  const primary = normalizeSignal(intentContract.primary);
-  const secondary = new Set(intentContract.secondary.map(normalizeSignal));
-  const labels = new Set([
-    normalizeSignal(rec.parsedIntent?.primary),
-    ...(rec.parsedIntent?.secondary ?? []).map(normalizeSignal),
-    ...(rec.contentCategory ?? []).map(normalizeSignal),
-    ...(rec.emotionalEffect ?? []).map(normalizeSignal),
-  ]);
+// Scoring order: primary intent match (20) > secondary matches (4 each) > format match (3).
+// Language match isn't scored here — localFallback already routes to a language-specific curated
+// bucket (see language-lane.ts), so every candidate in a given batch already shares the same
+// language lane; there's nothing to differentiate. Sensitivity safety isn't scored either — it's
+// enforced as a hard reject in applyTrustFilter downstream, so an unsafe pick never survives to
+// become the served result regardless of its rank here.
+// The recent/seen penalty IS needed here: diversifyFallbackBatch excludes seen/recent titles when
+// possible, but falls back to the full (unfiltered) batch when EVERY candidate has been shown
+// before (small curated buckets make this reachable). In that edge case this penalty still orders
+// the least-recently-shown title first instead of an arbitrary one, avoiding a static-feeling repeat.
+function fallbackIntentScore(rec: RawRecommendation, intentContract?: IntentContract, input?: RecommendRequest): number {
+  let score = 0;
 
-  let score = labels.has(primary) ? 20 : 0;
-  for (const item of secondary) {
-    if (labels.has(item)) score += 4;
+  if (intentContract && intentContract.primary !== "unknown") {
+    const primary = normalizeSignal(intentContract.primary);
+    const secondary = new Set(intentContract.secondary.map(normalizeSignal));
+    const labels = new Set([
+      normalizeSignal(rec.parsedIntent?.primary),
+      ...(rec.parsedIntent?.secondary ?? []).map(normalizeSignal),
+      ...(rec.contentCategory ?? []).map(normalizeSignal),
+      ...(rec.emotionalEffect ?? []).map(normalizeSignal),
+    ]);
+
+    if (labels.has(primary)) score += 20;
+    for (const item of secondary) {
+      if (labels.has(item)) score += 4;
+    }
+    if (intentContract.format !== "any" && rec.parsedIntent?.format === intentContract.format) score += 3;
   }
-  if (intentContract.format !== "any" && rec.parsedIntent?.format === intentContract.format) score += 3;
+
+  if (input) {
+    const key = normalizeTitle(rec.title);
+    const seen = new Set([...(input.recentTitles ?? []), ...(input.seenTitles ?? [])].map(normalizeTitle));
+    if (seen.has(key)) score -= 50;
+  }
+
   return score;
 }
 
-function rankFallbacksByContract(batch: RawRecommendation[], intentContract?: IntentContract): RawRecommendation[] {
-  if (!intentContract || intentContract.primary === "unknown") return batch;
+function rankFallbacksByContract(batch: RawRecommendation[], intentContract?: IntentContract, input?: RecommendRequest): RawRecommendation[] {
+  if ((!intentContract || intentContract.primary === "unknown") && !input) return batch;
   return batch
-    .map((rec, index) => ({ rec, index, score: fallbackIntentScore(rec, intentContract) }))
+    .map((rec, index) => ({ rec, index, score: fallbackIntentScore(rec, intentContract, input) }))
     .sort((a, b) => b.score - a.score || a.index - b.index)
     .map((item) => item.rec);
 }
@@ -391,35 +395,46 @@ function filteredLocalFallback(input: RecommendRequest, intentContract?: IntentC
   const diversified = diversifyFallbackBatch(input, localFallback(input, intentContract).map(withStructuredFallbackLabels));
   const filtered = filterFalsePositiveRecommendations(input, diversified);
   const batch = filtered.length > 0 ? diversifyFallbackBatch(input, filtered) : diversified;
-  return rankFallbacksByContract(batch, intentContract);
+  return rankFallbacksByContract(batch, intentContract, input);
 }
 
-// NEW: Trust filter with retry loop. If all picks are rejected (wrong language, seen titles, etc.)
-// the prompt is extended with a rejection note and the LLM gets one more attempt before
-// falling back to local curated picks.
-async function trustedRawBatch(input: RecommendRequest, basePrompt: string, trace: ProviderTrace[], intentContract?: IntentContract): Promise<{
+// Trust filter with retry loop. If all picks are rejected the prompt is extended with a rejection
+// note and the LLM gets one more attempt before falling back to local curated picks.
+// precomputedBatch: skip the first LLM call — used when intent and first rec ran in parallel.
+async function trustedRawBatch(
+  input: RecommendRequest,
+  basePrompt: string,
+  trace: ProviderTrace[],
+  intentContract?: IntentContract,
+  precomputedBatch?: RawRecommendation[] | null,
+  count = 3,
+): Promise<{
   batch: RawRecommendation[];
   rejections: TrustRejection[];
 }> {
   const allRejections: TrustRejection[] = [];
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const prompt = attempt === 0 ? basePrompt : buildCompactRetryPrompt(input, allRejections, intentContract);
-    const rawBatch = await getRecommendations(input, prompt, trace, intentContract);
-    const normalizedBatch = filterFalsePositiveRecommendations(input, rawBatch).slice(0, 3);
+    let rawBatch: RawRecommendation[];
+    if (attempt === 0 && precomputedBatch) {
+      rawBatch = precomputedBatch; // reuse batch from parallel call
+    } else {
+      const prompt = attempt === 0 ? basePrompt : buildCompactRetryPrompt(input, allRejections, intentContract, count);
+      rawBatch = await getRecommendations(input, prompt, trace, intentContract);
+    }
+    const normalizedBatch = filterFalsePositiveRecommendations(input, rawBatch).slice(0, count);
 
     const trusted = applyTrustFilter(input, normalizedBatch, intentContract);
     allRejections.push(...trusted.rejected);
     if (trusted.accepted.length > 0) {
-      return { batch: trusted.accepted.slice(0, 3), rejections: allRejections };
+      return { batch: trusted.accepted.slice(0, count), rejections: allRejections };
     }
-
   }
 
   const localTrusted = applyTrustFilter(input, filteredLocalFallback(input, intentContract), intentContract);
   allRejections.push(...localTrusted.rejected);
   if (localTrusted.accepted.length > 0) {
-    return { batch: localTrusted.accepted.slice(0, 3), rejections: allRejections };
+    return { batch: localTrusted.accepted.slice(0, count), rejections: allRejections };
   }
 
   return { batch: [safeFallback(input)], rejections: allRejections };
@@ -450,11 +465,12 @@ async function subscriptionVerifiedChain(
   country: string,
   trace: ProviderTrace[],
   intentContract?: IntentContract,
+  count = 3,
 ): Promise<SubscriptionChainResult> {
   const platforms = input.platforms ?? [];
 
   // Step 1
-  const trusted1 = await trustedRawBatch(input, basePrompt, trace, intentContract);
+  const trusted1 = await trustedRawBatch(input, basePrompt, trace, intentContract, null, count);
   const enriched1 = await enrichBatch(trusted1.batch, country, platforms);
   const verified1 = enriched1.filter(hasSubscriptionProvider);
   if (verified1.length > 0) {
@@ -466,9 +482,9 @@ async function subscriptionVerifiedChain(
   // Never serve a trust-rejected pick just because TMDB might verify it.
   let enriched2: Recommendation[] = [];
   try {
-    const strictPrompt = buildRecommendationPrompt(input, { strictSubscription: true, intentContract });
+    const strictPrompt = buildRecommendationPrompt(input, { strictSubscription: true, intentContract, count });
     const raw2 = await getRecommendations(input, strictPrompt, trace, intentContract);
-    const filtered2 = applyTrustFilter(input, filterFalsePositiveRecommendations(input, raw2).slice(0, 3), intentContract);
+    const filtered2 = applyTrustFilter(input, filterFalsePositiveRecommendations(input, raw2).slice(0, count), intentContract);
     if (filtered2.accepted.length > 0) {
       enriched2 = await enrichBatch(filtered2.accepted, country, platforms);
       const verified2 = enriched2.filter(hasSubscriptionProvider);
@@ -485,7 +501,7 @@ async function subscriptionVerifiedChain(
   const curatedTrusted = applyTrustFilter(input, filteredLocalFallback(input, intentContract), intentContract);
   const curated = curatedTrusted.accepted.length > 0 ? curatedTrusted.accepted : [safeFallback(input)];
   const enrichedCurated = await enrichBatch(curated, country, platforms);
-  const verifiedCurated = enrichedCurated.filter(hasSubscriptionProvider);
+  const verifiedCurated = enrichedCurated.filter(hasSubscriptionProvider).slice(0, count);
   if (verifiedCurated.length > 0) {
     return { picks: verifiedCurated, displayState: "verified", rejections: trusted1.rejections };
   }
@@ -536,23 +552,75 @@ export async function POST(req: Request) {
     const avoids = activeHardAvoidanceKeys(input);
     const subscriptionOnly = input.platformFilter === "mine";
     const providerTrace: ProviderTrace[] = [];
-    const intentContract = await resolveIntentContract(input, providerTrace);
-    const prompt = buildRecommendationPrompt(input, { intentContract });
+    // Two-phase fetch: client sends 1 for the fast initial pick, 2 for the background fill call
+    // that tops the batch up to 3. Omitted (undefined) keeps today's single 3-at-once behavior.
+    const count = input.recommendationCount ?? 3;
 
+    let intentContract: IntentContract;
+    let prompt: string;
     let enrichedBatch: Recommendation[];
     let displayState: RecommendationDisplayState;
     let trustRejections: TrustRejection[];
     let fallbackUsed = false;
 
     if (subscriptionOnly) {
-      // Full verified chain: LLM → strict retry → curated → no-match
-      const chain = await subscriptionVerifiedChain(input, prompt, country, providerTrace, intentContract);
+      // Subscription chain has multiple sequential LLM steps — keep intent sequential
+      // to avoid extra concurrent Anthropic calls that push total time past limits.
+      intentContract = await resolveIntentContract(input, providerTrace);
+      prompt = buildRecommendationPrompt(input, { intentContract, count });
+      const chain = await subscriptionVerifiedChain(input, prompt, country, providerTrace, intentContract, count);
       enrichedBatch = chain.picks;
       displayState = chain.displayState;
       trustRejections = chain.rejections;
+    } else if (count < 3) {
+      // Two-phase fetch (fast first pick or background fill): skip the parallel local-contract
+      // speed optimization below — it exists to shave latency off the blocking 3-pick call, but
+      // a 1-or-2-pick call is already fast/hidden, so the added complexity isn't worth it here.
+      intentContract = await resolveIntentContract(input, providerTrace);
+      prompt = buildRecommendationPrompt(input, { intentContract, count });
+      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, null, count);
+      trustRejections = trustedRaw.rejections;
+      fallbackUsed = trustedRaw.batch.length === 1 && trustedRaw.batch[0]?.title === safeFallback(input).title;
+      enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms);
+      displayState = "unverified";
     } else {
-      // All-cinema: single LLM pass with trust-filter retry, then TMDB enrich
-      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract);
+      // All-cinema path: run intent classification and first recommendation in parallel.
+      // First rec uses local contract (instant); intent result is used for trust filtering + retry.
+      // Saves up to 3.5s on the happy path (no retry needed).
+      const localContract = localIntentContract(input);
+      const localPrompt = buildRecommendationPrompt(input, { intentContract: localContract, count });
+      const parallelTrace: ProviderTrace[] = [];
+
+      const [resolvedContract, precomputedBatch] = await Promise.all([
+        resolveIntentContract(input, providerTrace),
+        getRecommendations(input, localPrompt, parallelTrace, localContract).catch(() => null as RawRecommendation[] | null),
+      ]);
+      providerTrace.push(...parallelTrace);
+      intentContract = resolvedContract;
+
+      // Quality gate for the speed optimization: only reuse the precomputed batch (generated from
+      // the local contract) when local and LLM intent agree on the primary outcome. On disagreement
+      // — e.g. local read "comfort" but the LLM read "bleak" — discard it and let trustedRawBatch
+      // regenerate from the richer LLM-contract prompt. Costs one extra LLM call only on disagreement.
+      const intentsAgree =
+        intentContract.source !== "llm" ||
+        intentContract.primary === "unknown" ||
+        localContract.primary === intentContract.primary ||
+        localContract.secondary.includes(intentContract.primary) ||
+        intentContract.secondary.includes(localContract.primary);
+      const usableBatch = intentsAgree ? precomputedBatch : null;
+      if (!intentsAgree) {
+        providerTrace.push({
+          provider: "parallel-batch discarded (intent disagreement)",
+          durationMs: 0,
+          ok: true,
+          promptChars: 0,
+        });
+      }
+
+      // LLM-contract prompt for retry if the precomputed batch fails trust
+      prompt = buildRecommendationPrompt(input, { intentContract, count });
+      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, usableBatch, count);
       const normalizedBatch = trustedRaw.batch;
       trustRejections = trustedRaw.rejections;
       fallbackUsed = normalizedBatch.length === 1 && normalizedBatch[0]?.title === safeFallback(input).title;
@@ -590,8 +658,12 @@ export async function POST(req: Request) {
       const languageMatchedBatch = enrichedBatch.filter((recommendation) => matchesLanguageRequest(input, recommendation));
       if (languageMatchedBatch.length > 0) {
         enrichedBatch = languageMatchedBatch;
-      } else if (wantsHindi(input)) {
-        const fallback = await enrichBatch(filteredLocalFallback(input, intentContract), country, platforms);
+      } else if (wantsSpecificLanguage(input)) {
+        // All LLM picks were confirmed wrong-language. Try curated local fallback filtered to the
+        // requested language; if the fallback has no titles in that lane (common for non-Hindi),
+        // serve the fallback anyway rather than an empty result — the confirmed-mismatch LLM picks
+        // are already dropped, which is the primary language-lane guarantee.
+        const fallback = (await enrichBatch(filteredLocalFallback(input, intentContract), country, platforms)).slice(0, count);
         const filteredFallback = fallback.filter((recommendation) => matchesLanguageRequest(input, recommendation));
         enrichedBatch = filteredFallback.length > 0 ? filteredFallback : fallback;
       }
@@ -620,7 +692,7 @@ export async function POST(req: Request) {
       }));
     }
 
-    enrichedBatch = enrichedBatch.map((item) => sanitizeRelatedForRequest(input, item));
+    enrichedBatch = enrichedBatch.map((item) => sanitizeRelatedForRequest(input, item, intentContract));
 
     const firstPick = enrichedBatch[0];
     if (displayState !== "no-subscription-match" && displayState !== "avoidance-fallback") {
@@ -635,6 +707,10 @@ export async function POST(req: Request) {
         rejections: trustRejections,
         displayState,
         fallbackUsed,
+        // Two-phase fetch: lets the client know whether to fire a background fill call, and lets
+        // that fill call reuse this response's intent contract instead of re-classifying intent.
+        intentContract,
+        batchComplete: count >= 3,
         ...(process.env.NODE_ENV !== "production" || process.env.FUN_DEBUG_TRACES === "1" ? { providerTrace } : {}),
       },
     });

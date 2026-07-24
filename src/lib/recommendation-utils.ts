@@ -22,16 +22,22 @@ export function uniqueValues(values: Array<string | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }
 
-export async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-  });
-
+// Takes a factory (not a Promise) so the AbortSignal can be threaded into the underlying fetch —
+// Promise.race alone stops the CALLER from waiting, but never cancels the in-flight request, which
+// leaks a connection-pool slot that later requests queue behind. That leak was the likely root
+// cause of this app's recurring "provider hangs past its nominal timeout" pattern.
+export async function withTimeout<T>(factory: (signal: AbortSignal) => Promise<T>, ms: number, label: string): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
   try {
-    return await Promise.race([promise, timeout]);
+    return await factory(controller.signal);
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`${label} timed out after ${ms}ms`);
+    }
+    throw error;
   } finally {
-    if (timer) clearTimeout(timer);
+    clearTimeout(timer);
   }
 }
 

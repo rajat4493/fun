@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left.js";
 import ArrowRight from "lucide-react/dist/esm/icons/arrow-right.js";
@@ -42,7 +42,7 @@ import {
   toTitleCase,
 } from "@/lib/recommendation-session";
 import { captureRecommendationRun } from "@/lib/recommendation-analytics";
-import { Recommendation, RecommendationDisplayState, WatchProvider } from "@/lib/types";
+import { IntentContract, Recommendation, RecommendationDisplayState, WatchProvider } from "@/lib/types";
 
 const LOADING_KEY = "fun:loading";
 const LOADING_STARTED_KEY = "fun:loading-started-at";
@@ -265,6 +265,10 @@ export default function RecommendationPage() {
   const [shareState, setShareState] = useState<"idle" | "copied">("idle");
   const [watchOptionsOpen, setWatchOptionsOpen] = useState(false);
   const [showMorePicks, setShowMorePicks] = useState(false);
+  // Two-phase fetch: tracks the in-flight background "fill" call (picks 2–3) so handleSeenIt can
+  // await it directly instead of polling. null once no fill is pending for the current session.
+  const fillPromiseRef = useRef<Promise<void> | null>(null);
+  const fillStartedForRunIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (!fetchLoading) return;
@@ -317,20 +321,86 @@ export default function RecommendationPage() {
     setReady(true);
   }, []);
 
+  // Two-phase fetch: pick 1 already rendered (see page.tsx's initial recommendationCount: 1
+  // request). Fetch picks 2–3 in the background so they're ready by the time the user rerolls,
+  // without having made them wait for all 3 up front.
+  async function runBackgroundFill(current: RecommendationSession) {
+    try {
+      const response = await fetch("/api/recommend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          ...current.request,
+          recommendationCount: 2,
+          precomputedIntentContract: current.intentContract,
+          recentTitles: [...(current.request.recentTitles ?? []), current.recommendation.title].slice(0, 40),
+        }),
+      });
+      if (!response.ok) throw new Error("fill failed");
+      const data = await response.json() as Recommendation & { _batch?: Recommendation[] };
+      const fillPicks = data._batch ?? [data];
+
+      const existingKeys = new Set((current.batch ?? [current.recommendation]).map((item) => relatedTitleKey(item.title)));
+      const newPicks = fillPicks.filter((pick) => !existingKeys.has(relatedTitleKey(pick.title)));
+
+      // Re-read from localStorage in case the user has already advanced batchIndex/feedback state
+      // while the fill was in flight — merge onto the freshest session, not a stale closure.
+      const latest = loadSession() ?? current;
+      const mergedBatch = [...(latest.batch ?? [latest.recommendation]), ...newPicks];
+      const next: RecommendationSession = { ...latest, batch: mergedBatch, batchComplete: true };
+      localStorage.setItem(recommendationStorageKey, JSON.stringify(next));
+      setSession(next);
+    } catch {
+      // Fill failed — mark complete anyway so handleSeenIt doesn't wait forever. It will fall
+      // through to the existing full replaceWithBatch regeneration once the batch is exhausted,
+      // which is exactly today's pre-two-phase-fetch behavior.
+      const latest = loadSession() ?? current;
+      const next: RecommendationSession = { ...latest, batchComplete: true };
+      localStorage.setItem(recommendationStorageKey, JSON.stringify(next));
+      setSession(next);
+    }
+  }
+
+  useEffect(() => {
+    if (!session || session.batchComplete !== false) return;
+    if (fillStartedForRunIdRef.current === session.runId) return;
+    fillStartedForRunIdRef.current = session.runId;
+    fillPromiseRef.current = runBackgroundFill(session).finally(() => {
+      fillPromiseRef.current = null;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.runId, session?.batchComplete]);
+
   async function replaceWithBatch(request: RecommendationSession["request"]) {
+    // This path always regenerates a full fresh batch — it must NOT inherit a stale
+    // recommendationCount: 1 from session.request (the original two-phase-fetch initial request).
+    // Without this override, every fallback regeneration would keep asking for just 1 pick forever.
+    const fullBatchRequest: RecommendationSession["request"] = { ...request, recommendationCount: 3 };
     const response = await fetch("/api/recommend", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
-      body: JSON.stringify(request),
+      body: JSON.stringify(fullBatchRequest),
     });
     if (!response.ok) throw new Error("failed");
-    const data = await response.json() as Recommendation & { _batch?: Recommendation[]; _trust?: { displayState?: RecommendationDisplayState } };
+    const data = await response.json() as Recommendation & {
+      _batch?: Recommendation[];
+      _trust?: { displayState?: RecommendationDisplayState; batchComplete?: boolean; intentContract?: IntentContract };
+    };
     const batch = data._batch ?? [data];
     const runId = createRecommendationRunId();
     rememberRecommendationTitles(batch.map((item) => item.title));
-    rememberRecommendationHistory(batch, request, runId);
-    const next = createRecommendationSession(batch[0], request, batch, data._trust?.displayState, runId);
+    rememberRecommendationHistory(batch, fullBatchRequest, runId);
+    const next = createRecommendationSession(
+      batch[0],
+      fullBatchRequest,
+      batch,
+      data._trust?.displayState,
+      runId,
+      data._trust?.batchComplete,
+      data._trust?.intentContract,
+    );
     localStorage.setItem(recommendationStorageKey, JSON.stringify(next));
     setSession(next);
     setBatchIndex(0);
@@ -346,8 +416,8 @@ export default function RecommendationPage() {
     });
     captureRecommendationRun({
       runId,
-      source: request.platformFilter === "any" ? "search-all-cinema" : "reroll",
-      request,
+      source: fullBatchRequest.platformFilter === "any" ? "search-all-cinema" : "reroll",
+      request: fullBatchRequest,
       recommendation: batch[0],
       batch,
       displayState: data._trust?.displayState,
@@ -359,17 +429,28 @@ export default function RecommendationPage() {
     setRerolling(true);
     try {
       const seen = addSeenTitle(session.recommendation.title);
-      const batch = session.batch ?? [session.recommendation];
-      const nextIndex = batchIndex + 1;
+      let activeSession = session;
+      let batch = activeSession.batch ?? [activeSession.recommendation];
+      let nextIndex = batchIndex + 1;
+
+      // Two-phase fetch: if the batch looks exhausted but a background fill is still in flight,
+      // wait for it — it usually finishes well before the user reads the current pick and clicks
+      // through. Falls straight through (no wait) once batchComplete is true.
+      if (nextIndex >= batch.length && activeSession.batchComplete === false && fillPromiseRef.current) {
+        await fillPromiseRef.current;
+        activeSession = loadSession() ?? activeSession;
+        batch = activeSession.batch ?? [activeSession.recommendation];
+      }
+
       if (nextIndex < batch.length) {
-        const next = { ...session, recommendation: batch[nextIndex], batchIndex: nextIndex };
+        const next = { ...activeSession, recommendation: batch[nextIndex], batchIndex: nextIndex };
         localStorage.setItem(recommendationStorageKey, JSON.stringify(next));
         setSession(next);
         setBatchIndex(nextIndex);
         setFeedbackReason(null);
       } else {
         await replaceWithBatch({
-          ...session.request,
+          ...activeSession.request,
           seenTitles: seen,
           recentTitles: [...loadRecommendationMemoryTitles(), ...batch.map((item) => item.title)].slice(0, 40),
           feedbackContext: loadRecommendationFeedbackContext(),

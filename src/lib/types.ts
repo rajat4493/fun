@@ -74,6 +74,12 @@ export type RecommendRequest = {
   contextHint?: string; // time-of-day, day, season — influences pick tone
   craziness?: CrazinessLevel;
   feedbackContext?: RecommendationFeedbackContext;
+  // Two-phase fetch: omit for the default 3-at-once batch. Client sets this to 1 for the fast
+  // initial pick, then 2 for the background fill call (see recommendation/page.tsx).
+  recommendationCount?: number;
+  // Lets the background fill call reuse phase 1's already-resolved intent contract instead of
+  // paying for a second intent-classification LLM call.
+  precomputedIntentContract?: IntentContract;
 };
 
 export type WatchProvider = {

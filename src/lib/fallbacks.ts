@@ -117,6 +117,9 @@ export function localFallback(input: RecommendRequest, intentContract?: IntentCo
   const wantsShameless = /shameless/i.test(text);
   const wantsFriends = /\bfriends\b/i.test(text);
   const wantsHindi = /\bhindi\b/i.test(text) || (input.languagePreferences ?? []).some((language) => /hindi/i.test(language));
+  const wantsKorean = /\bkorean\b/i.test(text) || (input.languagePreferences ?? []).some((language) => /korean/i.test(language));
+  const wantsFrench = /\bfrench\b/i.test(text) || (input.languagePreferences ?? []).some((language) => /french/i.test(language));
+  const wantsGerman = /\bgerman\b/i.test(text) || (input.languagePreferences ?? []).some((language) => /german/i.test(language));
   const wantsThriller = contractHas("thriller") || /\b(thriller|tense|suspense|mystery|crime)\b/i.test(text);
   const wantsComedy = contractHas("comedy") || /\b(comedy|funny|laugh|comfort|sitcom|light)\b/i.test(text);
   const wantsRomance = contractHas("romance") || /\b(romance|romantic|love|date)\b/i.test(text);
@@ -522,7 +525,11 @@ export function localFallback(input: RecommendRequest, intentContract?: IntentCo
     ];
   }
 
-  if (wantsScare || wantsGore) {
+  // Guarded off for the 4 gated languages: their scare/gore fallback is handled by the
+  // language-specific blocks below, so an English horror pick never gets generated here
+  // only to be rejected by the hard language gate downstream.
+  const wantsGatedLanguage = wantsHindi || wantsKorean || wantsFrench || wantsGerman;
+  if ((wantsScare || wantsGore) && !wantsGatedLanguage) {
     if (input.platformFilter === "mine" && (input.platforms ?? []).some((platform) => /netflix/i.test(platform))) {
       const netflixRec = {
         format: "Film" as const,
@@ -923,6 +930,406 @@ export function localFallback(input: RecommendRequest, intentContract?: IntentCo
     ];
   }
 
+  // Korean/French/German fallback lanes exist because the hard language gate (matchesLanguageRequest)
+  // will reject any English pick for these 4 languages. Without a curated set here, a wrong-language
+  // LLM batch falls through to the generic English blocks below, gets rejected, and the user is left
+  // with nothing. Only scoped to languages proven end-to-end — see src/lib/language-lane.ts.
+  if (wantsKorean && (wantsScare || wantsGore || wantsThriller)) {
+    const baseRec = {
+      format: "Film" as const,
+      whereToWatch: {
+        status: "unverified" as const,
+        primary: "Availability not verified",
+        note: "F.U.N will verify this in real time. Check your apps before watching.",
+      },
+      hiddenLayer: {
+        headline: "Korean tension beyond the obvious",
+        insight: "Korean thriller and horror rarely need to borrow dread from anywhere else.",
+        classyJab: "Your taste deserves a better map.",
+      },
+    };
+    return [
+      {
+        title: "The Wailing",
+        year: "2016",
+        runtime: "156 min",
+        vibe: "Korean folk horror, dread, unrelenting",
+        confidence: 84,
+        oneLine: "Watch The Wailing for a Korean horror-thriller that keeps escalating dread without ever letting go.",
+        whyItFits: [
+          "It stays firmly in Korean horror rather than drifting into generic global scare tropes.",
+          "The atmosphere builds through sustained unease, not cheap jump scares alone.",
+          "It rewards patience with a genuinely unsettling back half.",
+        ],
+        hiddenTitles: [{ title: "I Saw the Devil", year: "2010" }, { title: "The Chaser", year: "2008" }, { title: "A Tale of Two Sisters", year: "2003" }],
+        alternatives: ["I Saw the Devil (2010)", "The Chaser (2008)", "A Tale of Two Sisters (2003)"],
+        ...baseRec,
+      },
+      {
+        title: "I Saw the Devil",
+        year: "2010",
+        runtime: "144 min",
+        vibe: "Korean revenge thriller, brutal, relentless",
+        confidence: 82,
+        oneLine: "Watch I Saw the Devil for a genuinely brutal Korean revenge thriller with real teeth.",
+        whyItFits: [
+          "It delivers real intensity rather than softened suspense.",
+          "The cat-and-mouse structure keeps tension sustained throughout.",
+          "It stays honest to the Korean thriller/extreme-cinema lane.",
+        ],
+        hiddenTitles: [{ title: "The Chaser", year: "2008" }, { title: "The Wailing", year: "2016" }, { title: "Oldboy", year: "2003" }],
+        alternatives: ["The Chaser (2008)", "Oldboy (2003)", "The Wailing (2016)"],
+        ...baseRec,
+      },
+      {
+        title: "The Chaser",
+        year: "2008",
+        runtime: "125 min",
+        vibe: "Korean thriller, tense, procedural dread",
+        confidence: 80,
+        oneLine: "Watch The Chaser for a taut Korean thriller where the horror is in the ticking clock.",
+        whyItFits: [
+          "It is thriller-first: tension from pursuit and time pressure, not spectacle.",
+          "Its pacing is relentless without needing gore to stay gripping.",
+          "It is a real discovery pick rather than the default Parasite answer.",
+        ],
+        hiddenTitles: [{ title: "I Saw the Devil", year: "2010" }, { title: "The Wailing", year: "2016" }, { title: "Memories of Murder", year: "2003" }],
+        alternatives: ["I Saw the Devil (2010)", "Memories of Murder (2003)", "The Wailing (2016)"],
+        ...baseRec,
+      },
+    ];
+  }
+
+  if (wantsKorean) {
+    const baseRec = {
+      format: "Film" as const,
+      whereToWatch: {
+        status: "unverified" as const,
+        primary: "Availability not verified",
+        note: "F.U.N will verify this in real time. Check your apps before watching.",
+      },
+      hiddenLayer: {
+        headline: "Korean cinema beyond the obvious",
+        insight: "The best Korean picks often sit just outside what the homepage surfaces first.",
+        classyJab: "Your taste deserves a better map.",
+      },
+    };
+    return [
+      {
+        title: "Burning",
+        year: "2018",
+        runtime: "148 min",
+        vibe: "Korean slow-burn mystery, ambiguous, absorbing",
+        confidence: 83,
+        oneLine: "Watch Burning for a hypnotic Korean slow-burn that turns ambiguity into real tension.",
+        whyItFits: [
+          "It stays deliberately unresolved rather than tying things up for comfort.",
+          "The mood is precise and controlled throughout.",
+          "It rewards attention with a genuinely unsettling final act.",
+        ],
+        hiddenTitles: [{ title: "Decision to Leave", year: "2022" }, { title: "Parasite", year: "2019" }, { title: "Poetry", year: "2010" }],
+        alternatives: ["Decision to Leave (2022)", "Parasite (2019)", "Poetry (2010)"],
+        ...baseRec,
+      },
+      {
+        title: "Decision to Leave",
+        year: "2022",
+        runtime: "138 min",
+        vibe: "Korean romantic mystery, elegant, melancholic",
+        confidence: 81,
+        oneLine: "Watch Decision to Leave for a sophisticated Korean mystery with real romantic ache underneath.",
+        whyItFits: [
+          "It blends genre precision with genuine emotional complexity.",
+          "The craft is meticulous without feeling cold.",
+          "It is acclaimed but still feels like a discovery outside the obvious picks.",
+        ],
+        hiddenTitles: [{ title: "Burning", year: "2018" }, { title: "Poetry", year: "2010" }, { title: "Parasite", year: "2019" }],
+        alternatives: ["Burning (2018)", "Poetry (2010)", "Parasite (2019)"],
+        ...baseRec,
+      },
+      {
+        title: "Poetry",
+        year: "2010",
+        runtime: "139 min",
+        vibe: "Korean drama, quiet, devastating",
+        confidence: 78,
+        oneLine: "Watch Poetry for a quietly devastating Korean drama built on restraint rather than spectacle.",
+        whyItFits: [
+          "It carries real emotional weight without manipulative pacing.",
+          "The performance and structure are precise and unhurried.",
+          "It is a genuine discovery pick beyond the default Korean-cinema answers.",
+        ],
+        hiddenTitles: [{ title: "Burning", year: "2018" }, { title: "Decision to Leave", year: "2022" }, { title: "A Moment to Remember", year: "2004" }],
+        alternatives: ["Burning (2018)", "Decision to Leave (2022)", "A Moment to Remember (2004)"],
+        ...baseRec,
+      },
+    ];
+  }
+
+  if (wantsFrench && (wantsScare || wantsGore || wantsThriller)) {
+    const baseRec = {
+      format: "Film" as const,
+      whereToWatch: {
+        status: "unverified" as const,
+        primary: "Availability not verified",
+        note: "F.U.N will verify this in real time. Check your apps before watching.",
+      },
+      hiddenLayer: {
+        headline: "French suspense beyond the obvious",
+        insight: "French thriller cinema builds dread through precision, not noise.",
+        classyJab: "Your taste deserves a better map.",
+      },
+    };
+    return [
+      {
+        title: "Tell No One",
+        year: "2006",
+        runtime: "131 min",
+        vibe: "French thriller, twisty, propulsive",
+        confidence: 82,
+        oneLine: "Watch Tell No One for a genuinely twisty French thriller that never loosens its grip.",
+        whyItFits: [
+          "It stays firmly in French thriller territory rather than drifting into drama.",
+          "The plotting rewards close attention with real payoff.",
+          "It is acclaimed without being the obvious default pick.",
+        ],
+        hiddenTitles: [{ title: "Caché", year: "2005" }, { title: "A Prophet", year: "2009" }, { title: "Point Blank", year: "2010" }],
+        alternatives: ["Caché (2005)", "A Prophet (2009)", "Point Blank (2010)"],
+        ...baseRec,
+      },
+      {
+        title: "Caché",
+        year: "2005",
+        runtime: "117 min",
+        vibe: "French thriller, paranoid, dread-filled",
+        confidence: 80,
+        oneLine: "Watch Caché for a French thriller that turns quiet dread into sustained unease.",
+        whyItFits: [
+          "The tension is psychological and controlled, not spectacle-driven.",
+          "Haneke's precision keeps the dread genuinely uncomfortable.",
+          "It stays in the thriller lane without softening into drama.",
+        ],
+        hiddenTitles: [{ title: "Tell No One", year: "2006" }, { title: "A Prophet", year: "2009" }, { title: "Elle", year: "2016" }],
+        alternatives: ["Tell No One (2006)", "A Prophet (2009)", "Elle (2016)"],
+        ...baseRec,
+      },
+      {
+        title: "A Prophet",
+        year: "2009",
+        runtime: "155 min",
+        vibe: "French crime thriller, brutal, immersive",
+        confidence: 80,
+        oneLine: "Watch A Prophet for an intense French crime thriller with real stakes and no softening.",
+        whyItFits: [
+          "It delivers genuine tension and danger inside a prison-crime structure.",
+          "It is critically major while still feeling like a discovery.",
+          "It stays honest to a hard thriller/crime lane throughout.",
+        ],
+        hiddenTitles: [{ title: "Tell No One", year: "2006" }, { title: "Caché", year: "2005" }, { title: "Point Blank", year: "2010" }],
+        alternatives: ["Tell No One (2006)", "Caché (2005)", "Point Blank (2010)"],
+        ...baseRec,
+      },
+    ];
+  }
+
+  if (wantsFrench) {
+    const baseRec = {
+      format: "Film" as const,
+      whereToWatch: {
+        status: "unverified" as const,
+        primary: "Availability not verified",
+        note: "F.U.N will verify this in real time. Check your apps before watching.",
+      },
+      hiddenLayer: {
+        headline: "French cinema beyond the obvious",
+        insight: "The best French picks often sit just outside what the homepage surfaces first.",
+        classyJab: "Your taste deserves a better map.",
+      },
+    };
+    return [
+      {
+        title: "Amélie",
+        year: "2001",
+        runtime: "122 min",
+        vibe: "French romance-comedy, whimsical, warm",
+        confidence: 85,
+        oneLine: "Watch Amélie for whimsical, warm French storytelling that never tips into saccharine.",
+        whyItFits: [
+          "It is unmistakably French in texture, humor, and rhythm.",
+          "The warmth is earned through specific, inventive detail, not cliché.",
+          "It stays charming without becoming empty comfort food.",
+        ],
+        hiddenTitles: [{ title: "The Intouchables", year: "2011" }, { title: "The Class", year: "2008" }, { title: "Delicatessen", year: "1991" }],
+        alternatives: ["The Intouchables (2011)", "The Class (2008)", "Delicatessen (1991)"],
+        ...baseRec,
+      },
+      {
+        title: "The Intouchables",
+        year: "2011",
+        runtime: "112 min",
+        vibe: "French comedy-drama, warm, feel-good",
+        confidence: 84,
+        oneLine: "Watch The Intouchables for genuine warmth and humor with real emotional grounding.",
+        whyItFits: [
+          "The chemistry and humor feel earned rather than manufactured.",
+          "It balances comedy and real feeling without tipping into melodrama.",
+          "It is broadly loved while still feeling specific and French.",
+        ],
+        hiddenTitles: [{ title: "Amélie", year: "2001" }, { title: "The Class", year: "2008" }, { title: "Delicatessen", year: "1991" }],
+        alternatives: ["Amélie (2001)", "The Class (2008)", "Delicatessen (1991)"],
+        ...baseRec,
+      },
+      {
+        title: "The Class",
+        year: "2008",
+        runtime: "128 min",
+        vibe: "French drama, immersive, unresolved",
+        confidence: 78,
+        oneLine: "Watch The Class for an immersive French drama that stays honest instead of neatly resolving.",
+        whyItFits: [
+          "It captures social and cultural texture with real precision.",
+          "The naturalistic approach avoids sentimentality.",
+          "It is a genuine discovery pick beyond the obvious French default.",
+        ],
+        hiddenTitles: [{ title: "Amélie", year: "2001" }, { title: "The Intouchables", year: "2011" }, { title: "A Prophet", year: "2009" }],
+        alternatives: ["Amélie (2001)", "The Intouchables (2011)", "A Prophet (2009)"],
+        ...baseRec,
+      },
+    ];
+  }
+
+  if (wantsGerman && (wantsScare || wantsGore || wantsThriller)) {
+    const baseRec = {
+      format: "Film" as const,
+      whereToWatch: {
+        status: "unverified" as const,
+        primary: "Availability not verified",
+        note: "F.U.N will verify this in real time. Check your apps before watching.",
+      },
+      hiddenLayer: {
+        headline: "German tension beyond the obvious",
+        insight: "German thriller and horror lean into dread through control, not chaos.",
+        classyJab: "Your taste deserves a better map.",
+      },
+    };
+    return [
+      {
+        title: "Goodnight Mommy",
+        year: "2014",
+        runtime: "99 min",
+        vibe: "German-language psychological horror, unsettling, controlled",
+        confidence: 80,
+        oneLine: "Watch Goodnight Mommy for genuinely unsettling German-language psychological horror.",
+        whyItFits: [
+          "It stays in real horror territory rather than softening into family drama.",
+          "The dread builds through restraint and ambiguity, not jump scares.",
+          "It delivers a real gut-punch rather than a comfortable ending.",
+        ],
+        hiddenTitles: [{ title: "The Lives of Others", year: "2006" }, { title: "The Wave", year: "2008" }, { title: "Funny Games", year: "1997" }],
+        alternatives: ["The Lives of Others (2006)", "The Wave (2008)", "Funny Games (1997)"],
+        ...baseRec,
+      },
+      {
+        title: "The Lives of Others",
+        year: "2006",
+        runtime: "137 min",
+        vibe: "German surveillance thriller, tense, dread-filled",
+        confidence: 82,
+        oneLine: "Watch The Lives of Others for a tense German thriller built on paranoia and moral pressure.",
+        whyItFits: [
+          "The tension is sustained through surveillance dread rather than spectacle.",
+          "It stays honest to the thriller lane while carrying real moral weight.",
+          "It is acclaimed without being an over-obvious default.",
+        ],
+        hiddenTitles: [{ title: "Goodnight Mommy", year: "2014" }, { title: "The Wave", year: "2008" }, { title: "Funny Games", year: "1997" }],
+        alternatives: ["Goodnight Mommy (2014)", "The Wave (2008)", "Funny Games (1997)"],
+        ...baseRec,
+      },
+      {
+        title: "The Wave",
+        year: "2008",
+        runtime: "107 min",
+        vibe: "German social thriller, disturbing, tense",
+        confidence: 78,
+        oneLine: "Watch The Wave for a disturbing German thriller that escalates with real menace.",
+        whyItFits: [
+          "It stays tense and unsettling throughout rather than resolving comfortably.",
+          "The premise builds real dread through plausibility.",
+          "It is a sharper discovery pick than the default German answers.",
+        ],
+        hiddenTitles: [{ title: "The Lives of Others", year: "2006" }, { title: "Goodnight Mommy", year: "2014" }, { title: "Funny Games", year: "1997" }],
+        alternatives: ["The Lives of Others (2006)", "Goodnight Mommy (2014)", "Funny Games (1997)"],
+        ...baseRec,
+      },
+    ];
+  }
+
+  if (wantsGerman) {
+    const baseRec = {
+      format: "Film" as const,
+      whereToWatch: {
+        status: "unverified" as const,
+        primary: "Availability not verified",
+        note: "F.U.N will verify this in real time. Check your apps before watching.",
+      },
+      hiddenLayer: {
+        headline: "German cinema beyond the obvious",
+        insight: "The best German picks often sit just outside what the homepage surfaces first.",
+        classyJab: "Your taste deserves a better map.",
+      },
+    };
+    return [
+      {
+        title: "Good Bye, Lenin!",
+        year: "2003",
+        runtime: "121 min",
+        vibe: "German comedy-drama, warm, inventive",
+        confidence: 84,
+        oneLine: "Watch Good Bye, Lenin! for warm, inventive German storytelling with real historical texture.",
+        whyItFits: [
+          "It is unmistakably German in setting, humor, and emotional register.",
+          "The warmth is earned through a genuinely clever premise, not cliché.",
+          "It balances comedy and real feeling without tipping into either extreme.",
+        ],
+        hiddenTitles: [{ title: "Toni Erdmann", year: "2016" }, { title: "Run Lola Run", year: "1998" }, { title: "The Lives of Others", year: "2006" }],
+        alternatives: ["Toni Erdmann (2016)", "Run Lola Run (1998)", "The Lives of Others (2006)"],
+        ...baseRec,
+      },
+      {
+        title: "Run Lola Run",
+        year: "1998",
+        runtime: "81 min",
+        vibe: "German thriller-drama, kinetic, propulsive",
+        confidence: 81,
+        oneLine: "Watch Run Lola Run for kinetic, propulsive German storytelling that never lets up.",
+        whyItFits: [
+          "Its structure and pace feel genuinely inventive rather than formulaic.",
+          "It stays tense and alive throughout a tight runtime.",
+          "It is iconic while still feeling like a real discovery to newer viewers.",
+        ],
+        hiddenTitles: [{ title: "Good Bye, Lenin!", year: "2003" }, { title: "Toni Erdmann", year: "2016" }, { title: "The Lives of Others", year: "2006" }],
+        alternatives: ["Good Bye, Lenin! (2003)", "Toni Erdmann (2016)", "The Lives of Others (2006)"],
+        ...baseRec,
+      },
+      {
+        title: "Toni Erdmann",
+        year: "2016",
+        runtime: "162 min",
+        vibe: "German comedy-drama, awkward, precise",
+        confidence: 78,
+        oneLine: "Watch Toni Erdmann for a precise German comedy-drama that finds real feeling in awkwardness.",
+        whyItFits: [
+          "It carries real emotional truth beneath its uncomfortable comedy.",
+          "The pacing and tone are distinctly unresolved rather than tidy.",
+          "It is acclaimed while still feeling like a genuine discovery.",
+        ],
+        hiddenTitles: [{ title: "Good Bye, Lenin!", year: "2003" }, { title: "Run Lola Run", year: "1998" }, { title: "The Lives of Others", year: "2006" }],
+        alternatives: ["Good Bye, Lenin! (2003)", "Run Lola Run (1998)", "The Lives of Others (2006)"],
+        ...baseRec,
+      },
+    ];
+  }
+
   const avoids = new Set((input.avoids ?? []).map((avoid) => avoid.toLowerCase()));
   if (hasNegatedConcept(text, /\bgore|gory|blood|bloody|splatter|body horror\b/i)) avoids.add("gore");
   if (hasNegatedConcept(text, /\bviolence|violent|brutal|action\b/i)) avoids.add("violence");
@@ -1071,6 +1478,78 @@ export function localFallback(input: RecommendRequest, intentContract?: IntentCo
           { title: "Coherence", year: "2013" },
         ],
         alternatives: ["Coherence (2013)", "Calibre (2018)", "Blue Ruin (2013)"],
+        ...baseRec,
+      },
+    ];
+  }
+
+  const wantsBleak = !avoids.has("heavy drama") && !strictNoDarkness &&
+    (contractHas("bleak") || (intentContract?.secondary ?? []).some((s) => s.toLowerCase() === "bleak") ||
+      /\b(bleak|grim|nihilistic|morally (complex|complicated|messy)|unflinching|no (hope|mercy)|zero mercy|doesn't blink|merciless)\b/i.test(text));
+  if (wantsBleak) {
+    const bleakIntent = { primary: "drama", secondary: ["bleak"], hardAvoids: [], softAvoids: [], format: "film" as const, language: "any", situation: [], intensity: "bold" as const, ambiguity: "" };
+    return [
+      {
+        title: "The Hunt",
+        year: "2012",
+        runtime: "115 min",
+        vibe: "bleak, morally devastating, unflinching",
+        confidence: 82,
+        oneLine: "Watch The Hunt for a morally devastating drama that refuses easy resolution.",
+        whyItFits: [
+          "It stays inside dark, morally complex territory without softening into redemption.",
+          "The tension comes from social cruelty and injustice, not genre mechanics.",
+          "It leaves a mark — exactly what a bleak-by-choice request is asking for.",
+        ],
+        parsedIntent: bleakIntent,
+        hiddenTitles: [
+          { title: "The Father", year: "2020" },
+          { title: "Nightcrawler", year: "2014" },
+          { title: "Incendies", year: "2010" },
+        ],
+        alternatives: ["Incendies (2010)", "Nightcrawler (2014)", "The Father (2020)"],
+        ...baseRec,
+      },
+      {
+        title: "Nightcrawler",
+        year: "2014",
+        runtime: "117 min",
+        vibe: "dark, morally hollow, magnetic",
+        confidence: 79,
+        oneLine: "Watch Nightcrawler for a pitch-dark character study with no moral safety net.",
+        whyItFits: [
+          "Its protagonist is genuinely amoral — the film never asks you to forgive him.",
+          "The darkness is the point, not a detour on the way to uplift.",
+          "It is gripping without offering comfort, which honors the request.",
+        ],
+        parsedIntent: bleakIntent,
+        hiddenTitles: [
+          { title: "The Hunt", year: "2012" },
+          { title: "Incendies", year: "2010" },
+          { title: "A Prophet", year: "2009" },
+        ],
+        alternatives: ["A Prophet (2009)", "The Hunt (2012)", "Incendies (2010)"],
+        ...baseRec,
+      },
+      {
+        title: "Incendies",
+        year: "2010",
+        runtime: "131 min",
+        vibe: "harrowing, devastating, unforgettable",
+        confidence: 80,
+        oneLine: "Watch Incendies for a harrowing family mystery that goes to genuinely dark places.",
+        whyItFits: [
+          "Its revelations are brutal and the film does not flinch from them.",
+          "The emotional weight is earned through structure, not manipulation.",
+          "It satisfies a bleak request with craft rather than shock alone.",
+        ],
+        parsedIntent: bleakIntent,
+        hiddenTitles: [
+          { title: "A Prophet", year: "2009" },
+          { title: "The Hunt", year: "2012" },
+          { title: "Nightcrawler", year: "2014" },
+        ],
+        alternatives: ["The Hunt (2012)", "A Prophet (2009)", "Nightcrawler (2014)"],
         ...baseRec,
       },
     ];

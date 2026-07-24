@@ -235,6 +235,27 @@ function buildFeedbackRepairClause(input: RecommendRequest) {
   return `\n- Feedback repair context: ${clauses.join(" ")}`;
 }
 
+const SENSITIVE_SITUATION_KEYS = ["panic-anxiety", "grief", "crisis", "distress"];
+
+function buildSensitivityClause(contract?: IntentContract, userContext?: string): string {
+  const contractSensitive = contract?.situation.some((s) =>
+    SENSITIVE_SITUATION_KEYS.some((key) => s.toLowerCase().includes(key)),
+  );
+  const textSensitive =
+    userContext &&
+    /\b(panic attack|panic|anxiety|anxious|grief|grieving|bereaved|mourning|lost (someone|my|a)\b|mental health|breakdown|overwhelmed and can't|crisis)\b/i.test(
+      userContext,
+    );
+
+  if (!contractSensitive && !textSensitive) return "";
+
+  const stateLabel = contractSensitive
+    ? contract!.situation.filter((s) => SENSITIVE_SITUATION_KEYS.some((key) => s.toLowerCase().includes(key))).join(", ")
+    : "detected from request";
+
+  return `\n- ⚠️ SENSITIVE EMOTIONAL STATE (${stateLabel}): The viewer is in distress. Emotional safety is the top priority here. Avoid: medical emergency scenes, graphic grief or loss, depictions of suicide or self-harm, severe abandonment, or content that could amplify the viewer's current state. Prefer: emotionally containing, gently distracting, or safely cathartic picks that help the viewer regulate. Do NOT pick challenging, morally complex, disturbing, or formally demanding content for this viewer right now, regardless of Taste Risk.`;
+}
+
 function timeLabel(contextHint?: string): string {
   if (contextHint) {
     if (/late night|early hours/i.test(contextHint)) return "tonight";
@@ -243,6 +264,43 @@ function timeLabel(contextHint?: string): string {
     if (/evening/i.test(contextHint)) return "this evening";
   }
   return "right now";
+}
+
+const INTENT_COMMITMENT: Record<string, string> = {
+  scare: "Do NOT soften to 'atmospheric', 'unsettling', 'psychological', or 'moody'. The film must be genuinely frightening — supernatural terror, body horror, nightmares, or jump scares at the level a real horror fan would call scary. If it won't make someone scared, it is wrong.",
+  gore: "Do NOT soften to action violence or dark thriller. The viewer explicitly wants body horror, visceral gore, or extreme violent cinema. A mainstream thriller is a failure.",
+  cry: "Do NOT redirect to bittersweet warmth, feel-good resolution, or uplifting endings. The emotional job is catharsis through grief, loss, or devastation. The pick must actually make the viewer cry — not just 'moving' or 'touching'.",
+  thriller: "Do NOT substitute procedural mystery, light crime, or action-lite suspense. The pick must generate genuine tension, paranoia, or sustained dread that grips the viewer throughout.",
+  weird: "Do NOT substitute quirky-mainstream, gently offbeat, or 'charming oddity'. The pick must be formally strange, surreal, conceptually unprecedented, or genuinely disorienting — something the viewer could not have predicted.",
+  comfort: "The pick must be warm, emotionally safe, and easy to enter — low dread, low ambiguity, a clear satisfying shape. Do NOT substitute quiet, precise, contemplative arthouse cinema (slow-cinema character studies, withheld-emotion festival dramas) just because it is well-made — that is homework, not comfort, even when it is critically acclaimed. Do not pick something cold, clinical, or emotionally distant unless the user explicitly asked for that register. The viewer should feel held, not impressed.",
+};
+
+function intentCommitmentClause(intentContract: IntentContract): string {
+  const primary = intentContract.primary;
+  const confidence = intentContract.confidence;
+  if (confidence < 0.5) return "";
+
+  const lines: string[] = [];
+
+  if (INTENT_COMMITMENT[primary]) {
+    lines.push(INTENT_COMMITMENT[primary]);
+  }
+
+  const hasDarknessSecondary = intentContract.secondary.some((s) =>
+    /\b(bleak|dark|grim|nihilistic|morally.complex|morally.complicated|challenging|heavy|disturbing|provocative|brutal|unflinching|raw)\b/i.test(s),
+  );
+  const hasDarknessGoal = /\b(bleak|dark|grim|nihilistic|morally|challenging|heavy|disturbing|provocative|brutal|unflinching|raw|complex)\b/i.test(
+    intentContract.emotionalGoal,
+  );
+
+  if (primary === "drama" && (hasDarknessSecondary || hasDarknessGoal)) {
+    lines.push(
+      "Do NOT soften to accessible, warm, or redemptive drama. The request signals morally complex, bleak, or challenging dramatic territory. Stay there — a crowd-pleasing pick is a failure.",
+    );
+  }
+
+  if (!lines.length) return "";
+  return `\n\nINTENT COMMITMENT — do not soften this primary:\n${lines.map((l) => `- ${l}`).join("\n")}`;
 }
 
 function intentContractClause(intentContract?: IntentContract): string {
@@ -259,12 +317,18 @@ AUTHORITATIVE INTENT CONTRACT
 - Situation: ${intentContract.situation.length ? intentContract.situation.join(", ") : "none"}
 - Intensity: ${intentContract.intensity}
 - Emotional goal: ${intentContract.emotionalGoal}
-- Ambiguity note: ${intentContract.ambiguity || "none"}
+- Ambiguity note: ${intentContract.ambiguity || "none"}${intentCommitmentClause(intentContract)}
 
 Use this contract as the source of truth for what the user means. Do not re-infer the opposite from a single word in the raw text.`;
 }
 
-export function buildRecommendationPrompt(input: RecommendRequest, options?: { strictSubscription?: boolean; intentContract?: IntentContract }) {
+const COUNT_WORDS: Record<number, string> = { 1: "ONE", 2: "TWO", 3: "THREE" };
+
+// "second recommendation", "third recommendation", ... for placeholder lines beyond the first.
+const ORDINAL_WORDS = ["second", "third", "fourth", "fifth"];
+
+export function buildRecommendationPrompt(input: RecommendRequest, options?: { strictSubscription?: boolean; intentContract?: IntentContract; count?: number }) {
+  const count = options?.count ?? 3;
   const momentLabel = timeLabel(input.contextHint);
   const userContext = input.mode === "self"
     ? input.selfText || "The user gave no extra context."
@@ -336,7 +400,7 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
   const hardLanguageLock = detectedLanguage
     ? highIntensityMode
       ? `\n\n🔒 LANGUAGE PREFERENCE — ${detectedLanguage.toUpperCase()} (with intensity escalation): User wants ${detectedLanguage} content. Prioritize ${detectedLanguage}-language picks. BUT at this intensity/craziness level, if ${detectedLanguage} cinema cannot deliver genuinely extreme or unhinged content matching the mood, expand to global picks rather than settling for a weak ${detectedLanguage} match. Acknowledge the language expansion in the pick's reasoning.`
-      : `\n\n🔒 HARD LANGUAGE LOCK — ${detectedLanguage.toUpperCase()}: The user's request explicitly names ${detectedLanguage}. This is a strict constraint. ALL THREE main picks AND their alternatives AND their hidden titles MUST be ${detectedLanguage}-language or ${detectedLanguage}-market films/series. Do NOT recommend English, American, Ukrainian, or any non-${detectedLanguage} content. This overrides the variety instruction (do not suggest "American" or "global" as variety) and overrides the arthouse/MUBI hidden-layer instruction. If you cannot find three ${detectedLanguage}-language matches for the mood, pick the closest ${detectedLanguage}-market equivalents rather than switching language.`
+      : `\n\n🔒 HARD LANGUAGE LOCK — ${detectedLanguage.toUpperCase()}: The user's request names "${detectedLanguage}" — whether as explicit language request or cultural descriptor ("French melancholy", "Italian feel", "Japanese aesthetic"). Either way this is a STRICT CONTENT LANE constraint. ALL ${COUNT_WORDS[count] ?? count} main pick${count === 1 ? "" : "s"} AND their alternatives AND their hidden titles MUST be ${detectedLanguage}-language or ${detectedLanguage}-market films/series. Do NOT recommend English-language, American, or any non-${detectedLanguage}-market content, even if it matches the mood. "French melancholy" means French films, not American indie films with a similar vibe. This overrides variety instructions and arthouse defaults. If you cannot find ${count === 1 ? "a" : count} ${detectedLanguage}-language match${count === 1 ? "" : "es"}, pick the closest ${detectedLanguage}-market equivalent${count === 1 ? "" : "s"}.`
     : "";
 
   const avoidObviousHindiHiddenGems = input.country?.toLowerCase() === "india" &&
@@ -356,6 +420,7 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
   const signalPriorityProtocol = buildSignalPriorityProtocol(input);
   const contextAmplifier = buildContextAmplifier(input, intent);
   const feedbackRepairClause = buildFeedbackRepairClause(input);
+  const sensitivityClause = buildSensitivityClause(contract, userContext);
   const crossLanguageReferenceClause = /\b(similar|like|vibe|reminds me|same as|after watching|watching)\b/i.test(userContext) && explicitLanguageRequest
     ? "\n- Cross-language reference request detected: preserve the reference title's viewer job and deep traits first; use the requested language/culture as the content lane second. Do not let the target language override the actual reason the user liked the reference."
     : "";
@@ -388,8 +453,25 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
   if (intent.primaryIntents.length) {
     hardConstraintLines.push(`❌ Explicit user intent — the main pick must satisfy: ${intent.primaryIntents.join(", ")}. Situation, context, Taste Risk, and availability must shape this request, not replace it.`);
   }
+  if (contract && contract.language && contract.language.toLowerCase() !== "any" && contract.source === "llm" && contract.confidence >= 0.6) {
+    if (!detectedLanguage) {
+      // Language inferred by LLM but not in raw text — add as hard constraint
+      hardConstraintLines.push(`❌ Culture/language lane (inferred from request): the viewer's context points to ${contract.language} cinema. ALL picks must be ${contract.language}-language or ${contract.language}-market titles — treat this as strongly as an explicit language mention.`);
+    } else if (contract.language.toLowerCase().includes(detectedLanguage.toLowerCase())) {
+      // Both regex and LLM agree — reinforce the language gate
+      hardConstraintLines.push(`❌ Language gate confirmed (text + intent analysis): ${detectedLanguage} cinema is required. Do NOT substitute English-language or non-${detectedLanguage}-market titles even if the mood matches. "French melancholy", "German feel", "Italian aesthetic" = French/German/Italian films, not mood-adjacent global picks.`);
+    }
+  }
   if (contract && contract.primary !== "unknown" && contract.confidence >= 0.6) {
     hardConstraintLines.push(`❌ Intent contract — the main pick must satisfy the interpreted primary outcome: ${contract.primary}. The recommendation's parsedIntent, contentCategory, and emotionalEffect must support this.`);
+    if (INTENT_COMMITMENT[contract.primary]) {
+      hardConstraintLines.push(`❌ Anti-softening (${contract.primary}): ${INTENT_COMMITMENT[contract.primary]}`);
+    }
+    const hasDark = contract.secondary.some((s) => /\b(bleak|dark|grim|nihilistic|morally.complex|challenging|heavy|disturbing|provocative)\b/i.test(s)) ||
+      /\b(bleak|dark|grim|nihilistic|morally|challenging|heavy|disturbing|provocative)\b/i.test(contract.emotionalGoal);
+    if (contract.primary === "drama" && hasDark) {
+      hardConstraintLines.push("❌ Darkness commitment: the request signals morally complex or bleak dramatic territory — do NOT soften to accessible, warm, or redemptive drama.");
+    }
   }
   if (avoidanceTiers.hard.length) {
     hardConstraintLines.push(`❌ Hard content gates — NEVER recommend content with or containing: ${avoidanceTiers.hard.join(", ")}. Taste Risk, craziness level, mood signals, novelty, and cinematic quality do NOT override these.`);
@@ -402,6 +484,9 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
   }
   for (const constraint of practicalConstraints) {
     hardConstraintLines.push(`❌ ${constraint}`);
+  }
+  if (/\b(panic attack|panic|anxiety|anxious|grief|grieving|bereaved|mourning)\b/i.test(userContext)) {
+    hardConstraintLines.push("❌ Sensitive viewer state: avoid medical emergencies, graphic loss, suicide depictions, or content that amplifies distress. Prioritize gentle, containing, or safely cathartic picks.");
   }
   const hardConstraintBlock = hardConstraintLines.length ? `
 
@@ -446,10 +531,10 @@ User context:
 - Time context: ${input.contextHint ?? "not provided"}
 - Energy level: ${input.energy ?? "not provided"}
 - Viewing context: muted for this version unless the user typed it directly
-  - Mood/request: ${userContext}${contractClause}${seenClause}${recentClause}${hiddenGemClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${fearIntentClause}${crazinessClause}${softMoodDirectionClause}${feedbackRepairClause}${emotionalJobProtocol}${signalPriorityProtocol}${contextAmplifier}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
+  - Mood/request: ${userContext}${contractClause}${seenClause}${recentClause}${hiddenGemClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${fearIntentClause}${crazinessClause}${softMoodDirectionClause}${feedbackRepairClause}${sensitivityClause}${emotionalJobProtocol}${signalPriorityProtocol}${contextAmplifier}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
 - Discovery mode: ${indieMode ? "Indie / hidden cinema" : "Standard"}${indieClause}
 
-Return an array of exactly THREE JSON objects (not a wrapper object) with this schema, no markdown:
+Return an array of exactly ${COUNT_WORDS[count] ?? String(count)} JSON object${count === 1 ? "" : "s"} (not a wrapper object) with this schema, no markdown:
 [
   {
     "parsedIntent": {
@@ -489,9 +574,7 @@ Return an array of exactly THREE JSON objects (not a wrapper object) with this s
       { "title": "string", "year": "string" }
     ],
     "alternatives": ["Title (Year)", "Title (Year)", "Title (Year)"]
-  },
-  { ... second recommendation with same schema ... },
-  { ... third recommendation with same schema ... }
+  }${count > 1 ? `,\n${ORDINAL_WORDS.slice(0, count - 1).map((word) => `  { ... ${word} recommendation with same schema ... }`).join(",\n")}` : ""}
 ]
 
 For each recommendation:
@@ -503,9 +586,9 @@ For each recommendation:
 - Why-it-fits must prove the match: each reason should name a concrete shared trait from the request/reference, not generic praise like "strong characters" or "great story".
 - Do not mention morning, afternoon, evening, late night, low energy, high energy, alone, partner, friends, or family in visible copy unless the user explicitly typed it or the selected control clearly makes it relevant. Never contradict a typed situation such as bedtime by saying afternoon.
 
-${detectedLanguage
-  ? `The 3 recommendations should offer variety WITHIN ${detectedLanguage} cinema: if pick 1 is a film, pick 2 could be a series; if pick 1 is recent, pick 2 could be classic; range from mainstream to cult. All three MUST be ${detectedLanguage}-language or ${detectedLanguage}-market. Do NOT use "American" or "global" as variety.`
-  : `The 3 recommendations should offer variety: if pick 1 is a film, pick 2 could be a series; if pick 1 is recent, pick 2 could be classic; if pick 1 is international, pick 2 could be American. Give the user choices while all matching their mood.`}
+${count === 1 ? "" : detectedLanguage
+  ? `The ${count} recommendations should offer variety WITHIN ${detectedLanguage} cinema: if pick 1 is a film, pick 2 could be a series; if pick 1 is recent, pick 2 could be classic; range from mainstream to cult. All must be ${detectedLanguage}-language or ${detectedLanguage}-market. Do NOT use "American" or "global" as variety.`
+  : `The ${count} recommendations should offer variety: if pick 1 is a film, pick 2 could be a series; if pick 1 is recent, pick 2 could be classic; if pick 1 is international, pick 2 could be American. Give the user choices while all matching their mood.`}
 
 Constraints:
 - Hard boundaries are trust contracts. Hard content gates, already-seen titles, explicit language/culture requests, subscription-only scope, and time/format/content-safety constraints outrank Taste Risk, novelty, hidden-gem intent, and cinematic quality. "Unhinged" means unusual inside the boundaries, not boundary-breaking.
@@ -531,7 +614,7 @@ type CompactRejection = {
   reasons: string[];
 };
 
-export function buildCompactRetryPrompt(input: RecommendRequest, rejections: CompactRejection[], intentContract?: IntentContract) {
+export function buildCompactRetryPrompt(input: RecommendRequest, rejections: CompactRejection[], intentContract?: IntentContract, count = 3) {
   const intent = extractIntent(input);
   const country = input.country || "not provided";
   const platforms = input.platforms?.length ? input.platforms.join(", ") : "not specified";
@@ -545,7 +628,7 @@ export function buildCompactRetryPrompt(input: RecommendRequest, rejections: Com
 
   return `
 You are F.U.N. The first recommendation attempt failed backend trust checks.
-Return exactly THREE different recommendations as valid JSON only. No markdown.
+Return exactly ${COUNT_WORDS[count] ?? count} different recommendation${count === 1 ? "" : "s"} as valid JSON only. No markdown.
 
 User contract:
 - Request text: ${intent.requestText || "not provided"}

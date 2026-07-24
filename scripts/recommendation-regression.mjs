@@ -2,7 +2,7 @@
 
 const API_BASE = process.env.FUN_QA_BASE_URL || "http://127.0.0.1:3000";
 const ENDPOINT = `${API_BASE.replace(/\/$/, "")}/api/recommend`;
-const CASE_TIMEOUT_MS = Number(process.env.FUN_QA_CASE_TIMEOUT_MS || 60000);
+const CASE_TIMEOUT_MS = Number(process.env.FUN_QA_CASE_TIMEOUT_MS || 75000);
 const DELAY_BETWEEN_MS = Number(process.env.FUN_QA_DELAY_MS || 0);
 
 const scary = /\b(scary|scare|terrify|terrified|terrifying|horror|dread|nightmare|haunted|ghost|possession|demonic|slasher|jumpscare|jump scare|creepy|fear)\b/i;

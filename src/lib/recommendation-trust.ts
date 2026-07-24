@@ -83,6 +83,39 @@ const knownHorrorOrGoreTitles = new Set([
   "enterthevoid",
   "tetsuo",
   "tetsuotheironman",
+  // Fallback-lane and commonly LLM-surfaced titles — needed here too so related-title
+  // safety (hiddenTitles/alternatives) catches them, not just the main pick.
+  "apostle",
+  "thebabadook",
+  "hishouse",
+  "thewailing",
+  "isawthedevil",
+  "thechaser",
+  "goodnightmommy",
+  "theconjuring",
+  "sinister",
+  "thewitch",
+  "streehorrorcomedy",
+  "thecookthethiefhiswifeherlover",
+  "dogtooth",
+]);
+
+// Titles known for heavy, unresolved grief/loss — kept separate from horror/gore because a
+// grief-state viewer who explicitly wants catharsis SHOULD be able to see these (unlike horror,
+// which stays off-limits for panic/anxiety regardless of what else was asked).
+const knownGriefHeavyTitles = new Set([
+  "manchesterbythesea",
+  "amour",
+  "aghoststory",
+  "graveofthefireflies",
+  "thefather",
+  "stillalice",
+  "mygirl",
+  "marleyandme",
+  "oldyeller",
+  "bridgetoterabithia",
+  "philadelphia",
+  "requiemforadream",
 ]);
 
 const goreTerms = /\b(gore|gory|bloody|blood-soaked|blood soaked|splatter|body horror|visceral violence|graphic violence|mutilation|dismember|cannibal|extreme horror|brutal horror|torture)\b/i;
@@ -97,6 +130,7 @@ const romanceTerms = /\b(romance|romantic|love story|love|chemistry|relationship
 const fearTerms = /\b(scary|scare|scared|terrify|terrified|terrifying|frighten|frightened|frightening|horror|dread|nightmare|haunted|ghost|possession|demonic|supernatural terror|jump scare|jumpscare|creepy|panic|fear)\b/i;
 const cryTerms = /\b(cry|crying|tearjerker|tear jerker|sob|weep|devastating|heartbreaking|heartbreak|cathartic|moving|emotionally wreck|grief|loss|melancholy|poignant)\b/i;
 const dramaTerms = /\b(drama|dramatic|character study|serious|emotional|prestige|social realist|melodrama)\b/i;
+const bleakTerms = /\b(bleak|grim|dark|darkness|nihilistic|unflinching|brutal|harrowing|devastating|morally complex|morally ambiguous|morally messy|disturbing|heavy|uncompromising|merciless|pitiless|austere|desolate)\b/i;
 
 function parsedIntentPrimary(parsedIntent?: ParsedRecommendationIntent): string {
   return parsedIntent?.primary?.toLowerCase().trim().replace(/[^a-z0-9-]+/g, "-") ?? "";
@@ -154,6 +188,11 @@ function hasStructuredSignals(rec: RawRecommendation | Recommendation): boolean 
 
 function effectivePrimaryIntents(local: RecommendationIntent, contract?: IntentContract): string[] {
   if (contract && contract.source === "llm" && contract.confidence >= 0.6 && contract.primary !== "unknown") {
+    return [contract.primary, ...contract.secondary].filter(Boolean);
+  }
+  // When extractIntent found no primary (free-text request uses words outside the regex set),
+  // fall to local contract so trust filter can still enforce the inferred intent
+  if (contract && contract.primary !== "unknown" && local.primaryIntents.length === 0) {
     return [contract.primary, ...contract.secondary].filter(Boolean);
   }
   return local.primaryIntents;
@@ -331,6 +370,9 @@ const structuredAllowedTerms: Record<string, string[]> = {
   weird: ["weird", "strange", "offbeat", "surreal", "absurd", "bizarre", "experimental", "quirky", "odd"],
   gore: ["gore", "gory", "body-horror", "splatter", "brutal", "visceral", "graphic-violence"],
   drama: ["drama", "dramatic", "character-study", "serious", "emotional", "prestige", "melodrama"],
+  // Signals for "bleak/morally-complex" requests — comfort/warm titles must not pass this check
+  bleak: ["bleak", "dark", "grim", "nihilistic", "disturbing", "provocative", "unflinching", "brutal", "challenging", "heavy", "harrowing", "confrontational", "moral-complexity", "morally-complex", "morally-complicated"],
+  cathartic: ["cathartic", "catharsis", "devastating", "heartbreaking", "cry", "emotional", "moving", "grief", "poignant", "drama"],
 };
 
 function structuredIntentViolation(primary: string, rec: RawRecommendation | Recommendation): string | null {
@@ -378,8 +420,74 @@ function explicitGenreViolations(input: RecommendRequest, rec: RawRecommendation
   if (primaryIntents.includes("weird") && !weirdTerms.test(text)) {
     reasons.push("intent: requested weird/offbeat");
   }
+  if (primaryIntents.includes("bleak") && !bleakTerms.test(text)) {
+    reasons.push("intent: requested bleak/morally-complex, pick reads as gentle");
+  }
 
   return reasons;
+}
+
+// Content that is too activating for a viewer in an acute panic/anxiety state.
+const panicUnsafeTerms = /\b(panic|anxiety attack|medical emergency|hospital|cardiac|heart attack|suicide|self-harm|self harm|overdose|home invasion|kidnap|abduction|torture|graphic violence|gore|body horror|jump scare|jumpscare|nightmare|terror|dread|breakdown|hostage)\b/i;
+// Content that risks amplifying a grieving viewer's loss (unless they explicitly asked for catharsis).
+const griefUnsafeTerms = /\b(child death|dying child|dead child|terminal illness|suicide|self-harm|self harm|miscarriage|cancer death|funeral|losing a (child|parent|spouse|partner|pet)|death of a (child|parent|spouse|partner|pet|dog|cat)|grief spiral|slowly dying)\b/i;
+const cathartsisRequested = /\b(devastating|cathartic|catharsis|make me cry|want to cry|need to cry|cry it out|tearjerker|sob|emotional release|let it (all )?out|gut-wrenching)\b/i;
+
+// Hard safety gate for acute emotional states carried on the intent contract's `situation`.
+// This is a real validation layer, not just prompt text — a distressing pick is rejected even
+// when the model labels it softly.
+function sensitivityViolation(
+  input: RecommendRequest,
+  rec: RawRecommendation | Recommendation,
+  contract?: IntentContract,
+): string | null {
+  const situation = contract?.situation ?? [];
+  if (!situation.length) return null;
+
+  const text = contentText(rec).toLowerCase();
+  const terms = structuredTerms(rec);
+  const activating = ["fear", "dread", "horror", "terror", "nightmare", "gore", "body-horror", "shock"];
+
+  if (situation.some((s) => s.toLowerCase().includes("panic") || s.toLowerCase().includes("anxiety"))) {
+    if (panicUnsafeTerms.test(text) || activating.some((label) => terms.has(label))) {
+      return "sensitivity: panic/anxiety state — pick is too activating";
+    }
+  }
+
+  if (situation.some((s) => s.toLowerCase().includes("grief"))) {
+    const request = requestText(input);
+    const wantsCatharsis = cathartsisRequested.test(request) || contract?.primary === "cry";
+    if (!wantsCatharsis && griefUnsafeTerms.test(text)) {
+      return "sensitivity: grief state — pick risks amplifying loss";
+    }
+  }
+
+  return null;
+}
+
+// Safety check for hiddenTitles/alternatives/similar-vibe cards — these are just {title, year}
+// pairs with no vibe/oneLine text and no TMDB enrichment, so the full text-based avoidance checks
+// used for the main pick can't run against them. This applies the same known-title denylists
+// (knownHorrorOrGoreTitles, knownGriefHeavyTitles) that back the main pick's trust checks, so a
+// user who avoided horror/gore or is in a panic/grief state doesn't see it resurface in the
+// "related" rail even though the main pick correctly avoided it.
+export function relatedTitleUnsafe(input: RecommendRequest, title: string, contract?: IntentContract): boolean {
+  const key = normalize(title);
+  const hardAvoids = activeHardAvoids(input);
+  const avoidingDarkness = ["horror", "gore", "violence", "graphic violence"].some((avoid) => hardAvoids.has(avoid));
+  if (avoidingDarkness && knownHorrorOrGoreTitles.has(key)) return true;
+
+  const situation = contract?.situation ?? [];
+  const isPanicState = situation.some((s) => s.toLowerCase().includes("panic") || s.toLowerCase().includes("anxiety"));
+  if (isPanicState && knownHorrorOrGoreTitles.has(key)) return true;
+
+  const isGriefState = situation.some((s) => s.toLowerCase().includes("grief"));
+  if (isGriefState) {
+    const wantsCatharsis = cathartsisRequested.test(requestText(input)) || contract?.primary === "cry";
+    if (!wantsCatharsis && knownGriefHeavyTitles.has(key)) return true;
+  }
+
+  return false;
 }
 
 function hiddenGemViolation(input: RecommendRequest, rec: RawRecommendation | Recommendation, intent = extractIntent(input)): string | null {
@@ -411,6 +519,7 @@ export function validateRecommendation<T extends RawRecommendation | Recommendat
     memoryViolation(input, rec),
     confidenceViolation(rec),
     runtimeViolation(input, rec),
+    sensitivityViolation(input, rec, contract),
     ...avoidanceViolations(input, rec),
     ...positiveFitViolations(input, rec, contract),
   ].filter((reason): reason is string => Boolean(reason));
@@ -449,6 +558,7 @@ export function rejectionPrompt(rejections: TrustRejection[]): string {
   const memoryViolations = rejections.flatMap((r) => r.reasons.filter((reason) => reason.startsWith("memory:")));
   const runtimeViolations = rejections.flatMap((r) => r.reasons.filter((reason) => reason.startsWith("time:")));
   const intentViolations = rejections.flatMap((r) => r.reasons.filter((reason) => reason.startsWith("intent:")));
+  const sensitivityViolations = rejections.flatMap((r) => r.reasons.filter((reason) => reason.startsWith("sensitivity:")));
 
   const avoidanceNote = avoidanceViolations.length
     ? `\n⛔ Avoidance violations found: ${[...new Set(avoidanceViolations)].join(", ")}. Do NOT recommend anything in these categories or adjacent genres — this is absolute regardless of Taste Risk or craziness level.`
@@ -462,22 +572,29 @@ export function rejectionPrompt(rejections: TrustRejection[]): string {
   const intentNote = intentViolations.length
     ? `\n⛔ Intent violations: ${[...new Set(intentViolations)].join(", ")}. The replacement must satisfy the explicit genre/type/discovery request, not just the broad mood.`
     : "";
+  const sensitivityNote = sensitivityViolations.length
+    ? `\n⛔ Sensitivity violations: ${[...new Set(sensitivityViolations)].join(", ")}. The viewer is in an acute emotional state. Choose emotionally containing, gently distracting, or safely warm picks. Avoid dread, terror, medical emergencies, suicide, graphic loss, and anything that could amplify distress.`
+    : "";
 
   return `\n\nBackend trust filter REJECTED the previous candidates. These are hard-boundary failures — not preference suggestions. Do not repeat any rejected title, do not pick thematically adjacent titles that would hit the same boundary:
 ${rejections.slice(0, 8).map((item) => `- "${item.title}" rejected: ${item.reasons.join("; ")}`).join("\n")}
-${avoidanceNote}${memoryNote}${runtimeNote}${intentNote}
+${avoidanceNote}${memoryNote}${runtimeNote}${intentNote}${sensitivityNote}
 Return three completely different valid candidates that preserve the emotional job while staying strictly inside all boundaries.`;
 }
 
 export function safeFallback(input: RecommendRequest): RawRecommendation {
   const intent = extractIntent(input);
   const text = requestText(input);
+  // Acute emotional state overrides genre pulls: a panic/grief viewer must never get a horror
+  // last-resort pick, even if they also expressed a scare/gore preference. This mirrors the
+  // sensitivityViolation gate so the last-resort path can't reintroduce what the gate rejected.
+  const sensitiveState = /\b(panic attack|panic|anxiety|anxious|spiraling|overwhelmed|grief|grieving|bereaved|mourning|lost (my|someone|a)|breakdown)\b/i.test(text);
   const wantsHindi = /\bhindi\b/i.test(text) || (input.languagePreferences ?? []).some((language) => /hindi/i.test(language));
-  const wantsThriller = /\b(thriller|suspense|mystery|crime thriller|tense and clever)\b/i.test(text);
+  const wantsThriller = !sensitiveState && /\b(thriller|suspense|mystery|crime thriller|tense and clever)\b/i.test(text);
   const wantsDrama = /\bdrama\b/i.test(text);
   const wantsWeirdSafe = /\b(weird|strange|unusual|offbeat|quirky|absurd|surreal|funny|comedy)\b/i.test(text) || (input.craziness ?? 0) >= 2;
-  const wantsScare = intent.primaryIntents.includes("scare") && !intent.hardAvoids.includes("horror");
-  const wantsGore = intent.primaryIntents.includes("gore") && !intent.hardAvoids.some((avoid) => ["gore", "horror", "violence", "graphic violence"].includes(avoid));
+  const wantsScare = !sensitiveState && intent.primaryIntents.includes("scare") && !intent.hardAvoids.includes("horror");
+  const wantsGore = !sensitiveState && intent.primaryIntents.includes("gore") && !intent.hardAvoids.some((avoid) => ["gore", "horror", "violence", "graphic violence"].includes(avoid));
   const isExcluded = (title: string) => {
     const key = normalize(title);
     return [...(input.recentTitles ?? []), ...(input.seenTitles ?? [])].some((item) => normalize(item) === key);

@@ -1,4 +1,4 @@
-import { RecommendRequest, Recommendation, RecommendationDisplayState, RecommendationFeedbackContext, WatchProvider } from "@/lib/types";
+import { IntentContract, RecommendRequest, Recommendation, RecommendationDisplayState, RecommendationFeedbackContext, WatchProvider } from "@/lib/types";
 
 export const recommendationStorageKey = "fun:last-recommendation";
 export const seenTitlesKey = "fun:seen-titles";
@@ -286,6 +286,13 @@ export type RecommendationSession = {
   batch?: Recommendation[];
   batchIndex?: number;
   displayState?: RecommendationDisplayState; // from _trust.displayState on the API response
+  // Two-phase fetch: false means only pick 1 has been fetched so far and recommendation/page.tsx
+  // should fire a background fill call for picks 2–3. Undefined/true means the batch is already
+  // complete (today's default single-call behavior, or a fill that already finished).
+  batchComplete?: boolean;
+  // Phase 1's resolved intent contract, carried forward so the background fill call can reuse it
+  // instead of paying for a second intent-classification LLM call.
+  intentContract?: IntentContract;
 };
 
 export const defaultRecommendation: Recommendation = {
@@ -320,6 +327,8 @@ export function createRecommendationSession(
   batch?: Recommendation[],
   displayState?: RecommendationDisplayState,
   runId?: string,
+  batchComplete?: boolean,
+  intentContract?: IntentContract,
 ): RecommendationSession {
   return {
     runId,
@@ -329,6 +338,8 @@ export function createRecommendationSession(
     batch: batch ?? [recommendation],
     batchIndex: 0,
     displayState,
+    batchComplete,
+    intentContract,
   };
 }
 

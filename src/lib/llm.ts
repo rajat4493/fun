@@ -4,7 +4,7 @@ import { extractJson, uniqueValues, withTimeout } from "@/lib/recommendation-uti
 const ANTHROPIC_TIMEOUT_MS = 25000;
 const FALLBACK_LLM_TIMEOUT_MS = 15000;
 const LLM_MAX_OUTPUT_TOKENS = 3000;
-const INTENT_TIMEOUT_MS = 6000;
+const INTENT_TIMEOUT_MS = 3500;
 const INTENT_MAX_OUTPUT_TOKENS = 700;
 
 type AnthropicTextBlock = {
@@ -64,7 +64,7 @@ export async function recommendWithGenericLLM(prompt: string, temperature = 0.85
 
   const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
   const response = await withTimeout(
-    fetch(url, {
+    (signal) => fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -76,6 +76,7 @@ export async function recommendWithGenericLLM(prompt: string, temperature = 0.85
         max_tokens: LLM_MAX_OUTPUT_TOKENS,
         messages: [{ role: "user", content: prompt }],
       }),
+      signal,
     }),
     FALLBACK_LLM_TIMEOUT_MS,
     `Generic LLM (${model})`,
@@ -95,7 +96,7 @@ export async function interpretIntentWithGenericLLM(prompt: string): Promise<Rec
 
   const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
   const response = await withTimeout(
-    fetch(url, {
+    (signal) => fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -107,6 +108,7 @@ export async function interpretIntentWithGenericLLM(prompt: string): Promise<Rec
         max_tokens: INTENT_MAX_OUTPUT_TOKENS,
         messages: [{ role: "user", content: prompt }],
       }),
+      signal,
     }),
     INTENT_TIMEOUT_MS,
     `Generic intent LLM (${model})`,
@@ -122,7 +124,7 @@ export async function recommendWithAnthropic(prompt: string, temperature = 0.85)
   if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY");
 
   const response = await withTimeout(
-    fetch("https://api.anthropic.com/v1/messages", {
+    (signal) => fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -135,6 +137,7 @@ export async function recommendWithAnthropic(prompt: string, temperature = 0.85)
         temperature,
         messages: [{ role: "user", content: prompt }],
       }),
+      signal,
     }),
     ANTHROPIC_TIMEOUT_MS,
     "Anthropic",
@@ -151,7 +154,7 @@ export async function interpretIntentWithAnthropic(prompt: string): Promise<Reco
   if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY");
 
   const response = await withTimeout(
-    fetch("https://api.anthropic.com/v1/messages", {
+    (signal) => fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -164,6 +167,7 @@ export async function interpretIntentWithAnthropic(prompt: string): Promise<Reco
         temperature: 0.1,
         messages: [{ role: "user", content: prompt }],
       }),
+      signal,
     }),
     INTENT_TIMEOUT_MS,
     "Anthropic intent",
@@ -191,7 +195,7 @@ export async function recommendWithOpenAI(prompt: string, temperature = 0.85): P
   for (const model of uniqueValues([process.env.OPENAI_MODEL, "gpt-4o-mini"])) {
     try {
       const response = await withTimeout(
-        fetch("https://api.openai.com/v1/responses", {
+        (signal) => fetch("https://api.openai.com/v1/responses", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -203,6 +207,7 @@ export async function recommendWithOpenAI(prompt: string, temperature = 0.85): P
             temperature,
             max_output_tokens: LLM_MAX_OUTPUT_TOKENS,
           }),
+          signal,
         }),
         FALLBACK_LLM_TIMEOUT_MS,
         `OpenAI ${model}`,
@@ -228,7 +233,7 @@ export async function interpretIntentWithOpenAI(prompt: string): Promise<Record<
   for (const model of uniqueValues([process.env.OPENAI_MODEL, "gpt-4o-mini"])) {
     try {
       const response = await withTimeout(
-        fetch("https://api.openai.com/v1/responses", {
+        (signal) => fetch("https://api.openai.com/v1/responses", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -240,6 +245,7 @@ export async function interpretIntentWithOpenAI(prompt: string): Promise<Record<
             temperature: 0.1,
             max_output_tokens: INTENT_MAX_OUTPUT_TOKENS,
           }),
+          signal,
         }),
         INTENT_TIMEOUT_MS,
         `OpenAI intent ${model}`,

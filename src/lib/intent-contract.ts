@@ -1,5 +1,5 @@
 import { extractIntent } from "@/lib/intent";
-import { requestText } from "@/lib/recommendation-utils";
+import { hasNegatedConcept, requestText } from "@/lib/recommendation-utils";
 import { IntentContract, RecommendRequest } from "@/lib/types";
 
 const PRIMARY_VALUES = new Set([
@@ -41,16 +41,62 @@ function numberConfidence(value: unknown): number {
 
 export function localIntentContract(input: RecommendRequest): IntentContract {
   const intent = extractIntent(input);
+  const text = [input.selfText, ...(input.mood ?? []), ...(input.wants ?? []), ...(input.avoids ?? [])].filter(Boolean).join(" ");
+
+  // Emotional register: detect nuanced secondary signals from free text.
+  // "brutal week/day" describes the user's life, not desired content — exclude those idioms.
+  // Comfort-seeking language overrides darkness words entirely.
+  const extraSecondary: string[] = [];
+  const seekingComfort = /\b(something (kind|warm|gentle|light|easy|comforting)|comfort me|cheer me up|asks nothing|nothing heavy|no heavy|unwind|feel.good|feel better|lift me)\b/i.test(text);
+  const darknessPattern = /\b(bleak|nihilistic|grim|hopeless|morally.(complex|complicated|messy)|disturbing|provocative|brutal(?!\s+(week|day|month|year|shift|commute|schedule))|unflinching|confrontational|harrowing|raw cinema|dark and honest|zero mercy)\b/i;
+  const darknessSignal = darknessPattern.test(text) &&
+    !hasNegatedConcept(text, /\b(bleak|grim|dark|heavy|disturbing|brutal)\b/i);
+  if (darknessSignal && !seekingComfort) {
+    extraSecondary.push("bleak");
+  }
+  if (/\b(gut.wrenching|heartbreaking|devastating|devastation|emotionally.heavy|poignant|melancholy|melancholic)\b/i.test(text)) {
+    extraSecondary.push("cathartic");
+  }
+  if (/\b(surreal|bizarre|strange|weird|absurd|avant.garde|experimental|formally.unusual)\b/i.test(text)) {
+    if (!intent.primaryIntents.includes("weird")) extraSecondary.push("weird");
+  }
+
+  // Sensitive situation: detect emotional state requiring safety handling
+  const extraSituation: string[] = [];
+  if (/\b(panic attack|panic|anxiety|anxious|overthinking|spiraling|overwhelmed)\b/i.test(text)) {
+    extraSituation.push("panic-anxiety");
+  }
+  if (/\b(grief|grieving|bereaved|mourning|lost (my|someone|a))\b/i.test(text)) {
+    extraSituation.push("grief");
+  }
+  if (/\b(can't sleep|cant sleep|insomnia|before bed|bedtime)\b/i.test(text)) {
+    extraSituation.push("bedtime");
+  }
+  if (/\b(with (my )?(partner|girlfriend|boyfriend|wife|husband)|date night)\b/i.test(text)) {
+    extraSituation.push("partner");
+  }
+  if (/\b(with friends|friends over|group watch|movie night)\b/i.test(text)) {
+    extraSituation.push("friends");
+  }
+
+  const hasDarkness = extraSecondary.includes("bleak");
+  // Map "bleak/morally complex" requests to "drama" when primary is unknown — enables the darkness commitment clause
+  const rawPrimary = firstKnownPrimary(intent.primaryIntents);
+  const primary = rawPrimary === "unknown" && hasDarkness ? "drama" : rawPrimary;
+  const secondaryBase = intent.primaryIntents.filter((item) => item !== primary).slice(0, 4);
+
   return {
-    primary: firstKnownPrimary(intent.primaryIntents),
-    secondary: intent.primaryIntents.filter((item) => item !== firstKnownPrimary(intent.primaryIntents)).slice(0, 6),
+    primary,
+    secondary: [...new Set([...secondaryBase, ...extraSecondary])].slice(0, 6),
     hardAvoids: intent.hardAvoids,
     softAvoids: intent.softAvoids,
     format: intent.requestedFormat ?? "any",
     language: intent.requestedLanguage ?? input.languagePreferences?.[0] ?? "any",
-    situation: [],
+    situation: extraSituation,
     intensity: input.craziness === 3 ? "unhinged" : input.craziness === 2 ? "bold" : input.craziness === 0 ? "safe" : "curious",
-    emotionalGoal: "Infer the best emotional outcome from the request while respecting hard constraints.",
+    emotionalGoal: hasDarkness
+      ? "Morally complex, bleak, or challenging emotional territory — do not soften to accessible or redemptive."
+      : "Infer the best emotional outcome from the request while respecting hard constraints.",
     confidence: 0.55,
     ambiguity: "",
     source: "local",
@@ -68,12 +114,14 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
 
   return {
     primary,
-    secondary: stringArray(value.secondary),
+    // Merge local emotional-register signals (bleak, cathartic, weird) — the LLM often omits them
+    secondary: [...new Set([...stringArray(value.secondary), ...local.secondary])].slice(0, 8),
     hardAvoids: [...new Set([...local.hardAvoids, ...stringArray(value.hardAvoids).map((item) => item.toLowerCase())])],
     softAvoids: [...new Set([...local.softAvoids, ...stringArray(value.softAvoids).map((item) => item.toLowerCase())])],
     format: FORMAT_VALUES.has(formatRaw as IntentContract["format"]) ? formatRaw as IntentContract["format"] : local.format,
     language: typeof value.language === "string" && value.language.trim() ? value.language.trim() : local.language,
-    situation: stringArray(value.situation),
+    // Merge local sensitivity/situation detection so safety mode can't be dropped by the LLM
+    situation: [...new Set([...stringArray(value.situation), ...local.situation])].slice(0, 8),
     intensity: INTENSITY_VALUES.has(intensityRaw as IntentContract["intensity"]) ? intensityRaw as IntentContract["intensity"] : local.intensity,
     emotionalGoal: typeof value.emotionalGoal === "string" && value.emotionalGoal.trim()
       ? value.emotionalGoal.trim()
