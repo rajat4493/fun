@@ -338,7 +338,7 @@ const COUNT_WORDS: Record<number, string> = { 1: "ONE", 2: "TWO", 3: "THREE" };
 // "second recommendation", "third recommendation", ... for placeholder lines beyond the first.
 const ORDINAL_WORDS = ["second", "third", "fourth", "fifth"];
 
-export function buildRecommendationPrompt(input: RecommendRequest, options?: { strictSubscription?: boolean; intentContract?: IntentContract; count?: number }) {
+export function buildRecommendationPrompt(input: RecommendRequest, options?: { strictSubscription?: boolean; intentContract?: IntentContract; count?: number; failedTitles?: string[] }) {
   const count = options?.count ?? 3;
   const momentLabel = timeLabel(input.contextHint);
   const userContext = input.mode === "self"
@@ -449,7 +449,7 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
 
   const scopeClause = mineMode
     ? options?.strictSubscription
-      ? `\n- ⚠️ STRICT SUBSCRIPTION RETRY: Your previous picks could not be verified on ${platforms} in ${country}. This is your second and final attempt. You MUST only recommend titles you are highly confident currently appear on ${platforms} in ${country}. If you are uncertain whether a title is on these platforms, do not choose it — pick your next-best option that you can be confident about. Setting a lower confidence score (70–80) is fine — honesty is better than a guess. Do NOT pick titles that are typically exclusive to other platforms, only available to buy/rent, or festival-only.`
+      ? `\n- ⚠️ STRICT SUBSCRIPTION RETRY: Your previous picks (${options?.failedTitles?.length ? options.failedTitles.join(", ") : "the earlier attempt"}) could not be verified on ${platforms} in ${country}. This is your second and final attempt. Do not repeat any of those titles. The real constraint here is catalog licensing, not taste — ${country} may carry a materially smaller or different catalog than the US. Favor titles that are Netflix/Prime/major-platform Originals, or major-studio films with broad global licensing, over festival, indie, or regionally-exclusive titles, even if a narrower pick would otherwise fit the mood slightly better. You MUST only recommend titles you are highly confident currently appear on ${platforms} in ${country}. If you are uncertain whether a title is on these platforms, do not choose it — pick your next-best option that you can be confident about. Setting a lower confidence score (70–80) is fine — honesty is better than a guess. Do NOT pick titles that are typically exclusive to other platforms, only available to buy/rent, or festival-only.`
       : `\n- Scope (streaming filter only): User wants picks available on ${platforms}. CRITICAL: Honor the user's language, genre, culture, and mood request exactly — if they ask for Hindi comedy, pick Hindi comedies; if they ask for French thriller, pick French thrillers. Major platforms carry vast international and non-English catalogues. The filter changes WHERE it streams, NOT what language or genre you pick. Only avoid titles that are exclusively on niche services (Mubi, Criterion Channel, BFI Player) or completely unavailable on mainstream platforms. Find the best match for the request that also lives on ${platforms}.`
     : "";
 

@@ -495,7 +495,8 @@ async function subscriptionVerifiedChain(
   // Never serve a trust-rejected pick just because TMDB might verify it.
   let enriched2: Recommendation[] = [];
   try {
-    const strictPrompt = buildRecommendationPrompt(input, { strictSubscription: true, intentContract, count });
+    const failedTitles = trusted1.batch.map((rec) => rec.title);
+    const strictPrompt = buildRecommendationPrompt(input, { strictSubscription: true, intentContract, count, failedTitles });
     const raw2 = await getRecommendations(input, strictPrompt, trace, intentContract);
     const filtered2 = applyTrustFilter(input, filterFalsePositiveRecommendations(input, raw2).slice(0, count), intentContract);
     if (filtered2.accepted.length > 0) {
