@@ -255,11 +255,21 @@ function isEpisodeRuntime(rec: RawRecommendation | Recommendation): boolean {
   return /\b(episode|per episode)\b/.test(value);
 }
 
-function runtimeViolation(input: RecommendRequest, rec: RawRecommendation | Recommendation): string | null {
+// A contract format is only trusted here when it's either locally derived (source: "local",
+// always deterministic) or an LLM classification confident enough to act on — mirrors the
+// threshold effectivePrimaryIntents already uses for the same contract.
+function contractFormat(contract?: IntentContract): IntentContract["format"] | null {
+  if (!contract || contract.format === "any") return null;
+  if (contract.source === "llm" && contract.confidence < 0.6) return null;
+  return contract.format;
+}
+
+function runtimeViolation(input: RecommendRequest, rec: RawRecommendation | Recommendation, contract?: IntentContract): string | null {
   const request = requestText(input).toLowerCase();
   const time = input.time?.toLowerCase();
   const minutes = parseRuntimeMinutes(rec.runtime);
-  if (time?.includes("one episode") || /\b(one|1)\s+episode\b|\ban episode\b/.test(request)) {
+  const asksForEpisode = contractFormat(contract) === "episode" || time?.includes("one episode") || /\b(one|1)\s+episode\b|\ban episode\b/.test(request);
+  if (asksForEpisode) {
     return isEpisodeRuntime(rec) ? null : "time: requested one episode";
   }
   if (!minutes) return null;
@@ -348,12 +358,13 @@ const softScareFalsePositiveTitles = new Set([
   "anomalisa",
 ]);
 
-function explicitFormatViolation(input: RecommendRequest, rec: RawRecommendation | Recommendation, intent = extractIntent(input)): string | null {
+function explicitFormatViolation(input: RecommendRequest, rec: RawRecommendation | Recommendation, intent = extractIntent(input), contract?: IntentContract): string | null {
   const request = intent.requestText || requestText(input);
   const format = `${rec.format} ${rec.runtime}`.toLowerCase();
-  const asksForFilm = intent.requestedFormat === "film" || /\b(movie|film|feature)\b/i.test(request);
-  const asksForSeries = intent.requestedFormat === "series" || /\b(series|show|season|episodes|binge)\b/i.test(request);
-  const asksForEpisode = intent.requestedFormat === "episode" || /\b(one|1)\s+episode\b|\ban episode\b/i.test(request);
+  const declaredFormat = contractFormat(contract);
+  const asksForFilm = intent.requestedFormat === "film" || declaredFormat === "film" || /\b(movie|film|feature)\b/i.test(request);
+  const asksForSeries = intent.requestedFormat === "series" || declaredFormat === "series" || /\b(series|show|season|episodes|binge)\b/i.test(request);
+  const asksForEpisode = intent.requestedFormat === "episode" || declaredFormat === "episode" || /\b(one|1)\s+episode\b|\ban episode\b/i.test(request);
 
   if (asksForEpisode && !/\b(episode|per episode)\b/.test(format)) return "intent: requested one specific episode";
   if (asksForFilm && /\b(series|episode|season)\b/.test(format)) return "intent: requested a film/movie, got series/episode";
@@ -535,7 +546,7 @@ function positiveFitViolations(input: RecommendRequest, rec: RawRecommendation |
   const intent = extractIntent(input);
   return [
     ...parsedIntentContradictions(input, rec, contract),
-    explicitFormatViolation(input, rec, intent),
+    explicitFormatViolation(input, rec, intent, contract),
     hiddenGemViolation(input, rec, intent),
     ...explicitGenreViolations(input, rec, intent, contract),
   ].filter((reason): reason is string => Boolean(reason));
@@ -549,7 +560,7 @@ export function validateRecommendation<T extends RawRecommendation | Recommendat
   const reasons = [
     memoryViolation(input, rec),
     confidenceViolation(rec),
-    runtimeViolation(input, rec),
+    runtimeViolation(input, rec, contract),
     sensitivityViolation(input, rec, contract),
     humaneToneViolation(input, rec),
     ...avoidanceViolations(input, rec),
