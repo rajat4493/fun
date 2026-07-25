@@ -2,7 +2,11 @@ import { RawRecommendation } from "@/lib/types";
 import { extractJson, uniqueValues, withTimeout } from "@/lib/recommendation-utils";
 
 const ANTHROPIC_TIMEOUT_MS = 25000;
-const FALLBACK_LLM_TIMEOUT_MS = 15000;
+// Measured real-world 3-pick generation time is 15-23s (p95), right at or over the old 15000ms
+// ceiling — meaning a request that would have succeeded at 18s was being cut off and forced into
+// a full retry (another 15-25s), turning a ~18s wait into a 30-44s one. Raised to give the first
+// attempt a fair chance to actually finish instead of paying for two calls when one would do.
+const FALLBACK_LLM_TIMEOUT_MS = 25000;
 const LLM_MAX_OUTPUT_TOKENS = 3000;
 const INTENT_TIMEOUT_MS = 3500;
 const INTENT_MAX_OUTPUT_TOKENS = 700;
@@ -187,7 +191,101 @@ function openAIText(data: OpenAIResponse): string {
     .join("\n") ?? "";
 }
 
-export async function recommendWithOpenAI(prompt: string, temperature = 0.85): Promise<RawRecommendation[]> {
+// OpenAI Structured Outputs (strict mode) — the model provider uses constrained decoding so the
+// response is guaranteed to match this shape exactly; malformed/truncated JSON becomes structurally
+// impossible rather than something we catch after the fact. This targets a real, observed failure
+// mode ("Expected double-quoted property name in JSON at position 1373") — though it only fixes
+// *structural* validity, not *semantic* correctness (a schema-valid response can still declare the
+// wrong format/genre), so the trust layer's content checks remain necessary and unchanged.
+// Strict mode requires every property listed in "required" (no true-optional fields — arrays that
+// are conceptually optional are just allowed to be empty) and "additionalProperties": false on
+// every object, including nested ones.
+const PARSED_INTENT_SCHEMA = {
+  type: "object",
+  properties: {
+    primary: { type: "string", enum: ["scare", "cry", "comedy", "thriller", "romance", "weird", "comfort", "gore", "drama", "discovery", "unknown"] },
+    secondary: { type: "array", items: { type: "string" } },
+    hardAvoids: { type: "array", items: { type: "string" } },
+    softAvoids: { type: "array", items: { type: "string" } },
+    format: { type: "string", enum: ["film", "series", "episode", "any"] },
+    language: { type: "string" },
+    situation: { type: "array", items: { type: "string" } },
+    intensity: { type: "string", enum: ["safe", "curious", "bold", "unhinged"] },
+    ambiguity: { type: "string" },
+  },
+  required: ["primary", "secondary", "hardAvoids", "softAvoids", "format", "language", "situation", "intensity", "ambiguity"],
+  additionalProperties: false,
+};
+
+const RECOMMENDATION_ITEM_SCHEMA = {
+  type: "object",
+  properties: {
+    parsedIntent: PARSED_INTENT_SCHEMA,
+    title: { type: "string" },
+    year: { type: "string" },
+    format: { type: "string", enum: ["Film", "Series", "Episode", "Documentary", "Unknown"] },
+    runtime: { type: "string" },
+    vibe: { type: "string" },
+    contentCategory: { type: "array", items: { type: "string" } },
+    emotionalEffect: { type: "array", items: { type: "string" } },
+    confidence: { type: "number" },
+    oneLine: { type: "string" },
+    whyItFits: { type: "array", items: { type: "string" } },
+    whereToWatch: {
+      type: "object",
+      properties: {
+        status: { type: "string", enum: ["unverified"] },
+        primary: { type: "string" },
+        note: { type: "string" },
+      },
+      required: ["status", "primary", "note"],
+      additionalProperties: false,
+    },
+    hiddenLayer: {
+      type: "object",
+      properties: {
+        headline: { type: "string" },
+        insight: { type: "string" },
+        classyJab: { type: "string" },
+      },
+      required: ["headline", "insight", "classyJab"],
+      additionalProperties: false,
+    },
+    hiddenTitles: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          year: { type: "string" },
+        },
+        required: ["title", "year"],
+        additionalProperties: false,
+      },
+    },
+    alternatives: { type: "array", items: { type: "string" } },
+  },
+  required: ["parsedIntent", "title", "year", "format", "runtime", "vibe", "contentCategory", "emotionalEffect", "confidence", "oneLine", "whyItFits", "whereToWatch", "hiddenLayer", "hiddenTitles", "alternatives"],
+  additionalProperties: false,
+};
+
+function recommendationBatchSchema(count: number) {
+  return {
+    type: "object",
+    properties: {
+      recommendations: {
+        type: "array",
+        minItems: count,
+        maxItems: count,
+        items: RECOMMENDATION_ITEM_SCHEMA,
+      },
+    },
+    required: ["recommendations"],
+    additionalProperties: false,
+  };
+}
+
+export async function recommendWithOpenAI(prompt: string, temperature = 0.85, count = 3): Promise<RawRecommendation[]> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
 
@@ -206,6 +304,14 @@ export async function recommendWithOpenAI(prompt: string, temperature = 0.85): P
             input: prompt,
             temperature,
             max_output_tokens: LLM_MAX_OUTPUT_TOKENS,
+            text: {
+              format: {
+                type: "json_schema",
+                name: "fun_recommendations",
+                schema: recommendationBatchSchema(count),
+                strict: true,
+              },
+            },
           }),
           signal,
         }),

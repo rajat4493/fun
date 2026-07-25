@@ -141,7 +141,7 @@ function buildPracticalConstraints(input: RecommendRequest, userContext: string,
   const plainMinutes = text.match(/\b(\d{1,3})\s*(?:min|mins|minutes)\b/);
 
   if (intent.requestedFormat === "episode" || /\b(one|1)\s+episode\b|\ban episode\b/i.test(text) || input.time?.toLowerCase().includes("one episode")) {
-    constraints.push("Format/time: recommend a specific one-episode watch. Set format to Episode or make runtime clearly say per episode. Do not return a general series/binge recommendation.");
+    constraints.push("Format/time: the user wants ONE SPECIFIC EPISODE — not a film, not a whole series, not a season. A feature-length film is NOT a valid answer here under any circumstances, no matter how good the mood match is — this is the most common mistake, avoid it. Pick one show and name one specific episode (or a strong representative episode if none is named). Set \"format\" to \"Episode\" and make \"runtime\" state the per-episode length (e.g. \"22 min\"), not the show's total length.");
   } else if (intent.requestedFormat === "film") {
     constraints.push("Format: recommend a movie/film, not a series or full-season suggestion.");
   } else if (intent.requestedFormat === "series") {

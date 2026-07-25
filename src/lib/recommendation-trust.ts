@@ -627,7 +627,6 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
   const sensitiveState = /\b(panic attack|panic|anxiety|anxious|spiraling|overwhelmed|grief|grieving|bereaved|mourning|lost (my|someone|a)|breakdown)\b/i.test(text);
   const wantsHindi = /\bhindi\b/i.test(text) || (input.languagePreferences ?? []).some((language) => /hindi/i.test(language));
   const wantsThriller = !sensitiveState && /\b(thriller|suspense|mystery|crime thriller|tense and clever)\b/i.test(text);
-  const wantsDrama = /\bdrama\b/i.test(text);
   const wantsWeirdSafe = /\b(weird|strange|unusual|offbeat|quirky|absurd|surreal|funny|comedy)\b/i.test(text) || (input.craziness ?? 0) >= 2;
   const wantsScare = !sensitiveState && intent.primaryIntents.includes("scare") && !intent.hardAvoids.includes("horror");
   const wantsGore = !sensitiveState && intent.primaryIntents.includes("gore") && !intent.hardAvoids.some((avoid) => ["gore", "horror", "violence", "graphic violence"].includes(avoid));
@@ -853,8 +852,41 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
     return episodeFallbacks.find((candidate) => !isExcluded(candidate.title)) ?? episodeFallbacks[0];
   }
 
-  if (wantsDrama && intent.runtimeLimitMinutes && intent.runtimeLimitMinutes <= 90) {
-    const shortDramaFallbacks: RawRecommendation[] = [
+  // Runtime is a hard practical constraint, not a taste preference — it must outrank mood-matching
+  // in this last-resort path the same way it does everywhere else in the pipeline. This used to be
+  // gated behind wantsDrama, so a non-drama request with a tight runtime (e.g. "romantic and
+  // comforting, under 45 minutes") skipped straight past it into the runtime-blind generic
+  // fallback below and could serve a 97-minute film for a 45-minute request. Fixed by applying
+  // regardless of mood, and by leading with a genuinely short (<45 min) option when the limit is
+  // tight enough that the 71/85-minute picks wouldn't actually satisfy it either.
+  if (intent.runtimeLimitMinutes && intent.runtimeLimitMinutes <= 90) {
+    const shortRuntimeFallbacks: RawRecommendation[] = [
+      ...(intent.runtimeLimitMinutes <= 45 ? [{
+        title: "The Red Balloon",
+        year: "1956",
+        runtime: "34 min",
+        vibe: "gentle, whimsical, warm",
+        confidence: 74,
+        parsedIntent: {
+          primary: "comfort" as const,
+          format: "film" as const,
+          language: "any",
+          intensity: "safe" as const,
+        },
+        oneLine: "Watch The Red Balloon for a genuinely short classic that actually respects a tight time window.",
+        whyItFits: [
+          "It is a true short film, not just 'shorter than usual' — it fits a strict time limit for real.",
+          "The tone is warm and gentle without needing dialogue to carry it.",
+          "It is a safe, widely loved choice when a stricter mood match could not be confirmed.",
+        ],
+        hiddenTitles: [
+          { title: "The Party", year: "2017" },
+          { title: "Locke", year: "2013" },
+          { title: "Ida", year: "2013" },
+        ],
+        alternatives: ["The Party (2017)", "Locke (2013)", "Ida (2013)"],
+        ...base,
+      }] : []),
       {
         title: "The Party",
         year: "2017",
@@ -867,10 +899,10 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
           language: "any",
           intensity: "curious",
         },
-        oneLine: "Watch The Party for a short, contained drama that respects a tight time window.",
+        oneLine: "Watch The Party for a short, contained film that respects a tight time window.",
         whyItFits: [
           "It stays clearly under 90 minutes.",
-          "It is a drama first, not a comedy-series workaround.",
+          "It is tightly plotted rather than padded, so the short runtime doesn't feel rushed.",
           "The contained setup gives the watch focus without demanding a long evening.",
         ],
         hiddenTitles: [
@@ -893,10 +925,10 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
           language: "any",
           intensity: "curious",
         },
-        oneLine: "Watch Locke for a compact drama built almost entirely from pressure and consequence.",
+        oneLine: "Watch Locke for a compact film built almost entirely from pressure and consequence.",
         whyItFits: [
           "It fits under 90 minutes cleanly.",
-          "The dramatic engine is focused and adult.",
+          "The pacing stays focused throughout, so the runtime never feels stretched.",
           "It avoids drifting into a longer, softer comfort pick.",
         ],
         hiddenTitles: [
@@ -908,7 +940,7 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
         ...base,
       },
     ];
-    return shortDramaFallbacks.find((candidate) => !isExcluded(candidate.title)) ?? shortDramaFallbacks[0];
+    return shortRuntimeFallbacks.find((candidate) => !isExcluded(candidate.title)) ?? shortRuntimeFallbacks[0];
   }
 
   if (wantsHindi && wantsThriller) {

@@ -8,6 +8,7 @@ import {
   recommendWithGenericLLM,
   recommendWithOpenAI,
 } from "@/lib/llm";
+import { extractIntent } from "@/lib/intent";
 import { enrichRecommendation } from "@/lib/metadata";
 import { buildCompactRetryPrompt, buildRecommendationPrompt } from "@/lib/prompt";
 import { activeHardAvoidanceKeys, applyTrustFilter, relatedTitleUnsafe, safeFallback, TrustRejection } from "@/lib/recommendation-trust";
@@ -139,7 +140,18 @@ function diversifyFallbackBatch(input: RecommendRequest, batch: RawRecommendatio
   return [...source.slice(start), ...source.slice(0, start)];
 }
 
+// Scoped to "one episode" requests only — this is the one case with actual evidence behind it
+// (6/6 first-attempt success at temperature 0.05, vs ~50% at the default temperature). A runtime-
+// ceiling trigger (e.g. "under 45 min") was tested too and did NOT show the same reliable gain
+// (1/4 and 2/4 across two mood combinations), so it's deliberately left out rather than extended
+// on unproven evidence. Do not broaden this trigger without the same kind of before/after
+// measurement — see conversation history for why temperature is not a uniform lever across moods.
+function isHardFormatRequest(input: RecommendRequest): boolean {
+  return extractIntent(input).requestedFormat === "episode";
+}
+
 function llmTemperature(input: RecommendRequest): number {
+  if (isHardFormatRequest(input)) return 0.05;
   return input.craziness === 3 ? 1 : 0.85;
 }
 
@@ -249,6 +261,7 @@ async function tryProvider(
 // Each provider is tried only when its required env vars are set.
 async function getRecommendations(input: RecommendRequest, prompt: string, trace: ProviderTrace[], intentContract?: IntentContract): Promise<RawRecommendation[]> {
   const temperature = llmTemperature(input);
+  const count = input.recommendationCount ?? 3;
 
   if (process.env.ANTHROPIC_API_KEY) {
     const batch = await tryProvider(trace, "Anthropic", prompt, () => recommendWithAnthropic(prompt, temperature));
@@ -261,7 +274,7 @@ async function getRecommendations(input: RecommendRequest, prompt: string, trace
   }
 
   if (process.env.OPENAI_API_KEY) {
-    const batch = await tryProvider(trace, `OpenAI (${process.env.OPENAI_MODEL || "gpt-4o-mini"})`, prompt, () => recommendWithOpenAI(prompt, temperature));
+    const batch = await tryProvider(trace, `OpenAI (${process.env.OPENAI_MODEL || "gpt-4o-mini"})`, prompt, () => recommendWithOpenAI(prompt, temperature, count));
     if (batch) return batch;
   }
 
