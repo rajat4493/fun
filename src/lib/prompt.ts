@@ -256,6 +256,17 @@ function buildSensitivityClause(contract?: IntentContract, userContext?: string)
   return `\n- ⚠️ SENSITIVE EMOTIONAL STATE (${stateLabel}): The viewer is in distress. Emotional safety is the top priority here. Avoid: medical emergency scenes, graphic grief or loss, depictions of suicide or self-harm, severe abandonment, or content that could amplify the viewer's current state. Prefer: emotionally containing, gently distracting, or safely cathartic picks that help the viewer regulate. Do NOT pick challenging, morally complex, disturbing, or formally demanding content for this viewer right now, regardless of Taste Risk.`;
 }
 
+// Catches requests like "a humane documentary, not crime or celebrity fluff" — without this, the
+// model tends to satisfy "documentary" + "absorbing" by reaching for critically acclaimed but
+// harrowing true-crime/atrocity documentaries (war crimes, genocide, serial killers), treating
+// acclaim as a substitute for the requested tone instead of orthogonal to it.
+const humaneToneSignal = /\b(humane|gentle|kind-hearted|kindhearted|life-affirming|not (too )?(dark|harsh|brutal|violent)|not crime|no crime|not (about )?(murder|killing|killings)|celebrity fluff)\b/i;
+
+function buildHumaneToneClause(userContext: string): string {
+  if (!humaneToneSignal.test(userContext)) return "";
+  return `\n- ⚠️ HUMANE TONE REQUESTED: The viewer explicitly asked for something humane/gentle, not crime or atrocity content. Do NOT pick true-crime documentaries, war-crime/genocide documentaries, serial-killer profiles, or anything centered on mass violence — even if critically acclaimed or "absorbing." Critical acclaim is not a substitute for matching the requested tone. Prefer documentaries/films about human connection, craft, resilience, or discovery instead.`;
+}
+
 function timeLabel(contextHint?: string): string {
   if (contextHint) {
     if (/late night|early hours/i.test(contextHint)) return "tonight";
@@ -421,6 +432,7 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
   const contextAmplifier = buildContextAmplifier(input, intent);
   const feedbackRepairClause = buildFeedbackRepairClause(input);
   const sensitivityClause = buildSensitivityClause(contract, userContext);
+  const humaneToneClause = buildHumaneToneClause(userContext);
   const crossLanguageReferenceClause = /\b(similar|like|vibe|reminds me|same as|after watching|watching)\b/i.test(userContext) && explicitLanguageRequest
     ? "\n- Cross-language reference request detected: preserve the reference title's viewer job and deep traits first; use the requested language/culture as the content lane second. Do not let the target language override the actual reason the user liked the reference."
     : "";
@@ -488,6 +500,9 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
   if (/\b(panic attack|panic|anxiety|anxious|grief|grieving|bereaved|mourning)\b/i.test(userContext)) {
     hardConstraintLines.push("❌ Sensitive viewer state: avoid medical emergencies, graphic loss, suicide depictions, or content that amplifies distress. Prioritize gentle, containing, or safely cathartic picks.");
   }
+  if (humaneToneSignal.test(userContext)) {
+    hardConstraintLines.push("❌ Humane tone requested: do NOT pick true-crime, war-crime/genocide, or serial-killer documentaries/films — acclaim does not override this. Pick something about human connection, craft, resilience, or discovery instead.");
+  }
   const hardConstraintBlock = hardConstraintLines.length ? `
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -531,7 +546,7 @@ User context:
 - Time context: ${input.contextHint ?? "not provided"}
 - Energy level: ${input.energy ?? "not provided"}
 - Viewing context: muted for this version unless the user typed it directly
-  - Mood/request: ${userContext}${contractClause}${seenClause}${recentClause}${hiddenGemClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${fearIntentClause}${crazinessClause}${softMoodDirectionClause}${feedbackRepairClause}${sensitivityClause}${emotionalJobProtocol}${signalPriorityProtocol}${contextAmplifier}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
+  - Mood/request: ${userContext}${contractClause}${seenClause}${recentClause}${hiddenGemClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${fearIntentClause}${crazinessClause}${softMoodDirectionClause}${feedbackRepairClause}${sensitivityClause}${humaneToneClause}${emotionalJobProtocol}${signalPriorityProtocol}${contextAmplifier}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
 - Discovery mode: ${indieMode ? "Indie / hidden cinema" : "Standard"}${indieClause}
 
 Return an array of exactly ${COUNT_WORDS[count] ?? String(count)} JSON object${count === 1 ? "" : "s"} (not a wrapper object) with this schema, no markdown:

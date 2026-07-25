@@ -465,6 +465,37 @@ function sensitivityViolation(
   return null;
 }
 
+// Known acclaimed but harrowing true-crime/atrocity documentaries — the exact category the model
+// tends to reach for when asked for an "absorbing" documentary, ignoring an explicit humane/gentle
+// tone request because these titles are critically acclaimed. Title-level denylist backs up the
+// text-pattern check below for cases where the description text doesn't use an obvious trigger word.
+const knownHarrowingDocumentaryTitles = new Set([
+  "theactofkilling",
+  "thelookofsilence",
+  "dearzachary",
+  "thethinbluelinedocumentary",
+  "thejinx",
+  "makingamurderer",
+  "abductedinplainsight",
+  "conversationswithakiller",
+  "tigerking",
+  "theinnocenceofmemory",
+]);
+const harrowingDocumentaryTerms = /\b(mass killing|mass killings|genocide|war crime|war crimes|death squad|serial killer|mass murder|atrocit|torture|massacre|executioner|paramilitary violence)\b/i;
+const humaneToneRequested = /\b(humane|gentle|kind-hearted|kindhearted|life-affirming|not (too )?(dark|harsh|brutal|violent)|not crime|no crime|not (about )?(murder|killing|killings)|celebrity fluff)\b/i;
+
+// Hard gate mirroring sensitivityViolation — rejects harrowing atrocity/true-crime documentaries
+// when the user explicitly asked for something humane, even if the model's own labels look clean.
+function humaneToneViolation(input: RecommendRequest, rec: RawRecommendation | Recommendation): string | null {
+  if (!humaneToneRequested.test(requestText(input))) return null;
+  const text = contentText(rec).toLowerCase();
+  const titleKey = normalize(rec.title);
+  if (knownHarrowingDocumentaryTitles.has(titleKey) || harrowingDocumentaryTerms.test(text)) {
+    return "humane-tone: harrowing/atrocity documentary conflicts with explicit humane request";
+  }
+  return null;
+}
+
 // Safety check for hiddenTitles/alternatives/similar-vibe cards — these are just {title, year}
 // pairs with no vibe/oneLine text and no TMDB enrichment, so the full text-based avoidance checks
 // used for the main pick can't run against them. This applies the same known-title denylists
@@ -520,6 +551,7 @@ export function validateRecommendation<T extends RawRecommendation | Recommendat
     confidenceViolation(rec),
     runtimeViolation(input, rec),
     sensitivityViolation(input, rec, contract),
+    humaneToneViolation(input, rec),
     ...avoidanceViolations(input, rec),
     ...positiveFitViolations(input, rec, contract),
   ].filter((reason): reason is string => Boolean(reason));
@@ -559,6 +591,7 @@ export function rejectionPrompt(rejections: TrustRejection[]): string {
   const runtimeViolations = rejections.flatMap((r) => r.reasons.filter((reason) => reason.startsWith("time:")));
   const intentViolations = rejections.flatMap((r) => r.reasons.filter((reason) => reason.startsWith("intent:")));
   const sensitivityViolations = rejections.flatMap((r) => r.reasons.filter((reason) => reason.startsWith("sensitivity:")));
+  const humaneToneViolations = rejections.flatMap((r) => r.reasons.filter((reason) => reason.startsWith("humane-tone:")));
 
   const avoidanceNote = avoidanceViolations.length
     ? `\n⛔ Avoidance violations found: ${[...new Set(avoidanceViolations)].join(", ")}. Do NOT recommend anything in these categories or adjacent genres — this is absolute regardless of Taste Risk or craziness level.`
@@ -575,10 +608,13 @@ export function rejectionPrompt(rejections: TrustRejection[]): string {
   const sensitivityNote = sensitivityViolations.length
     ? `\n⛔ Sensitivity violations: ${[...new Set(sensitivityViolations)].join(", ")}. The viewer is in an acute emotional state. Choose emotionally containing, gently distracting, or safely warm picks. Avoid dread, terror, medical emergencies, suicide, graphic loss, and anything that could amplify distress.`
     : "";
+  const humaneToneNote = humaneToneViolations.length
+    ? `\n⛔ Humane tone violations: ${[...new Set(humaneToneViolations)].join(", ")}. The viewer explicitly asked for something humane/gentle. Do NOT pick true-crime, war-crime/genocide, or serial-killer documentaries — critical acclaim does not override this.`
+    : "";
 
   return `\n\nBackend trust filter REJECTED the previous candidates. These are hard-boundary failures — not preference suggestions. Do not repeat any rejected title, do not pick thematically adjacent titles that would hit the same boundary:
 ${rejections.slice(0, 8).map((item) => `- "${item.title}" rejected: ${item.reasons.join("; ")}`).join("\n")}
-${avoidanceNote}${memoryNote}${runtimeNote}${intentNote}${sensitivityNote}
+${avoidanceNote}${memoryNote}${runtimeNote}${intentNote}${sensitivityNote}${humaneToneNote}
 Return three completely different valid candidates that preserve the emotional job while staying strictly inside all boundaries.`;
 }
 

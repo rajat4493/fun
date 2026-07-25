@@ -169,17 +169,29 @@ function watchAction(pick: Recommendation, providers: WatchProvider[], platforms
 }
 
 function MovieImage({ posterUrl, title, className = "", objectPosition = "center" }: { posterUrl?: string; title: string; className?: string; objectPosition?: string }) {
-  if (posterUrl) {
+  // Tracks load failures separately from "no poster URL at all" — a valid TMDB/OMDB URL that
+  // fails to load client-side (transient network blip, CDN hiccup, blocked request) previously
+  // rendered as a broken <img> with zero intrinsic width/height instead of falling back to the
+  // gradient placeholder that already covers the "no poster available" case.
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [posterUrl]);
+
+  if (posterUrl && !failed) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={posterUrl} alt={title} className={`object-cover ${className}`} style={{ objectPosition }} />;
+    return <img src={posterUrl} alt={title} className={`object-cover ${className}`} style={{ objectPosition }} onError={() => setFailed(true)} />;
   }
   return <div className={`bg-gradient-to-br from-[#1a1625] via-[#12141c] to-[#0a0b10] ${className}`} />;
 }
 
 function ProviderLogo({ provider }: { provider: WatchProvider }) {
-  if (provider.logoUrl) {
+  // Same load-failure gap as MovieImage — TMDB-hosted provider logos can fail to load
+  // transiently, leaving a broken 0x0 <img> instead of falling back to the letter badge.
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [provider.logoUrl]);
+
+  if (provider.logoUrl && !failed) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={provider.logoUrl} alt={provider.name} className="h-10 w-10 rounded-lg object-contain" />;
+    return <img src={provider.logoUrl} alt={provider.name} className="h-10 w-10 rounded-lg object-contain" onError={() => setFailed(true)} />;
   }
   return <span className="grid h-10 w-10 place-items-center rounded-lg bg-black/55 text-lg font-black text-white">{provider.name.charAt(0)}</span>;
 }
@@ -321,9 +333,10 @@ export default function RecommendationPage() {
     setReady(true);
   }, []);
 
-  // Two-phase fetch: pick 1 already rendered (see page.tsx's initial recommendationCount: 1
-  // request). Fetch picks 2–3 in the background so they're ready by the time the user rerolls,
-  // without having made them wait for all 3 up front.
+  // Two-phase fetch: pick 1 already rendered — either from page.tsx's initial recommendationCount: 1
+  // request, or from replaceWithBatch below (reroll / "Already seen" exhaustion / search beyond
+  // subscriptions all request just 1 pick too). Fetch picks 2–3 in the background so they're ready
+  // by the time the user rerolls again, without ever blocking on a full 3-pick generation.
   async function runBackgroundFill(current: RecommendationSession) {
     try {
       const response = await fetch("/api/recommend", {
@@ -373,15 +386,16 @@ export default function RecommendationPage() {
   }, [session?.runId, session?.batchComplete]);
 
   async function replaceWithBatch(request: RecommendationSession["request"]) {
-    // This path always regenerates a full fresh batch — it must NOT inherit a stale
-    // recommendationCount: 1 from session.request (the original two-phase-fetch initial request).
-    // Without this override, every fallback regeneration would keep asking for just 1 pick forever.
-    const fullBatchRequest: RecommendationSession["request"] = { ...request, recommendationCount: 3 };
+    // Two-phase fetch applies here too, not just the very first load: fetch pick 1 alone so it
+    // renders fast, then let the same background-fill effect (below) top the batch up to 3 while
+    // the user is already looking at something. Explicitly set to 1 (not just spread from the
+    // caller) since a stale recommendationCount: 2 could otherwise leak in from a fill request.
+    const firstPickRequest: RecommendationSession["request"] = { ...request, recommendationCount: 1, precomputedIntentContract: undefined };
     const response = await fetch("/api/recommend", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
-      body: JSON.stringify(fullBatchRequest),
+      body: JSON.stringify(firstPickRequest),
     });
     if (!response.ok) throw new Error("failed");
     const data = await response.json() as Recommendation & {
@@ -391,10 +405,10 @@ export default function RecommendationPage() {
     const batch = data._batch ?? [data];
     const runId = createRecommendationRunId();
     rememberRecommendationTitles(batch.map((item) => item.title));
-    rememberRecommendationHistory(batch, fullBatchRequest, runId);
+    rememberRecommendationHistory(batch, firstPickRequest, runId);
     const next = createRecommendationSession(
       batch[0],
-      fullBatchRequest,
+      firstPickRequest,
       batch,
       data._trust?.displayState,
       runId,
@@ -416,8 +430,8 @@ export default function RecommendationPage() {
     });
     captureRecommendationRun({
       runId,
-      source: fullBatchRequest.platformFilter === "any" ? "search-all-cinema" : "reroll",
-      request: fullBatchRequest,
+      source: firstPickRequest.platformFilter === "any" ? "search-all-cinema" : "reroll",
+      request: firstPickRequest,
       recommendation: batch[0],
       batch,
       displayState: data._trust?.displayState,
