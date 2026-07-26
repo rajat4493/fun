@@ -42,6 +42,11 @@ function numberConfidence(value: unknown): number {
 export function localIntentContract(input: RecommendRequest): IntentContract {
   const intent = extractIntent(input);
   const text = [input.selfText, ...(input.mood ?? []), ...(input.wants ?? []), ...(input.avoids ?? [])].filter(Boolean).join(" ");
+  const wantsCatharsis = /\b(devastating|cathartic|catharsis|make me cry|want to cry|need to cry|cry it out|tearjerker|sob|emotional release|let it (all )?out|gut-wrenching)\b/i.test(text);
+  const griefSignal = /\b(grief|grieving|bereaved|mourning|lost (my|someone|a))\b/i.test(text);
+  const breakupSignal = /\b(breakup|break-up|broke up|got dumped|dumped me|heartbroken|broken heart|relationship ended)\b/i.test(text);
+  const reliefSignal = /\b(not more (sadness|loss|grief)|don't want (more )?(sadness|loss|grief)|do not want (more )?(sadness|loss|grief)|don't want to fall apart|do not want to fall apart|holds? me gently|something (kind|warm|gentle|light|easy|comforting)|comfort me|cheer me up|take my mind off|help me (recover|reset|feel better)|nothing (sad|depressing|heavy)|not (sad|depressing|heavy)|no romance|not romantic)\b/i.test(text);
+  const wantsEmotionalRelief = reliefSignal && !wantsCatharsis && (griefSignal || breakupSignal || intent.primaryIntents.includes("comfort"));
 
   // Emotional register: detect nuanced secondary signals from free text.
   // "brutal week/day" describes the user's life, not desired content — exclude those idioms.
@@ -60,14 +65,23 @@ export function localIntentContract(input: RecommendRequest): IntentContract {
   if (/\b(surreal|bizarre|strange|weird|absurd|avant.garde|experimental|formally.unusual)\b/i.test(text)) {
     if (!intent.primaryIntents.includes("weird")) extraSecondary.push("weird");
   }
+  if (wantsEmotionalRelief) {
+    extraSecondary.push("emotional-relief", "gentle-comfort");
+  }
 
   // Sensitive situation: detect emotional state requiring safety handling
   const extraSituation: string[] = [];
   if (/\b(panic attack|panic|anxiety|anxious|overthinking|spiraling|overwhelmed)\b/i.test(text)) {
     extraSituation.push("panic-anxiety");
   }
-  if (/\b(grief|grieving|bereaved|mourning|lost (my|someone|a))\b/i.test(text)) {
+  if (griefSignal) {
     extraSituation.push("grief");
+  }
+  if (griefSignal && wantsEmotionalRelief) {
+    extraSituation.push("grief-relief");
+  }
+  if (breakupSignal) {
+    extraSituation.push(wantsEmotionalRelief ? "breakup-recovery" : "breakup");
   }
   if (/\b(can't sleep|cant sleep|insomnia|before bed|bedtime)\b/i.test(text)) {
     extraSituation.push("bedtime");
@@ -82,7 +96,11 @@ export function localIntentContract(input: RecommendRequest): IntentContract {
   const hasDarkness = extraSecondary.includes("bleak");
   // Map "bleak/morally complex" requests to "drama" when primary is unknown — enables the darkness commitment clause
   const rawPrimary = firstKnownPrimary(intent.primaryIntents);
-  const primary = rawPrimary === "unknown" && hasDarkness ? "drama" : rawPrimary;
+  const primary = wantsEmotionalRelief
+    ? "comfort"
+    : rawPrimary === "unknown" && hasDarkness
+      ? "drama"
+      : rawPrimary;
   const secondaryBase = intent.primaryIntents.filter((item) => item !== primary).slice(0, 4);
 
   return {
@@ -94,9 +112,11 @@ export function localIntentContract(input: RecommendRequest): IntentContract {
     language: intent.requestedLanguage ?? input.languagePreferences?.[0] ?? "any",
     situation: extraSituation,
     intensity: input.craziness === 3 ? "unhinged" : input.craziness === 2 ? "bold" : input.craziness === 0 ? "safe" : "curious",
-    emotionalGoal: hasDarkness
-      ? "Morally complex, bleak, or challenging emotional territory — do not soften to accessible or redemptive."
-      : "Infer the best emotional outcome from the request while respecting hard constraints.",
+    emotionalGoal: wantsEmotionalRelief
+      ? "Provide emotionally containing relief without centering fresh grief, heartbreak, or romantic longing."
+      : hasDarkness
+        ? "Morally complex, bleak, or challenging emotional territory — do not soften to accessible or redemptive."
+        : "Infer the best emotional outcome from the request while respecting hard constraints.",
     confidence: 0.55,
     ambiguity: "",
     source: "local",

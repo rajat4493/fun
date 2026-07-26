@@ -12,6 +12,8 @@ const romance = /\b(romance|romantic|love story|chemistry|relationship|date)\b/i
 const cry = /\b(cry|tearjerker|tear jerker|sob|weep|devastating|heartbreaking|cathartic|moving|grief|loss|poignant)\b/i;
 const horror = /\b(horror|gore|gory|bloody|slasher|demonic|haunted|ghost|nightmare|torture|visceral)\b/i;
 const drama = /\b(drama|dramatic|character study|serious|emotional|prestige|social realist|melodrama)\b/i;
+const comfort = /\b(comfort|warm|cozy|feel.good|uplifting|sweet|gentle|heartwarming|charming|hopeful|funny|light|kind|soothing|reassur|laughter|easy)\b/i;
+const emotionalAmplification = /\b(grief|grieving|bereavement|mourning|heartbreak|heartbreaking|breakup|romantic longing|devastating|bleak|harrowing|melancholy|tragic loss)\b/i;
 
 function textOf(rec) {
   return [
@@ -24,6 +26,11 @@ function textOf(rec) {
     rec.hiddenLayer?.headline,
     rec.hiddenLayer?.insight,
   ].filter(Boolean).join(" ");
+}
+
+function emotionallyAmplifying(rec) {
+  const labels = [...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].join(" ");
+  return labels ? emotionalAmplification.test(labels) : emotionalAmplification.test(textOf(rec));
 }
 
 function runtimeMinutes(rec) {
@@ -162,6 +169,35 @@ const tests = [
       return isNotScare && hasPositiveSignal;
     },
     why: "Text saying someone hates horror/gets scared must be treated as an avoidance/light request — parsedIntent.primary must not be scare/horror and the pick must have a positive warmth/comedy/romance signal.",
+  },
+  {
+    id: "GRIEF-RELIEF-NOT-CATHARSIS",
+    input: {
+      mode: "self",
+      selfText: "I am grieving and need something gentle that will not give me more sadness. I want relief, not a film that makes me cry.",
+      country: "Canada",
+      languagePreferences: ["Any language"],
+      platforms: [],
+      platformFilter: "any",
+    },
+    check: (rec) => comfort.test(textOf(rec)) && !emotionallyAmplifying(rec),
+    why: "A grief-relief request must soothe rather than turn into broad emotional prestige or catharsis.",
+  },
+  {
+    id: "BREAKUP-COMFORT-NO-ROMANCE",
+    input: {
+      mode: "self",
+      selfText: "I just got dumped. Give me something comforting and funny, but not romantic and not about heartbreak.",
+      country: "UK",
+      languagePreferences: ["Any language"],
+      platforms: [],
+      platformFilter: "any",
+    },
+    check: (rec) => {
+      const labels = [...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].join(" ");
+      return comfort.test(textOf(rec)) && !romance.test(labels) && !emotionallyAmplifying(rec);
+    },
+    why: "Breakup recovery must not be answered with another romance or heartbreak story.",
   },
 ];
 

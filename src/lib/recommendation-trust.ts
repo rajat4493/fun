@@ -379,6 +379,7 @@ const structuredAllowedTerms: Record<string, string[]> = {
   thriller: ["thriller", "suspense", "mystery", "crime", "noir", "detective", "investigation", "paranoid", "tension", "tense", "conspiracy"],
   romance: ["romance", "romantic", "love", "relationship", "chemistry", "tender", "warm"],
   weird: ["weird", "strange", "offbeat", "surreal", "absurd", "bizarre", "experimental", "quirky", "odd"],
+  comfort: ["comfort", "warm", "warmth", "reassurance", "reassuring", "gentle", "cozy", "soothing", "uplifting", "feel-good", "light", "laughter", "easy"],
   gore: ["gore", "gory", "body-horror", "splatter", "brutal", "visceral", "graphic-violence"],
   drama: ["drama", "dramatic", "character-study", "serious", "emotional", "prestige", "melodrama"],
   // Signals for "bleak/morally-complex" requests — comfort/warm titles must not pass this check
@@ -443,6 +444,7 @@ const panicUnsafeTerms = /\b(panic|anxiety attack|medical emergency|hospital|car
 // Content that risks amplifying a grieving viewer's loss (unless they explicitly asked for catharsis).
 const griefUnsafeTerms = /\b(child death|dying child|dead child|terminal illness|suicide|self-harm|self harm|miscarriage|cancer death|funeral|losing a (child|parent|spouse|partner|pet)|death of a (child|parent|spouse|partner|pet|dog|cat)|grief spiral|slowly dying)\b/i;
 const cathartsisRequested = /\b(devastating|cathartic|catharsis|make me cry|want to cry|need to cry|cry it out|tearjerker|sob|emotional release|let it (all )?out|gut-wrenching)\b/i;
+const emotionalReliefUnsafeTerms = /\b(grief|grieving|bereavement|mourning|heartbreak|heartbroken|breakup|romantic longing|terminal illness|funeral|devastating|bleak|harrowing|melancholy|emotionally punishing|tragic loss)\b/i;
 
 // Hard safety gate for acute emotional states carried on the intent contract's `situation`.
 // This is a real validation layer, not just prompt text — a distressing pick is rejected even
@@ -470,6 +472,22 @@ function sensitivityViolation(
     const wantsCatharsis = cathartsisRequested.test(request) || contract?.primary === "cry";
     if (!wantsCatharsis && griefUnsafeTerms.test(text)) {
       return "sensitivity: grief state — pick risks amplifying loss";
+    }
+  }
+
+  const wantsRelief = contract?.secondary.some((signal) => signal === "emotional-relief" || signal === "gentle-comfort") ||
+    situation.some((signal) => signal.includes("grief-relief") || signal.includes("breakup-recovery"));
+  if (wantsRelief) {
+    const reliefUnsafeLabels = ["grief", "loss", "heartbreak", "heartbreaking", "melancholy", "bleak", "harrowing", "devastating", "catharsis"];
+    const romanceAvoided = contract?.softAvoids.includes("romance") || contract?.hardAvoids.includes("romance");
+    if (reliefUnsafeLabels.some((label) => terms.has(label))) {
+      return "sensitivity: emotional-relief request — pick is emotionally amplifying rather than containing";
+    }
+    if (romanceAvoided && terms.has("romance")) {
+      return "sensitivity: breakup recovery — explicit non-romance request got a romance";
+    }
+    if (!hasStructuredSignals(rec) && emotionalReliefUnsafeTerms.test(text)) {
+      return "sensitivity: emotional-relief request — pick centers grief or heartbreak";
     }
   }
 

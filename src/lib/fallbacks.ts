@@ -1336,6 +1336,8 @@ export function localFallback(input: RecommendRequest, intentContract?: IntentCo
   if (hasNegatedConcept(text, /\bhorror|scary|ghost|haunted|supernatural\b/i)) avoids.add("horror");
   if (hasNegatedConcept(text, /\bheavy drama|heavy|trauma|depressing|bleak\b/i)) avoids.add("heavy drama");
   if (hasNegatedConcept(text, /\bslow|slow burn|slow-burn\b/i)) avoids.add("slow");
+  const wantsEmotionalRelief = contractHas("emotional-relief", "gentle-comfort") ||
+    (intentContract?.situation ?? []).some((signal) => signal.includes("grief-relief") || signal.includes("breakup-recovery"));
   const light = avoids.has("violence") || avoids.has("gore") || avoids.has("heavy drama") || wantsComedy || wantsRomance;
   const strictNoDarkness = avoids.has("violence") || avoids.has("gore") || avoids.has("horror");
   const wantsWeird = /\b(weird|strange|unusual|offbeat|quirky|absurd|surreal|unhinged)\b/i.test(text) || (input.craziness ?? 0) >= 2;
@@ -1352,6 +1354,91 @@ export function localFallback(input: RecommendRequest, intentContract?: IntentCo
       classyJab: "Your taste deserves a better map.",
     },
   };
+
+  if (wantsEmotionalRelief) {
+    const reliefIntent = {
+      primary: "comfort",
+      secondary: ["emotional-relief", "gentle-comfort"],
+      hardAvoids: intent.hardAvoids,
+      softAvoids: intent.softAvoids,
+      format: "film" as const,
+      language: "any",
+      situation: intentContract?.situation ?? [],
+      intensity: "safe" as const,
+      ambiguity: "",
+    };
+    return [
+      {
+        title: "Paddington 2",
+        year: "2017",
+        runtime: "103 min",
+        vibe: "warm, funny, reassuring",
+        confidence: 84,
+        oneLine: "Watch Paddington 2 for sincere warmth that lifts the room without asking you to process more pain.",
+        whyItFits: [
+          "Its kindness is active and funny rather than sentimental or grief-centered.",
+          "The story is easy to enter and gives the viewer a clean emotional landing.",
+          "It offers relief without turning romance or loss into the main event.",
+        ],
+        parsedIntent: reliefIntent,
+        contentCategory: ["comfort", "comedy", "family"],
+        emotionalEffect: ["warmth", "reassurance", "laughter"],
+        hiddenTitles: [
+          { title: "School of Rock", year: "2003" },
+          { title: "Kiki's Delivery Service", year: "1989" },
+          { title: "Chef", year: "2014" },
+        ],
+        alternatives: ["School of Rock (2003)", "Kiki's Delivery Service (1989)", "Chef (2014)"],
+        ...baseRec,
+      },
+      {
+        title: "School of Rock",
+        year: "2003",
+        runtime: "109 min",
+        vibe: "joyful, energetic, easy",
+        confidence: 82,
+        oneLine: "Watch School of Rock when you need uncomplicated momentum, laughter, and people finding their spark.",
+        whyItFits: [
+          "It redirects attention through music and comic energy without becoming emotionally demanding.",
+          "The warmth comes from belonging and play, not romance or heartbreak.",
+          "Its familiar shape makes it easy to trust on a low-reserve night.",
+        ],
+        parsedIntent: reliefIntent,
+        contentCategory: ["comfort", "comedy", "music"],
+        emotionalEffect: ["laughter", "warmth", "uplifting"],
+        hiddenTitles: [
+          { title: "Paddington 2", year: "2017" },
+          { title: "Kiki's Delivery Service", year: "1989" },
+          { title: "Chef", year: "2014" },
+        ],
+        alternatives: ["Paddington 2 (2017)", "Kiki's Delivery Service (1989)", "Chef (2014)"],
+        ...baseRec,
+      },
+      {
+        title: "Kiki's Delivery Service",
+        year: "1989",
+        runtime: "103 min",
+        vibe: "gentle, restorative, hopeful",
+        confidence: 81,
+        oneLine: "Watch Kiki's Delivery Service for a gentle reset built on friendship, purpose, and regained confidence.",
+        whyItFits: [
+          "It is emotionally soft without being empty or artificially cheerful.",
+          "The central recovery arc is hopeful and containing rather than punishing.",
+          "It leaves grief and romantic longing outside the center of the experience.",
+        ],
+        parsedIntent: reliefIntent,
+        contentCategory: ["comfort", "animation", "family"],
+        emotionalEffect: ["soothing", "reassurance", "hopeful"],
+        hiddenTitles: [
+          { title: "Paddington 2", year: "2017" },
+          { title: "School of Rock", year: "2003" },
+          { title: "Chef", year: "2014" },
+        ],
+        alternatives: ["Paddington 2 (2017)", "School of Rock (2003)", "Chef (2014)"],
+        ...baseRec,
+      },
+    ];
+  }
 
   if (strictNoDarkness && (wantsComedy || wantsWeird)) {
     return [

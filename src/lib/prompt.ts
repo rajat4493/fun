@@ -235,7 +235,7 @@ function buildFeedbackRepairClause(input: RecommendRequest) {
   return `\n- Feedback repair context: ${clauses.join(" ")}`;
 }
 
-const SENSITIVE_SITUATION_KEYS = ["panic-anxiety", "grief", "crisis", "distress"];
+const SENSITIVE_SITUATION_KEYS = ["panic-anxiety", "grief", "breakup-recovery", "crisis", "distress"];
 
 function buildSensitivityClause(contract?: IntentContract, userContext?: string): string {
   const contractSensitive = contract?.situation.some((s) =>
@@ -252,6 +252,12 @@ function buildSensitivityClause(contract?: IntentContract, userContext?: string)
   const stateLabel = contractSensitive
     ? contract!.situation.filter((s) => SENSITIVE_SITUATION_KEYS.some((key) => s.toLowerCase().includes(key))).join(", ")
     : "detected from request";
+
+  const reliefRequested = contract?.secondary.some((signal) => signal === "emotional-relief" || signal === "gentle-comfort") ||
+    contract?.situation.some((signal) => signal.includes("grief-relief") || signal.includes("breakup-recovery"));
+  if (reliefRequested) {
+    return `\n- ⚠️ EMOTIONAL RELIEF REQUESTED (${stateLabel}): The viewer wants containment and a change of emotional weather, not catharsis. Choose something warm, easy to enter, reassuring, and gently absorbing. Do NOT center bereavement, heartbreak, romantic longing, terminal illness, or an emotionally punishing recovery arc. Do not confuse "thoughtful" or "bittersweet" with comfort. The viewer should finish steadier than they started.`;
+  }
 
   return `\n- ⚠️ SENSITIVE EMOTIONAL STATE (${stateLabel}): The viewer is in distress. Emotional safety is the top priority here. Avoid: medical emergency scenes, graphic grief or loss, depictions of suicide or self-harm, severe abandonment, or content that could amplify the viewer's current state. Prefer: emotionally containing, gently distracting, or safely cathartic picks that help the viewer regulate. Do NOT pick challenging, morally complex, disturbing, or formally demanding content for this viewer right now, regardless of Taste Risk.`;
 }
@@ -499,6 +505,9 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
   }
   if (/\b(panic attack|panic|anxiety|anxious|grief|grieving|bereaved|mourning)\b/i.test(userContext)) {
     hardConstraintLines.push("❌ Sensitive viewer state: avoid medical emergencies, graphic loss, suicide depictions, or content that amplifies distress. Prioritize gentle, containing, or safely cathartic picks.");
+  }
+  if (contract?.secondary.some((signal) => signal === "emotional-relief" || signal === "gentle-comfort")) {
+    hardConstraintLines.push("❌ Emotional-relief contract: this viewer does NOT want catharsis. Pick warmth, reassurance, ease, and gentle absorption. Reject grief-centered, heartbreak-centered, romantically yearning, bleak, ambiguous, or emotionally punishing choices.");
   }
   if (humaneToneSignal.test(userContext)) {
     hardConstraintLines.push("❌ Humane tone requested: do NOT pick true-crime, war-crime/genocide, or serial-killer documentaries/films — acclaim does not override this. Pick something about human connection, craft, resilience, or discovery instead.");

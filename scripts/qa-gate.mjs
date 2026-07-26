@@ -19,6 +19,7 @@ const drama = /\b(drama|dramatic|character study|serious|emotional|prestige|soci
 const distressing = /\b(horror|gore|suicide|self.harm|massacre|brutal|terror|nightmare|graphic|disturbing|traumatic|harrowing|medical emergency|panic|dread)\b/i;
 const griefTrigger = /\b(child (death|dying)|terminal|suicide|funeral|cancer|dying (dog|pet|mother|father|child)|slowly dying|miscarriage)\b/i;
 const comfort = /\b(comfort|warm|cozy|feel.good|uplifting|sweet|gentle|heartwarming|charming|delightful|hopeful|funny|light|kind|soothing|humane|tender)\b/i;
+const emotionalAmplification = /\b(grief|grieving|bereavement|mourning|heartbreak|heartbreaking|breakup|romantic longing|devastating|bleak|harrowing|melancholy|tragic loss)\b/i;
 
 const overRecommendedHiddenGem = new Set(["andhadhun", "drishyam", "kahaani", "masaan", "tumbbad", "se7en", "seven", "gonegirl", "zodiac", "knivesout", "getout", "thesilenceofthelambs"]);
 const unsafeRelatedTitles = new Set([
@@ -35,6 +36,11 @@ function normalizeTitle(v) {
 
 function textOf(rec) {
   return [rec.title, rec.format, rec.runtime, rec.vibe, rec.oneLine, ...(rec.whyItFits ?? []), rec.hiddenLayer?.headline, rec.hiddenLayer?.insight].filter(Boolean).join(" ");
+}
+
+function emotionallyAmplifying(rec) {
+  const labels = [...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].join(" ");
+  return labels ? emotionalAmplification.test(labels) : emotionalAmplification.test(textOf(rec));
 }
 
 function relatedTitles(rec) {
@@ -84,8 +90,19 @@ const tests = [
     id: "GATE-GRIEF-SAFETY",
     category: "panic/grief safety",
     input: { mode: "self", selfText: "Still grieving my mum. I don't want to fall apart — something that holds me gently, not more loss.", country: "Canada", languagePreferences: ["Any language"], platforms: [], platformFilter: "any" },
-    check: (rec) => !griefTrigger.test(textOf(rec)),
-    why: "Grief state (no catharsis requested) must not return loss-amplifying content.",
+    check: (rec) => comfort.test(textOf(rec)) && !griefTrigger.test(textOf(rec)) && !emotionallyAmplifying(rec),
+    why: "Grief-relief request must be actively warm and containing, not merely free of explicit death.",
+  },
+  {
+    id: "GATE-BREAKUP-RELIEF",
+    category: "breakup recovery",
+    input: { mode: "self", selfText: "I just got dumped. I need something comforting and funny to take my mind off it, not a romance and not more heartbreak.", country: "UK", languagePreferences: ["Any language"], platforms: [], platformFilter: "any" },
+    check: (rec) => {
+      const text = textOf(rec);
+      const labels = [...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].join(" ");
+      return comfort.test(text) && !romance.test(labels) && !emotionallyAmplifying(rec);
+    },
+    why: "Breakup recovery must offer relief without redirecting the viewer into romance or heartbreak.",
   },
   {
     id: "GATE-HIDDEN-GEM",
