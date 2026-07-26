@@ -608,12 +608,21 @@ export async function POST(req: Request) {
       enrichedBatch = chain.picks;
       displayState = chain.displayState;
       trustRejections = chain.rejections;
+    } else if (input.mode === "self" || input.precomputedIntentContract) {
+      // Free-text Describe requests need the semantic intent contract to shape the actual pick,
+      // not merely validate a speculative pick afterward. Background fills already carry that
+      // resolved contract, so this path still costs only one recommendation call for them.
+      intentContract = await resolveIntentContract(input, providerTrace);
+      prompt = buildRecommendationPrompt(input, { intentContract, count });
+      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, null, count);
+      trustRejections = trustedRaw.rejections;
+      fallbackUsed = trustedRaw.batch.length === 1 && trustedRaw.batch[0]?.title === safeFallback(input).title;
+      enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms);
+      displayState = "unverified";
     } else {
-      // All-cinema path (any count): run intent classification and first recommendation in
-      // parallel. First rec uses local contract (instant); intent result is used for trust
-      // filtering + retry. Saves up to 3.5s on the happy path (no retry needed) — this matters
-      // most for the count:1 fast-first-pick call, since that's the one the user is actually
-      // waiting on; a prior version paid the sequential cost only there, which was backwards.
+      // Fresh structured Choose requests can safely run intent classification and recommendation
+      // generation in parallel. Their controls already provide an explicit local contract; the
+      // resolved LLM contract remains the trust authority before anything is served.
       const localContract = localIntentContract(input);
       const localPrompt = buildRecommendationPrompt(input, { intentContract: localContract, count });
       const parallelTrace: ProviderTrace[] = [];

@@ -332,7 +332,7 @@ export default function Home() {
   const [selectedMoods, setSelectedMoods] = useState<string[]>([]);
   const [selectedAvoids, setSelectedAvoids] = useState<string[]>([]);
   const [selectedWants, setSelectedWants] = useState<string[]>([]);
-  const [time, setTime] = useState("90 min");
+  const [time, setTime] = useState("no preference");
   const [energy, setEnergy] = useState("Low");
   const [risk, setRisk] = useState<CrazinessLevel>(0);
   const [platformFilter, setPlatformFilter] = useState<"mine" | "any">("mine");
