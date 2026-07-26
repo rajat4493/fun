@@ -474,18 +474,32 @@ type SubscriptionChainResult = {
 // Step 4: No match — return best unverified picks with no-subscription-match state.
 async function subscriptionVerifiedChain(
   input: RecommendRequest,
-  basePrompt: string,
   country: string,
   trace: ProviderTrace[],
   intentContract?: IntentContract,
   count = 3,
 ): Promise<SubscriptionChainResult> {
   const platforms = input.platforms ?? [];
+  // The UI deliberately asks for one visible pick first. Subscription verification needs a
+  // wider internal candidate set, otherwise one unavailable title makes the whole search fail.
+  const candidateCount = Math.max(3, count);
+  const candidateInput = { ...input, recommendationCount: candidateCount };
+  const candidatePrompt = buildRecommendationPrompt(candidateInput, {
+    intentContract,
+    count: candidateCount,
+  });
 
   // Step 1
-  const trusted1 = await trustedRawBatch(input, basePrompt, trace, intentContract, null, count);
+  const trusted1 = await trustedRawBatch(
+    candidateInput,
+    candidatePrompt,
+    trace,
+    intentContract,
+    null,
+    candidateCount,
+  );
   const enriched1 = await enrichBatch(trusted1.batch, country, platforms);
-  const verified1 = enriched1.filter(hasSubscriptionProvider);
+  const verified1 = enriched1.filter(hasSubscriptionProvider).slice(0, count);
   if (verified1.length > 0) {
     return { picks: verified1, displayState: "verified", rejections: trusted1.rejections };
   }
@@ -496,12 +510,21 @@ async function subscriptionVerifiedChain(
   let enriched2: Recommendation[] = [];
   try {
     const failedTitles = trusted1.batch.map((rec) => rec.title);
-    const strictPrompt = buildRecommendationPrompt(input, { strictSubscription: true, intentContract, count, failedTitles });
-    const raw2 = await getRecommendations(input, strictPrompt, trace, intentContract);
-    const filtered2 = applyTrustFilter(input, filterFalsePositiveRecommendations(input, raw2).slice(0, count), intentContract);
+    const strictPrompt = buildRecommendationPrompt(candidateInput, {
+      strictSubscription: true,
+      intentContract,
+      count: candidateCount,
+      failedTitles,
+    });
+    const raw2 = await getRecommendations(candidateInput, strictPrompt, trace, intentContract);
+    const filtered2 = applyTrustFilter(
+      candidateInput,
+      filterFalsePositiveRecommendations(candidateInput, raw2).slice(0, candidateCount),
+      intentContract,
+    );
     if (filtered2.accepted.length > 0) {
       enriched2 = await enrichBatch(filtered2.accepted, country, platforms);
-      const verified2 = enriched2.filter(hasSubscriptionProvider);
+      const verified2 = enriched2.filter(hasSubscriptionProvider).slice(0, count);
       if (verified2.length > 0) {
         return { picks: verified2, displayState: "verified", rejections: trusted1.rejections };
       }
@@ -581,26 +604,16 @@ export async function POST(req: Request) {
       // Subscription chain has multiple sequential LLM steps — keep intent sequential
       // to avoid extra concurrent Anthropic calls that push total time past limits.
       intentContract = await resolveIntentContract(input, providerTrace);
-      prompt = buildRecommendationPrompt(input, { intentContract, count });
-      const chain = await subscriptionVerifiedChain(input, prompt, country, providerTrace, intentContract, count);
+      const chain = await subscriptionVerifiedChain(input, country, providerTrace, intentContract, count);
       enrichedBatch = chain.picks;
       displayState = chain.displayState;
       trustRejections = chain.rejections;
-    } else if (count < 3) {
-      // Two-phase fetch (fast first pick or background fill): skip the parallel local-contract
-      // speed optimization below — it exists to shave latency off the blocking 3-pick call, but
-      // a 1-or-2-pick call is already fast/hidden, so the added complexity isn't worth it here.
-      intentContract = await resolveIntentContract(input, providerTrace);
-      prompt = buildRecommendationPrompt(input, { intentContract, count });
-      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, null, count);
-      trustRejections = trustedRaw.rejections;
-      fallbackUsed = trustedRaw.batch.length === 1 && trustedRaw.batch[0]?.title === safeFallback(input).title;
-      enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms);
-      displayState = "unverified";
     } else {
-      // All-cinema path: run intent classification and first recommendation in parallel.
-      // First rec uses local contract (instant); intent result is used for trust filtering + retry.
-      // Saves up to 3.5s on the happy path (no retry needed).
+      // All-cinema path (any count): run intent classification and first recommendation in
+      // parallel. First rec uses local contract (instant); intent result is used for trust
+      // filtering + retry. Saves up to 3.5s on the happy path (no retry needed) — this matters
+      // most for the count:1 fast-first-pick call, since that's the one the user is actually
+      // waiting on; a prior version paid the sequential cost only there, which was backwards.
       const localContract = localIntentContract(input);
       const localPrompt = buildRecommendationPrompt(input, { intentContract: localContract, count });
       const parallelTrace: ProviderTrace[] = [];
