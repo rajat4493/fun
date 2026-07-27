@@ -191,37 +191,49 @@ function pickResult(results: TmdbSearchResult[], year: string, dateField: "relea
   return results.find((r) => yearMatchesResult(r, dateField, year)) ?? null;
 }
 
-async function tmdbSearch(title: string, year: string): Promise<TmdbMovie | null> {
-  const q = encodeURIComponent(title.trim());
+function tmdbSearchPath(mediaType: "movie" | "tv", query: string, year: string, withYear: boolean): string {
+  const yearParam = mediaType === "movie" ? "primary_release_year" : "first_air_date_year";
+  const yearFilter = withYear && year ? `&${yearParam}=${year}` : "";
+  return `/search/${mediaType}?query=${query}${yearFilter}&language=en-US&page=1`;
+}
 
-  // Same 4-tier priority as before (year-filtered movie > unfiltered movie (year-matched) >
-  // year-filtered TV > unfiltered TV (year-matched)) and the exact same selection logic — this
-  // used to await each tier in sequence and bail out early on the first hit, which meant a title
-  // only found by the last tier paid for up to 4 sequential TMDB round trips (~14s worst case).
-  // Firing all four concurrently and applying the identical priority check afterward returns the
-  // same result, bounded by the slowest single call (~3.5s) instead of their sum.
-  const [movieYearData, movieFallback, tvYearData, tvFallback] = await Promise.all([
-    year
-      ? tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/movie?query=${q}&primary_release_year=${year}&language=en-US&page=1`)
-      : Promise.resolve(null),
-    tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/movie?query=${q}&language=en-US&page=1`),
-    year
-      ? tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/tv?query=${q}&first_air_date_year=${year}&language=en-US&page=1`)
-      : Promise.resolve(null),
-    tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/tv?query=${q}&language=en-US&page=1`),
+function dateFieldFor(mediaType: "movie" | "tv"): "release_date" | "first_air_date" {
+  return mediaType === "movie" ? "release_date" : "first_air_date";
+}
+
+// Staged lookup: tier 1 is a single call for the format we actually expect (from the pick's
+// declared format), year-filtered — covers the common case (well-known title, correct year) with
+// one TMDB round trip. Only on a tier-1 miss does tier 2 fan out concurrently across the remaining
+// movie/TV, year-filtered/unfiltered combinations, in the same priority order the old fully
+// sequential version checked one at a time. Confirming a title should not cost 4 network calls
+// when 1 will do, and should not fan out at all for backup/related titles the user may never see
+// (those are enriched separately via enrichRelatedPosters, not through this blocking path).
+async function tmdbSearch(title: string, year: string, expectedFormat?: string): Promise<TmdbMovie | null> {
+  const q = encodeURIComponent(title.trim());
+  const tvFirst = expectedFormat === "Series" || expectedFormat === "Episode";
+  const primaryType: "movie" | "tv" = tvFirst ? "tv" : "movie";
+  const secondaryType: "movie" | "tv" = tvFirst ? "movie" : "tv";
+
+  if (year) {
+    const primaryYearData = await tmdbFetch<{ results: TmdbSearchResult[] }>(tmdbSearchPath(primaryType, q, year, true));
+    if (primaryYearData?.results?.[0]) return withMediaType(primaryYearData.results[0], primaryType);
+  }
+
+  const [primaryFallback, secondaryYearData, secondaryFallback] = await Promise.all([
+    tmdbFetch<{ results: TmdbSearchResult[] }>(tmdbSearchPath(primaryType, q, year, false)),
+    year ? tmdbFetch<{ results: TmdbSearchResult[] }>(tmdbSearchPath(secondaryType, q, year, true)) : Promise.resolve(null),
+    tmdbFetch<{ results: TmdbSearchResult[] }>(tmdbSearchPath(secondaryType, q, year, false)),
   ]);
 
-  if (movieYearData?.results?.[0]) return withMediaType(movieYearData.results[0], "movie");
-
-  // Only accept the unfiltered movie fallback if the result's year roughly matches.
+  // Only accept an unfiltered fallback if the result's year roughly matches.
   // Returning null here means the pick is treated as "unknown" rather than trusted with wrong genre data.
-  const movieMatch = pickResult(movieFallback?.results ?? [], year, "release_date");
-  if (movieMatch) return withMediaType(movieMatch, "movie");
+  const primaryMatch = pickResult(primaryFallback?.results ?? [], year, dateFieldFor(primaryType));
+  if (primaryMatch) return withMediaType(primaryMatch, primaryType);
 
-  if (tvYearData?.results?.[0]) return withMediaType(tvYearData.results[0], "tv");
+  if (secondaryYearData?.results?.[0]) return withMediaType(secondaryYearData.results[0], secondaryType);
 
-  const tvMatch = pickResult(tvFallback?.results ?? [], year, "first_air_date");
-  if (tvMatch) return withMediaType(tvMatch, "tv");
+  const secondaryMatch = pickResult(secondaryFallback?.results ?? [], year, dateFieldFor(secondaryType));
+  if (secondaryMatch) return withMediaType(secondaryMatch, secondaryType);
 
   return null;
 }
@@ -257,6 +269,12 @@ function mapProviders(set: TmdbProviderSet): Recommendation["whereToWatch"]["pro
   return out;
 }
 
+// Poster lookups for hidden/similar titles used to run inline here on every request — up to 7
+// extra concurrent tmdbSearch calls (each itself up to 4 TMDB round trips) regardless of whether
+// the user ever expands that section. That's real, unnecessary latency and traffic on the
+// blocking path for content that's collapsed behind "show more" in the UI. Only the main title
+// is searched here now; related-title posters are fetched lazily via enrichRelatedPosters,
+// called by the client only when that section is actually opened.
 export async function enrichRecommendation(
   raw: RawRecommendation,
   country: string,
@@ -267,15 +285,7 @@ export async function enrichRecommendation(
   const altTitles = cleanAlternativeTitles(raw.alternatives ?? [], raw.title, hiddenRaw);
   const countryCode = toCountryCode(country);
 
-  const posterAltTitles = altTitles.slice(0, 4);
-  const posterHiddenTitles = hiddenRaw.slice(0, 3);
-
-  // Wave 1 — title searches in parallel, capped so secondary cards get posters without making the main pick slow.
-  const [mainMovie, altMovies, hiddenMovies] = await Promise.all([
-    tmdbSearch(raw.title, raw.year),
-    Promise.all(posterAltTitles.map((alt) => tmdbSearch(alt.title, alt.year))),
-    Promise.all(posterHiddenTitles.map((hidden) => tmdbSearch(hidden.title, hidden.year))),
-  ]);
+  const mainMovie = await tmdbSearch(raw.title, raw.year, raw.format);
 
   // CHANGED: Previously fetched providers for every hidden title too (~36 TMDB calls total per request).
   // Now only the main pick gets provider lookup — hidden titles get posters only, no provider calls.
@@ -330,19 +340,15 @@ export async function enrichRecommendation(
     ? omdbMain.Poster
     : undefined;
 
-  const alternativePosterUrls = altTitles.map((alt, i) => {
-    const m = altMovies[i];
-    return m?.poster_path && posterTitleMatches(alt.title, m.matchedTitle) ? `https://image.tmdb.org/t/p/w342${m.poster_path}` : "";
-  });
-
-  const hiddenLayerTitles: HiddenLayerTitle[] = hiddenRaw.map((hidden, i) => {
-    const m = hiddenMovies[i];
-    return {
-      title: hidden.title,
-      year: hidden.year,
-      posterUrl: m?.poster_path && posterTitleMatches(hidden.title, m.matchedTitle) ? `https://image.tmdb.org/t/p/w342${m.poster_path}` : undefined,
-    };
-  });
+  // Posters for these are not fetched here — see enrichRelatedPosters. Title/year still render
+  // immediately (the text content already came back from the LLM call); only the poster image
+  // is deferred until the section is opened.
+  const alternativePosterUrls = altTitles.map(() => "");
+  const hiddenLayerTitles: HiddenLayerTitle[] = hiddenRaw.map((hidden) => ({
+    title: hidden.title,
+    year: hidden.year,
+    posterUrl: undefined,
+  }));
 
   const { hiddenTitles: _dropped, ...rest } = raw;
   void _dropped;
@@ -363,4 +369,24 @@ export async function enrichRecommendation(
       titles: hiddenLayerTitles.length > 0 ? hiddenLayerTitles : undefined,
     },
   };
+}
+
+// Lazy poster lookup for hidden/similar titles, called only when the client actually opens that
+// section (see recommendation/page.tsx). Same tmdbSearch used for the main pick, capped to the
+// small number of cards the UI ever renders.
+export async function enrichRelatedPosters(
+  titles: Array<{ title: string; year: string }>,
+): Promise<Array<{ title: string; year: string; posterUrl?: string }>> {
+  const capped = titles.slice(0, 8);
+  const matches = await Promise.all(capped.map((item) => tmdbSearch(item.title, item.year)));
+  return capped.map((item, i) => {
+    const match = matches[i];
+    return {
+      title: item.title,
+      year: item.year,
+      posterUrl: match?.poster_path && posterTitleMatches(item.title, match.matchedTitle)
+        ? `https://image.tmdb.org/t/p/w342${match.poster_path}`
+        : undefined,
+    };
+  });
 }

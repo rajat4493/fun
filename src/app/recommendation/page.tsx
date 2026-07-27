@@ -277,6 +277,11 @@ export default function RecommendationPage() {
   const [shareState, setShareState] = useState<"idle" | "copied">("idle");
   const [watchOptionsOpen, setWatchOptionsOpen] = useState(false);
   const [showMorePicks, setShowMorePicks] = useState(false);
+  // Hidden/similar-title posters are deliberately not fetched as part of the primary response —
+  // that section is collapsed by default, so fetching their posters up front would be work the
+  // user may never see. Fetched lazily here, once, only when the section is actually opened.
+  const [relatedPosters, setRelatedPosters] = useState<Record<string, string>>({});
+  const relatedPostersFetchedForRef = useRef<string | null>(null);
   // Two-phase fetch: tracks the in-flight background "fill" call (picks 2–3) so handleSeenIt can
   // await it directly instead of polling. null once no fill is pending for the current session.
   const fillPromiseRef = useRef<Promise<void> | null>(null);
@@ -608,14 +613,15 @@ export default function RecommendationPage() {
   const mainTitleKey = relatedTitleKey(pick.title);
   const hiddenTitles = (pick.hiddenLayer.titles ?? [])
     .filter((title) => isDisplayableRelatedTitle(title.title) && relatedTitleKey(title.title) !== mainTitleKey)
-    .slice(0, 3);
+    .slice(0, 3)
+    .map((title) => ({ ...title, posterUrl: relatedPosters[relatedTitleKey(title.title)] ?? title.posterUrl }));
   const hiddenTitleKeys = new Set(hiddenTitles.map((title) => relatedTitleKey(title.title)));
   const seenSimilarKeys = new Set<string>();
   const similar = pick.alternatives.map((item, index) => {
     const [titlePart] = item.split(" (");
     const title = titlePart.trim();
     const year = item.match(/\((\d{4})\)/)?.[1] ?? "";
-    return { title, year, posterUrl: pick.alternativePosterUrls?.[index] };
+    return { title, year, posterUrl: relatedPosters[relatedTitleKey(title)] || pick.alternativePosterUrls?.[index] };
   }).filter((item) => {
     const key = relatedTitleKey(item.title);
     if (!isDisplayableRelatedTitle(item.title) || !key || key === mainTitleKey || hiddenTitleKeys.has(key) || seenSimilarKeys.has(key)) return false;
@@ -623,6 +629,49 @@ export default function RecommendationPage() {
     return true;
   }).slice(0, 4);
   const hasMorePicks = hiddenTitles.length > 0 || similar.length > 0;
+
+  // Posters for the section above are deliberately not part of the primary response (see
+  // enrichRecommendation) — fetch them once, only when the user actually opens the section.
+  useEffect(() => {
+    if (!showMorePicks) return;
+    const fetchKey = `${pick.title}-${pick.year}`;
+    if (relatedPostersFetchedForRef.current === fetchKey) return;
+
+    const titles = [
+      ...hiddenTitles.map((title) => ({ title: title.title, year: title.year })),
+      ...similar.map((item) => ({ title: item.title, year: item.year })),
+    ].filter((item) => item.title && !relatedPosters[relatedTitleKey(item.title)]);
+    if (titles.length === 0) {
+      relatedPostersFetchedForRef.current = fetchKey;
+      return;
+    }
+
+    fetch("/api/related-posters", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ titles }),
+    })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`related-posters: ${res.status}`))))
+      .then((data: { posters?: Array<{ title: string; posterUrl?: string }> }) => {
+        // Only mark this pick's related posters as fetched on success — a failed request
+        // (network blip, timeout) should be retried on the next render rather than permanently
+        // skipped until the primary title changes.
+        relatedPostersFetchedForRef.current = fetchKey;
+        if (!data.posters?.length) return;
+        setRelatedPosters((prev) => {
+          const next = { ...prev };
+          for (const poster of data.posters ?? []) {
+            if (poster.posterUrl) next[relatedTitleKey(poster.title)] = poster.posterUrl;
+          }
+          return next;
+        });
+      })
+      .catch(() => {
+        // Leave relatedPostersFetchedForRef unset so a later render (e.g. a state update from
+        // elsewhere on the page) gives this a chance to retry rather than failing silently forever.
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showMorePicks, pick.title, pick.year]);
 
   const artworkPosition = useMemo(() => {
     const seed = `${pick.title}-${pick.year}`.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
