@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#030303" />
+    <title>F.U.N - Offline</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 32px;
+        color: #f6f3ee;
+        background: #030303;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      main { width: min(100%, 520px); }
+      .brand {
+        margin-bottom: 56px;
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 8px;
+      }
+      .brand span { color: #ef4444; }
+      h1 {
+        margin: 0 0 18px;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: clamp(44px, 12vw, 72px);
+        font-weight: 400;
+        line-height: 0.95;
+      }
+      p {
+        margin: 0 0 32px;
+        color: rgba(255, 255, 255, 0.62);
+        font-size: 17px;
+        line-height: 1.55;
+      }
+      button {
+        min-height: 48px;
+        padding: 0 22px;
+        border: 1px solid rgba(255, 255, 255, 0.28);
+        border-radius: 6px;
+        color: white;
+        background: #151515;
+        font: inherit;
+        font-weight: 650;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="brand">F<span>.</span>U<span>.</span>N</div>
+      <h1>Your next pick needs a connection.</h1>
+      <p>Reconnect and F.U.N will continue from where you left off. Your recent picks remain available in Memory.</p>
+      <button type="button" onclick="window.location.reload()">Try again</button>
+    </main>
+  </body>
+</html>
