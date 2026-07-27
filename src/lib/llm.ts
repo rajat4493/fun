@@ -11,6 +11,16 @@ const LLM_MAX_OUTPUT_TOKENS = 3000;
 const INTENT_TIMEOUT_MS = 3500;
 const INTENT_MAX_OUTPUT_TOKENS = 700;
 
+// Providers allocate/reserve generation budget roughly proportional to max_tokens, so a 1-pick
+// request paying the same 3000-token ceiling as a 3-pick request wastes allocation it never uses.
+// Scaled by count, capped at the original constant so the already-proven 3-pick path (count=3)
+// gets exactly LLM_MAX_OUTPUT_TOKENS, unchanged from before this existed.
+const LLM_TOKENS_PER_PICK = 1000;
+const LLM_TOKENS_BASE_OVERHEAD = 200;
+function outputTokenBudget(count: number): number {
+  return Math.min(LLM_MAX_OUTPUT_TOKENS, LLM_TOKENS_BASE_OVERHEAD + LLM_TOKENS_PER_PICK * count);
+}
+
 type AnthropicTextBlock = {
   type: "text";
   text: string;
@@ -60,7 +70,7 @@ function parseJsonObject(text: string): Record<string, unknown> {
 
 // Generic OpenAI-compatible provider — reads LLM_BASE_URL, LLM_API_KEY, LLM_MODEL.
 // Set these to use Groq, Mistral, Together AI, Ollama, Fireworks, Perplexity, Gemini, etc.
-export async function recommendWithGenericLLM(prompt: string, temperature = 0.85): Promise<RawRecommendation[]> {
+export async function recommendWithGenericLLM(prompt: string, temperature = 0.85, count = 3): Promise<RawRecommendation[]> {
   const baseUrl = process.env.LLM_BASE_URL;
   const apiKey = process.env.LLM_API_KEY;
   const model = process.env.LLM_MODEL;
@@ -77,7 +87,7 @@ export async function recommendWithGenericLLM(prompt: string, temperature = 0.85
       body: JSON.stringify({
         model,
         temperature,
-        max_tokens: LLM_MAX_OUTPUT_TOKENS,
+        max_tokens: outputTokenBudget(count),
         messages: [{ role: "user", content: prompt }],
       }),
       signal,
@@ -123,7 +133,7 @@ export async function interpretIntentWithGenericLLM(prompt: string): Promise<Rec
   return parseJsonObject(data.choices?.[0]?.message?.content ?? "");
 }
 
-export async function recommendWithAnthropic(prompt: string, temperature = 0.85): Promise<RawRecommendation[]> {
+export async function recommendWithAnthropic(prompt: string, temperature = 0.85, count = 3): Promise<RawRecommendation[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY");
 
@@ -137,7 +147,7 @@ export async function recommendWithAnthropic(prompt: string, temperature = 0.85)
       },
       body: JSON.stringify({
         model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
-        max_tokens: LLM_MAX_OUTPUT_TOKENS,
+        max_tokens: outputTokenBudget(count),
         temperature,
         messages: [{ role: "user", content: prompt }],
       }),
@@ -303,7 +313,7 @@ export async function recommendWithOpenAI(prompt: string, temperature = 0.85, co
             model,
             input: prompt,
             temperature,
-            max_output_tokens: LLM_MAX_OUTPUT_TOKENS,
+            max_output_tokens: outputTokenBudget(count),
             text: {
               format: {
                 type: "json_schema",

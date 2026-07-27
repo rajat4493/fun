@@ -194,26 +194,32 @@ function pickResult(results: TmdbSearchResult[], year: string, dateField: "relea
 async function tmdbSearch(title: string, year: string): Promise<TmdbMovie | null> {
   const q = encodeURIComponent(title.trim());
 
-  // Year-filtered search first — TMDB applies the filter server-side, results are trustworthy.
-  if (year) {
-    const movieData = await tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/movie?query=${q}&primary_release_year=${year}&language=en-US&page=1`);
-    if (movieData?.results?.[0]) return withMediaType(movieData.results[0], "movie");
-  }
+  // Same 4-tier priority as before (year-filtered movie > unfiltered movie (year-matched) >
+  // year-filtered TV > unfiltered TV (year-matched)) and the exact same selection logic — this
+  // used to await each tier in sequence and bail out early on the first hit, which meant a title
+  // only found by the last tier paid for up to 4 sequential TMDB round trips (~14s worst case).
+  // Firing all four concurrently and applying the identical priority check afterward returns the
+  // same result, bounded by the slowest single call (~3.5s) instead of their sum.
+  const [movieYearData, movieFallback, tvYearData, tvFallback] = await Promise.all([
+    year
+      ? tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/movie?query=${q}&primary_release_year=${year}&language=en-US&page=1`)
+      : Promise.resolve(null),
+    tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/movie?query=${q}&language=en-US&page=1`),
+    year
+      ? tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/tv?query=${q}&first_air_date_year=${year}&language=en-US&page=1`)
+      : Promise.resolve(null),
+    tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/tv?query=${q}&language=en-US&page=1`),
+  ]);
 
-  // Unfiltered movie fallback — only accept if the result's year roughly matches.
+  if (movieYearData?.results?.[0]) return withMediaType(movieYearData.results[0], "movie");
+
+  // Only accept the unfiltered movie fallback if the result's year roughly matches.
   // Returning null here means the pick is treated as "unknown" rather than trusted with wrong genre data.
-  const movieFallback = await tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/movie?query=${q}&language=en-US&page=1`);
   const movieMatch = pickResult(movieFallback?.results ?? [], year, "release_date");
   if (movieMatch) return withMediaType(movieMatch, "movie");
 
-  // Year-filtered TV search.
-  if (year) {
-    const tvData = await tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/tv?query=${q}&first_air_date_year=${year}&language=en-US&page=1`);
-    if (tvData?.results?.[0]) return withMediaType(tvData.results[0], "tv");
-  }
+  if (tvYearData?.results?.[0]) return withMediaType(tvYearData.results[0], "tv");
 
-  // Unfiltered TV fallback — same year validation.
-  const tvFallback = await tmdbFetch<{ results: TmdbSearchResult[] }>(`/search/tv?query=${q}&language=en-US&page=1`);
   const tvMatch = pickResult(tvFallback?.results ?? [], year, "first_air_date");
   if (tvMatch) return withMediaType(tvMatch, "tv");
 

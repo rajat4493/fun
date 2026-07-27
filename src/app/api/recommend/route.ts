@@ -264,12 +264,12 @@ async function getRecommendations(input: RecommendRequest, prompt: string, trace
   const count = input.recommendationCount ?? 3;
 
   if (process.env.ANTHROPIC_API_KEY) {
-    const batch = await tryProvider(trace, "Anthropic", prompt, () => recommendWithAnthropic(prompt, temperature));
+    const batch = await tryProvider(trace, "Anthropic", prompt, () => recommendWithAnthropic(prompt, temperature, count));
     if (batch) return batch;
   }
 
   if (process.env.LLM_BASE_URL && process.env.LLM_API_KEY && process.env.LLM_MODEL) {
-    const batch = await tryProvider(trace, `Generic LLM (${process.env.LLM_MODEL})`, prompt, () => recommendWithGenericLLM(prompt, temperature));
+    const batch = await tryProvider(trace, `Generic LLM (${process.env.LLM_MODEL})`, prompt, () => recommendWithGenericLLM(prompt, temperature, count));
     if (batch) return batch;
   }
 
