@@ -16,9 +16,11 @@ const INTENT_MAX_OUTPUT_TOKENS = 700;
 // Scaled by count, capped at the original constant so the already-proven 3-pick path (count=3)
 // gets exactly LLM_MAX_OUTPUT_TOKENS, unchanged from before this existed.
 const LLM_TOKENS_PER_PICK = 1000;
+const LLM_CORE_TOKENS_PER_PICK = 800;
 const LLM_TOKENS_BASE_OVERHEAD = 200;
-function outputTokenBudget(count: number): number {
-  return Math.min(LLM_MAX_OUTPUT_TOKENS, LLM_TOKENS_BASE_OVERHEAD + LLM_TOKENS_PER_PICK * count);
+function outputTokenBudget(count: number, includeDiscovery = true): number {
+  const perPick = includeDiscovery ? LLM_TOKENS_PER_PICK : LLM_CORE_TOKENS_PER_PICK;
+  return Math.min(LLM_MAX_OUTPUT_TOKENS, LLM_TOKENS_BASE_OVERHEAD + perPick * count);
 }
 
 type AnthropicTextBlock = {
@@ -53,12 +55,25 @@ type ChatCompletionsResponse = {
 
 function parseRecommendationJson(text: string): RawRecommendation[] {
   const parsed = JSON.parse(extractJson(text)) as unknown;
-  if (Array.isArray(parsed)) return parsed as RawRecommendation[];
+  if (Array.isArray(parsed)) return hydrateRecommendationDefaults(parsed as RawRecommendation[]);
   if (parsed && typeof parsed === "object") {
     const wrapped = Object.values(parsed).find(Array.isArray);
-    if (wrapped) return wrapped as RawRecommendation[];
+    if (wrapped) return hydrateRecommendationDefaults(wrapped as RawRecommendation[]);
   }
-  return [parsed as RawRecommendation];
+  return hydrateRecommendationDefaults([parsed as RawRecommendation]);
+}
+
+function hydrateRecommendationDefaults(batch: RawRecommendation[]): RawRecommendation[] {
+  return batch.map((recommendation) => ({
+    ...recommendation,
+    hiddenLayer: recommendation.hiddenLayer ?? {
+      headline: "",
+      insight: "",
+      classyJab: "",
+    },
+    hiddenTitles: recommendation.hiddenTitles ?? [],
+    alternatives: recommendation.alternatives ?? [],
+  }));
 }
 
 function parseJsonObject(text: string): Record<string, unknown> {
@@ -70,7 +85,12 @@ function parseJsonObject(text: string): Record<string, unknown> {
 
 // Generic OpenAI-compatible provider — reads LLM_BASE_URL, LLM_API_KEY, LLM_MODEL.
 // Set these to use Groq, Mistral, Together AI, Ollama, Fireworks, Perplexity, Gemini, etc.
-export async function recommendWithGenericLLM(prompt: string, temperature = 0.85, count = 3): Promise<RawRecommendation[]> {
+export async function recommendWithGenericLLM(
+  prompt: string,
+  temperature = 0.85,
+  count = 3,
+  includeDiscovery = true,
+): Promise<RawRecommendation[]> {
   const baseUrl = process.env.LLM_BASE_URL;
   const apiKey = process.env.LLM_API_KEY;
   const model = process.env.LLM_MODEL;
@@ -87,7 +107,7 @@ export async function recommendWithGenericLLM(prompt: string, temperature = 0.85
       body: JSON.stringify({
         model,
         temperature,
-        max_tokens: outputTokenBudget(count),
+        max_tokens: outputTokenBudget(count, includeDiscovery),
         messages: [{ role: "user", content: prompt }],
       }),
       signal,
@@ -133,7 +153,12 @@ export async function interpretIntentWithGenericLLM(prompt: string): Promise<Rec
   return parseJsonObject(data.choices?.[0]?.message?.content ?? "");
 }
 
-export async function recommendWithAnthropic(prompt: string, temperature = 0.85, count = 3): Promise<RawRecommendation[]> {
+export async function recommendWithAnthropic(
+  prompt: string,
+  temperature = 0.85,
+  count = 3,
+  includeDiscovery = true,
+): Promise<RawRecommendation[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY");
 
@@ -147,7 +172,7 @@ export async function recommendWithAnthropic(prompt: string, temperature = 0.85,
       },
       body: JSON.stringify({
         model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
-        max_tokens: outputTokenBudget(count),
+        max_tokens: outputTokenBudget(count, includeDiscovery),
         temperature,
         messages: [{ role: "user", content: prompt }],
       }),
@@ -279,7 +304,30 @@ const RECOMMENDATION_ITEM_SCHEMA = {
   additionalProperties: false,
 };
 
-function recommendationBatchSchema(count: number) {
+const CORE_RECOMMENDATION_KEYS = [
+  "parsedIntent",
+  "title",
+  "year",
+  "format",
+  "runtime",
+  "vibe",
+  "contentCategory",
+  "emotionalEffect",
+  "confidence",
+  "oneLine",
+  "whyItFits",
+  "whereToWatch",
+] as const;
+
+const CORE_RECOMMENDATION_ITEM_SCHEMA = {
+  ...RECOMMENDATION_ITEM_SCHEMA,
+  properties: Object.fromEntries(
+    CORE_RECOMMENDATION_KEYS.map((key) => [key, RECOMMENDATION_ITEM_SCHEMA.properties[key]]),
+  ),
+  required: [...CORE_RECOMMENDATION_KEYS],
+};
+
+function recommendationBatchSchema(count: number, includeDiscovery = true) {
   return {
     type: "object",
     properties: {
@@ -287,7 +335,7 @@ function recommendationBatchSchema(count: number) {
         type: "array",
         minItems: count,
         maxItems: count,
-        items: RECOMMENDATION_ITEM_SCHEMA,
+        items: includeDiscovery ? RECOMMENDATION_ITEM_SCHEMA : CORE_RECOMMENDATION_ITEM_SCHEMA,
       },
     },
     required: ["recommendations"],
@@ -295,7 +343,12 @@ function recommendationBatchSchema(count: number) {
   };
 }
 
-export async function recommendWithOpenAI(prompt: string, temperature = 0.85, count = 3): Promise<RawRecommendation[]> {
+export async function recommendWithOpenAI(
+  prompt: string,
+  temperature = 0.85,
+  count = 3,
+  includeDiscovery = true,
+): Promise<RawRecommendation[]> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
 
@@ -313,12 +366,12 @@ export async function recommendWithOpenAI(prompt: string, temperature = 0.85, co
             model,
             input: prompt,
             temperature,
-            max_output_tokens: outputTokenBudget(count),
+            max_output_tokens: outputTokenBudget(count, includeDiscovery),
             text: {
               format: {
                 type: "json_schema",
                 name: "fun_recommendations",
-                schema: recommendationBatchSchema(count),
+                schema: recommendationBatchSchema(count, includeDiscovery),
                 strict: true,
               },
             },

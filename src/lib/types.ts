@@ -77,6 +77,9 @@ export type RecommendRequest = {
   // Two-phase fetch: omit for the default 3-at-once batch. Client sets this to 1 for the fast
   // initial pick, then 2 for the background fill call (see recommendation/page.tsx).
   recommendationCount?: number;
+  // Live UI requests use the compact shape because related discoveries are optional and should
+  // not delay the primary pick. Omitted keeps the full response for QA/backward compatibility.
+  responseDetail?: "core" | "full";
   // Lets the background fill call reuse phase 1's already-resolved intent contract instead of
   // paying for a second intent-classification LLM call.
   precomputedIntentContract?: IntentContract;

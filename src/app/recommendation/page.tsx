@@ -351,6 +351,7 @@ export default function RecommendationPage() {
         body: JSON.stringify({
           ...current.request,
           recommendationCount: 2,
+          responseDetail: "core",
           precomputedIntentContract: current.intentContract,
           recentTitles: [...(current.request.recentTitles ?? []), current.recommendation.title].slice(0, 40),
         }),
@@ -395,7 +396,12 @@ export default function RecommendationPage() {
     // renders fast, then let the same background-fill effect (below) top the batch up to 3 while
     // the user is already looking at something. Explicitly set to 1 (not just spread from the
     // caller) since a stale recommendationCount: 2 could otherwise leak in from a fill request.
-    const firstPickRequest: RecommendationSession["request"] = { ...request, recommendationCount: 1, precomputedIntentContract: undefined };
+    const firstPickRequest: RecommendationSession["request"] = {
+      ...request,
+      recommendationCount: 1,
+      responseDetail: "core",
+      precomputedIntentContract: undefined,
+    };
     const response = await fetch("/api/recommend", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -617,12 +623,26 @@ export default function RecommendationPage() {
     .map((title) => ({ ...title, posterUrl: relatedPosters[relatedTitleKey(title.title)] ?? title.posterUrl }));
   const hiddenTitleKeys = new Set(hiddenTitles.map((title) => relatedTitleKey(title.title)));
   const seenSimilarKeys = new Set<string>();
-  const similar = pick.alternatives.map((item, index) => {
+  const backgroundAlternatives = batch
+    .filter((item) => relatedTitleKey(item.title) !== mainTitleKey)
+    .map((item) => ({
+      title: item.title,
+      year: item.year,
+      posterUrl: item.omdbPosterUrl,
+      confidence: item.confidence,
+    }));
+  const legacyAlternatives = pick.alternatives.map((item, index) => {
     const [titlePart] = item.split(" (");
     const title = titlePart.trim();
     const year = item.match(/\((\d{4})\)/)?.[1] ?? "";
-    return { title, year, posterUrl: relatedPosters[relatedTitleKey(title)] || pick.alternativePosterUrls?.[index] };
-  }).filter((item) => {
+    return {
+      title,
+      year,
+      posterUrl: relatedPosters[relatedTitleKey(title)] || pick.alternativePosterUrls?.[index],
+      confidence: Math.max(78, pick.confidence - 2 - index),
+    };
+  });
+  const similar = [...backgroundAlternatives, ...legacyAlternatives].filter((item) => {
     const key = relatedTitleKey(item.title);
     if (!isDisplayableRelatedTitle(item.title) || !key || key === mainTitleKey || hiddenTitleKeys.has(key) || seenSimilarKeys.has(key)) return false;
     seenSimilarKeys.add(key);
@@ -1024,7 +1044,7 @@ export default function RecommendationPage() {
                     <div className="min-w-0 p-4">
                       <p className="truncate text-white">{item.title}</p>
                       <p className="mt-1 text-sm text-white/42">{item.year}</p>
-                      <p className="mt-3 inline-flex rounded-full border border-emerald-400/25 px-2 py-1 text-xs text-emerald-200">{Math.max(78, pick.confidence - 2 - index)}% match</p>
+                      <p className="mt-3 inline-flex rounded-full border border-emerald-400/25 px-2 py-1 text-xs text-emerald-200">{Math.round(item.confidence)}% match</p>
                     </div>
                   </a>
                 ))}

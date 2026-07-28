@@ -346,6 +346,7 @@ const ORDINAL_WORDS = ["second", "third", "fourth", "fifth"];
 
 export function buildRecommendationPrompt(input: RecommendRequest, options?: { strictSubscription?: boolean; intentContract?: IntentContract; count?: number; failedTitles?: string[] }) {
   const count = options?.count ?? 3;
+  const includeDiscovery = input.responseDetail !== "core";
   const momentLabel = timeLabel(input.contextHint);
   const userContext = input.mode === "self"
     ? input.selfText || "The user gave no extra context."
@@ -412,12 +413,12 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
   const languagePreferenceClause = input.languagePreferences?.length && !explicitLanguageRequest
     ? highIntensityMode
       ? `\n- Language preference (escalate if needed): User prefers ${input.languagePreferences.join(", ")} content. Try to find genuinely extreme/challenging picks in that language first. If ${input.languagePreferences.join("/")} cinema cannot satisfy this intensity level, expand to global cinema — and note in the oneLine or whyItFits that you went beyond the language preference because the intensity demanded it.`
-      : `\n- Language contract: The selected language preference is ${input.languagePreferences.join(", ")}. Because the user's request is broad and does not explicitly ask for another language, the main pick and alternatives MUST stay in that language/culture lane. Do not answer with English, Spanish, Korean, or generic global picks unless that language is selected.`
+      : `\n- Language contract: The selected language preference is ${input.languagePreferences.join(", ")}. Because the user's request is broad and does not explicitly ask for another language, every requested pick MUST stay in that language/culture lane. Do not answer with English, Spanish, Korean, or generic global picks unless that language is selected.`
     : "";
   const hardLanguageLock = detectedLanguage
     ? highIntensityMode
       ? `\n\n🔒 LANGUAGE PREFERENCE — ${detectedLanguage.toUpperCase()} (with intensity escalation): User wants ${detectedLanguage} content. Prioritize ${detectedLanguage}-language picks. BUT at this intensity/craziness level, if ${detectedLanguage} cinema cannot deliver genuinely extreme or unhinged content matching the mood, expand to global picks rather than settling for a weak ${detectedLanguage} match. Acknowledge the language expansion in the pick's reasoning.`
-      : `\n\n🔒 HARD LANGUAGE LOCK — ${detectedLanguage.toUpperCase()}: The user's request names "${detectedLanguage}" — whether as explicit language request or cultural descriptor ("French melancholy", "Italian feel", "Japanese aesthetic"). Either way this is a STRICT CONTENT LANE constraint. ALL ${COUNT_WORDS[count] ?? count} main pick${count === 1 ? "" : "s"} AND their alternatives AND their hidden titles MUST be ${detectedLanguage}-language or ${detectedLanguage}-market films/series. Do NOT recommend English-language, American, or any non-${detectedLanguage}-market content, even if it matches the mood. "French melancholy" means French films, not American indie films with a similar vibe. This overrides variety instructions and arthouse defaults. If you cannot find ${count === 1 ? "a" : count} ${detectedLanguage}-language match${count === 1 ? "" : "es"}, pick the closest ${detectedLanguage}-market equivalent${count === 1 ? "" : "s"}.`
+      : `\n\n🔒 HARD LANGUAGE LOCK — ${detectedLanguage.toUpperCase()}: The user's request names "${detectedLanguage}" — whether as explicit language request or cultural descriptor ("French melancholy", "Italian feel", "Japanese aesthetic"). Either way this is a STRICT CONTENT LANE constraint. ALL ${COUNT_WORDS[count] ?? count} requested pick${count === 1 ? "" : "s"} MUST be ${detectedLanguage}-language or ${detectedLanguage}-market films/series. Do NOT recommend English-language, American, or any non-${detectedLanguage}-market content, even if it matches the mood. "French melancholy" means French films, not American indie films with a similar vibe. This overrides variety instructions and arthouse defaults. If you cannot find ${count === 1 ? "a" : count} ${detectedLanguage}-language match${count === 1 ? "" : "es"}, pick the closest ${detectedLanguage}-market equivalent${count === 1 ? "" : "s"}.`
     : "";
 
   const avoidObviousHindiHiddenGems = input.country?.toLowerCase() === "india" &&
@@ -464,6 +465,24 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
     : detectedLanguage
     ? `- Hidden titles: 3 acclaimed ${detectedLanguage}-language films/series that deserve more visibility — strong picks from that market that are less algorithm-pushed. NOT English or global arthouse.`
     : `- Hidden titles: 3 acclaimed films/series NOT commonly found on mainstream platforms (Netflix, Prime, Disney+) — arthouse, MUBI, Criterion, or specialised catalogues. Any era is fine. Titles that feel like a real discovery, not algorithm bait.`;
+
+  const discoverySchema = includeDiscovery ? `,
+    "hiddenLayer": {
+      "headline": "A classy, short headline (max 10 words)",
+      "insight": "One or two sentences. Do not attack any platform by name.",
+      "classyJab": "A memorable one-liner, e.g. 'Your taste deserves a better map.'"
+    },
+    "hiddenTitles": [
+      { "title": "string", "year": "string" },
+      { "title": "string", "year": "string" },
+      { "title": "string", "year": "string" }
+    ],
+    "alternatives": ["Title (Year)", "Title (Year)", "Title (Year)"]` : "";
+
+  const discoveryInstructions = includeDiscovery
+    ? `${hiddenLayerInstruction}
+- Alternatives: 3 related mood-adjacent picks`
+    : "Return only the requested recommendations. Do not generate hidden titles, related discoveries, or alternatives in this response.";
 
   // Hard constraint block — placed before personality/craziness so the LLM reads
   // the non-negotiables first. LLMs weight earlier context more heavily.
@@ -586,18 +605,7 @@ Return an array of exactly ${COUNT_WORDS[count] ?? String(count)} JSON object${c
       "status": "unverified",
       "primary": "Availability not verified",
       "note": "F.U.N will verify this in real time. Check your apps before watching."
-    },
-    "hiddenLayer": {
-      "headline": "A classy, short headline (max 10 words)",
-      "insight": "One or two sentences. Do not attack any platform by name.",
-      "classyJab": "A memorable one-liner, e.g. 'Your taste deserves a better map.'"
-    },
-    "hiddenTitles": [
-      { "title": "string", "year": "string" },
-      { "title": "string", "year": "string" },
-      { "title": "string", "year": "string" }
-    ],
-    "alternatives": ["Title (Year)", "Title (Year)", "Title (Year)"]
+    }${discoverySchema}
   }${count > 1 ? `,\n${ORDINAL_WORDS.slice(0, count - 1).map((word) => `  { ... ${word} recommendation with same schema ... }`).join(",\n")}` : ""}
 ]
 
@@ -605,8 +613,7 @@ For each recommendation:
 - Fill parsedIntent BEFORE choosing the title. It is the contract you are satisfying, not post-rationalization. If the user says someone hates horror or does not want scary content, do NOT set primary to scare.
 - Fill contentCategory and emotionalEffect as factual structured labels for the chosen title. These fields describe the title, not the user's avoidances. Do not include avoided labels just to say the film avoids them.
 - Main pick: Your best match for the user's mood
-- ${hiddenLayerInstruction}
-- Alternatives: 3 related mood-adjacent picks
+- ${discoveryInstructions}
 - Why-it-fits must prove the match: each reason should name a concrete shared trait from the request/reference, not generic praise like "strong characters" or "great story".
 - Do not mention morning, afternoon, evening, late night, low energy, high energy, alone, partner, friends, or family in visible copy unless the user explicitly typed it or the selected control clearly makes it relevant. Never contradict a typed situation such as bedtime by saying afternoon.
 
@@ -622,7 +629,7 @@ Constraints:
 - Use the time context to calibrate the pick's energy: late night → introspective, slow, hypnotic; morning → lighter, focused; weekend evening → immersive, cinematic; weekday evening → something that earns its length or is concise. Do not state the time in your output — just let it influence the pick.
 - The Taste Risk level above is the primary dial for how mainstream vs. extreme to go after hard boundaries are satisfied. Follow it strictly within those boundaries.
 - Strictly obey hard content avoidances only when they are in "I do not want" / avoids or phrased as no/avoid/without. Soft mood directions like less slow, less heavy, or no sad ending should guide tone unless the user's situation makes them practically hard. If the user simply asks for "gore", "gory", "bloody", "splatter", or "body horror", treat that as a positive request for intense horror.
-- Strictly obey explicit language/culture requests. If the user asks for Hindi, the main pick and nearby alternatives should be Hindi or strongly Hindi-market Indian titles unless the user asks otherwise.
+- Strictly obey explicit language/culture requests. If the user asks for Hindi, every requested pick should be Hindi or strongly Hindi-market Indian unless the user asks otherwise.
 - Use the language preference as the default content lane when the user's request is broad. If the user selected Hindi and asks for "a hidden gem thriller", recommend a Hindi or strongly Hindi-market Indian thriller, not a global English/Spanish title. If the user explicitly asks for a different language, culture, or country, follow the explicit request instead.
 - If the user wants romantic/sexy, recommend sensual mainstream adult-themed content, never pornographic.
 - If a reference film is provided, extract its tone, pacing, aesthetic, and emotional register — use those as calibration signals. Never recommend the reference film itself or an obvious sequel/prequel to it.
@@ -640,6 +647,7 @@ type CompactRejection = {
 
 export function buildCompactRetryPrompt(input: RecommendRequest, rejections: CompactRejection[], intentContract?: IntentContract, count = 3) {
   const intent = extractIntent(input);
+  const includeDiscovery = input.responseDetail !== "core";
   const country = input.country || "not provided";
   const platforms = input.platforms?.length ? input.platforms.join(", ") : "not specified";
   const languagePreferences = input.languagePreferences?.length ? input.languagePreferences.join(", ") : "no preference";
@@ -649,6 +657,18 @@ export function buildCompactRetryPrompt(input: RecommendRequest, rejections: Com
   const rejectionsText = rejections.length
     ? rejections.slice(0, 8).map((item) => `- ${item.title}: ${item.reasons.join("; ")}`).join("\n")
     : "- none";
+  const discoverySchema = includeDiscovery ? `,
+    "hiddenLayer": {
+      "headline": "short headline",
+      "insight": "factual taste insight",
+      "classyJab": "short tasteful line"
+    },
+    "hiddenTitles": [
+      { "title": "string", "year": "string" },
+      { "title": "string", "year": "string" },
+      { "title": "string", "year": "string" }
+    ],
+    "alternatives": ["Title (Year)", "Title (Year)", "Title (Year)"]` : "";
 
   return `
 You are F.U.N. The first recommendation attempt failed backend trust checks.
@@ -707,18 +727,7 @@ Schema:
       "status": "unverified",
       "primary": "Availability not verified",
       "note": "F.U.N will verify this in real time. Check your apps before watching."
-    },
-    "hiddenLayer": {
-      "headline": "short headline",
-      "insight": "factual taste insight",
-      "classyJab": "short tasteful line"
-    },
-    "hiddenTitles": [
-      { "title": "string", "year": "string" },
-      { "title": "string", "year": "string" },
-      { "title": "string", "year": "string" }
-    ],
-    "alternatives": ["Title (Year)", "Title (Year)", "Title (Year)"]
+    }${discoverySchema}
   }
 ]
 `;

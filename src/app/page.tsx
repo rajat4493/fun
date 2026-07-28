@@ -481,6 +481,7 @@ export default function Home() {
       // Two-phase fetch: ask for just 1 pick so it renders fast. recommendation/page.tsx fetches
       // picks 2–3 in the background once this lands.
       recommendationCount: 1,
+      responseDetail: "core",
     };
 
     localStorage.setItem("fun:loading", "true");

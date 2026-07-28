@@ -207,14 +207,14 @@ async function resolveIntentContract(input: RecommendRequest, trace: ProviderTra
   };
 
   // Try only one configured provider for intent classification to avoid adding another long sequential chain.
-  if (process.env.ANTHROPIC_API_KEY) {
-    return await tryIntent("Intent Anthropic", () => interpretIntentWithAnthropic(prompt)) ?? local;
+  if (process.env.OPENAI_API_KEY) {
+    return await tryIntent(`Intent OpenAI (${process.env.OPENAI_MODEL || "gpt-4o-mini"})`, () => interpretIntentWithOpenAI(prompt)) ?? local;
   }
   if (process.env.LLM_BASE_URL && process.env.LLM_API_KEY && process.env.LLM_MODEL) {
     return await tryIntent(`Intent Generic LLM (${process.env.LLM_MODEL})`, () => interpretIntentWithGenericLLM(prompt)) ?? local;
   }
-  if (process.env.OPENAI_API_KEY) {
-    return await tryIntent(`Intent OpenAI (${process.env.OPENAI_MODEL || "gpt-4o-mini"})`, () => interpretIntentWithOpenAI(prompt)) ?? local;
+  if (process.env.ANTHROPIC_API_KEY) {
+    return await tryIntent("Intent Anthropic", () => interpretIntentWithAnthropic(prompt)) ?? local;
   }
 
   trace.push({
@@ -257,24 +257,25 @@ async function tryProvider(
   }
 }
 
-// Provider chain: Anthropic → generic OpenAI-compatible (Groq/Mistral/Ollama/etc.) → OpenAI → local fallback.
+// Provider chain: OpenAI → generic OpenAI-compatible (Groq/Mistral/Ollama/etc.) → Anthropic → local fallback.
 // Each provider is tried only when its required env vars are set.
 async function getRecommendations(input: RecommendRequest, prompt: string, trace: ProviderTrace[], intentContract?: IntentContract): Promise<RawRecommendation[]> {
   const temperature = llmTemperature(input);
   const count = input.recommendationCount ?? 3;
+  const includeDiscovery = input.responseDetail !== "core";
 
-  if (process.env.ANTHROPIC_API_KEY) {
-    const batch = await tryProvider(trace, "Anthropic", prompt, () => recommendWithAnthropic(prompt, temperature, count));
+  if (process.env.OPENAI_API_KEY) {
+    const batch = await tryProvider(trace, `OpenAI (${process.env.OPENAI_MODEL || "gpt-4o-mini"})`, prompt, () => recommendWithOpenAI(prompt, temperature, count, includeDiscovery));
     if (batch) return batch;
   }
 
   if (process.env.LLM_BASE_URL && process.env.LLM_API_KEY && process.env.LLM_MODEL) {
-    const batch = await tryProvider(trace, `Generic LLM (${process.env.LLM_MODEL})`, prompt, () => recommendWithGenericLLM(prompt, temperature, count));
+    const batch = await tryProvider(trace, `Generic LLM (${process.env.LLM_MODEL})`, prompt, () => recommendWithGenericLLM(prompt, temperature, count, includeDiscovery));
     if (batch) return batch;
   }
 
-  if (process.env.OPENAI_API_KEY) {
-    const batch = await tryProvider(trace, `OpenAI (${process.env.OPENAI_MODEL || "gpt-4o-mini"})`, prompt, () => recommendWithOpenAI(prompt, temperature, count));
+  if (process.env.ANTHROPIC_API_KEY) {
+    const batch = await tryProvider(trace, "Anthropic", prompt, () => recommendWithAnthropic(prompt, temperature, count, includeDiscovery));
     if (batch) return batch;
   }
 
