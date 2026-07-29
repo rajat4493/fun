@@ -2,7 +2,7 @@
 // Unified pre-deploy QA gate. One test case per risk category so fixing one area
 // cannot silently break another. Run before every deploy: npm run test:gate
 //
-// Categories: scare intent, cry intent, comfort, panic safety, grief safety,
+// Categories: scare intent, intent arbitration, cry intent, comfort, panic safety, grief safety,
 // hidden gem, runtime, language, subscription-only, related-title safety, format,
 // negated-scare (regression guard for the trickiest false-positive class).
 
@@ -66,6 +66,31 @@ const tests = [
     why: "Scare request must return a genuinely scary/fear-inducing pick, not romance/surreal comfort.",
   },
   {
+    id: "GATE-SCARE-WITH-NON-HORROR-NEGATION",
+    category: "intent arbitration",
+    input: { mode: "self", selfText: "I want something genuinely terrifying, real horror, not sadness or surreal drama, and no jump scares", country: "USA", languagePreferences: ["Any language"], platforms: [], platformFilter: "any" },
+    check: (rec) => {
+      const contract = rec._trust?.intentContract;
+      return scary.test(textOf(rec)) &&
+        contract?.primary === "scare" &&
+        !(contract?.hardAvoids ?? []).includes("horror");
+    },
+    why: "A negative modifier for sadness/jump scares must not turn a positive real-horror request into a horror avoidance.",
+  },
+  {
+    id: "GATE-STRUCTURED-AVOID-NOT-POSITIVE",
+    category: "intent arbitration",
+    input: { mode: "choose", mood: ["tired"], wants: ["romantic", "comforting"], avoids: ["gore"], country: "Poland", languagePreferences: ["Any language"], platforms: [], platformFilter: "any" },
+    check: (rec) => {
+      const contract = rec._trust?.intentContract;
+      const positiveSignals = [contract?.primary, ...(contract?.secondary ?? [])].map((item) => String(item).toLowerCase());
+      return !positiveSignals.includes("gore") &&
+        (contract?.hardAvoids ?? []).includes("gore") &&
+        ["romance", "comfort"].some((signal) => positiveSignals.includes(signal));
+    },
+    why: "A structured gore avoidance must remain a boundary and never become a positive request for gore.",
+  },
+  {
     id: "GATE-CRY",
     category: "cry intent",
     input: { mode: "self", selfText: "Watching with friends and want something that will make us cry", country: "Poland", languagePreferences: ["Any language"], platforms: [], platformFilter: "any" },
@@ -120,6 +145,13 @@ const tests = [
       return (runtimeMinutes(rec) ?? 999) <= 90 && /\bfilm\b/i.test(rec.format) && (drama.test(textOf(rec)) || /^drama$/i.test(intentLabel));
     },
     why: "Under-90 drama must stay inside runtime and return a drama film, not a TV series.",
+  },
+  {
+    id: "GATE-RUNTIME-UNDER-TWO-HOURS",
+    category: "runtime",
+    input: { mode: "self", selfText: "I want a Korean thriller with momentum and tension, not a slow drama.", time: "under 2 hours", country: "Poland", languagePreferences: ["Korean"], platforms: [], platformFilter: "any" },
+    check: (rec) => (runtimeMinutes(rec) ?? 999) <= 120,
+    why: "An explicit under-two-hour control must reject titles longer than 120 minutes.",
   },
   {
     id: "GATE-LANGUAGE",
@@ -185,7 +217,9 @@ async function runCase(test) {
   const response = await fetch(ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(test.input),
+    // Exercise the same compact, one-pick path the live UI uses. The separate
+    // recommendation regression suite retains the legacy full-batch coverage.
+    body: JSON.stringify({ recommendationCount: 1, responseDetail: "core", ...test.input }),
     signal: controller.signal,
   }).finally(() => clearTimeout(timeout));
 

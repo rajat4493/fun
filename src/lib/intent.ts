@@ -1,5 +1,5 @@
 import { RecommendRequest } from "@/lib/types";
-import { hasNegatedConcept, requestText } from "@/lib/recommendation-utils";
+import { hasNegatedConcept, intentRequestText } from "@/lib/recommendation-utils";
 
 export type RecommendationIntent = {
   requestText: string;
@@ -61,7 +61,7 @@ function requestedFormat(text: string): RecommendationIntent["requestedFormat"] 
 }
 
 export function extractIntent(input: RecommendRequest): RecommendationIntent {
-  const text = requestText(input);
+  const text = intentRequestText(input);
   const hardAvoids = new Set<string>();
   const softAvoids = new Set<string>();
   const primaryIntents = new Set<string>();

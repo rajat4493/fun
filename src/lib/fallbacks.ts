@@ -950,6 +950,22 @@ export function localFallback(input: RecommendRequest, intentContract?: IntentCo
     };
     return [
       {
+        title: "Midnight",
+        year: "2021",
+        runtime: "104 min",
+        vibe: "Korean thriller, tense, propulsive",
+        confidence: 81,
+        oneLine: "Watch Midnight for a lean Korean pursuit thriller that keeps moving without overrunning the night.",
+        whyItFits: [
+          "It stays firmly in the Korean thriller lane.",
+          "The pursuit structure creates momentum without relying on a slow dramatic build.",
+          "Its runtime fits a strict under-two-hour request.",
+        ],
+        hiddenTitles: [{ title: "The Call", year: "2020" }, { title: "Forgotten", year: "2017" }, { title: "Montage", year: "2013" }],
+        alternatives: ["The Call (2020)", "Forgotten (2017)", "Montage (2013)"],
+        ...baseRec,
+      },
+      {
         title: "The Wailing",
         year: "2016",
         runtime: "156 min",

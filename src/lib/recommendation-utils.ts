@@ -64,6 +64,20 @@ export function requestText(input: RecommendRequest): string {
   ].filter(Boolean).join(" ");
 }
 
+// Text used to infer positive intent. Structured avoid controls are deliberately
+// excluded: "gore" in the avoids array must never become a request for gore.
+export function intentRequestText(input: RecommendRequest): string {
+  return [
+    input.selfText,
+    input.reference,
+    input.mood?.join(" "),
+    input.wants?.join(" "),
+    input.time,
+    input.energy,
+    input.contextHint,
+  ].filter(Boolean).join(" ");
+}
+
 function cloneGlobalRegex(pattern: RegExp): RegExp {
   const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
   return new RegExp(pattern.source, flags);
@@ -83,7 +97,9 @@ export function hasNegatedConcept(text: string, pattern: RegExp): boolean {
       negationMatches.some((negationMatch) => {
         const negationIndex = negationMatch.index ?? 0;
         const conceptIndex = conceptMatch.index ?? 0;
-        return Math.abs(conceptIndex - negationIndex) <= 48;
+        // Negation must precede the concept it modifies. An absolute-distance
+        // check made "real horror, not sadness" incorrectly negate "horror".
+        return conceptIndex >= negationIndex && conceptIndex - negationIndex <= 48;
       }),
     );
   });

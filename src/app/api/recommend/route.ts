@@ -263,19 +263,32 @@ async function getRecommendations(input: RecommendRequest, prompt: string, trace
   const temperature = llmTemperature(input);
   const count = input.recommendationCount ?? 3;
   const includeDiscovery = input.responseDetail !== "core";
+  // Bound the complete provider chain. Previously OpenAI and Anthropic could each
+  // consume 25 seconds serially, producing 50–75 second requests on a degraded
+  // serverless instance. Core UI calls get a fast primary window while full
+  // backward-compatible batches retain more generation time.
+  const chainStarted = Date.now();
+  const chainBudgetMs = includeDiscovery ? 30000 : 24000;
+  const primaryBudgetMs = includeDiscovery ? 20000 : 12000;
+  const remainingBudget = () => Math.max(0, chainBudgetMs - (Date.now() - chainStarted));
+  const providerBudget = (preferred: number) => Math.min(preferred, remainingBudget());
+  const canTryProvider = () => remainingBudget() >= 3000;
 
-  if (process.env.OPENAI_API_KEY) {
-    const batch = await tryProvider(trace, `OpenAI (${process.env.OPENAI_MODEL || "gpt-4o-mini"})`, prompt, () => recommendWithOpenAI(prompt, temperature, count, includeDiscovery));
+  if (process.env.OPENAI_API_KEY && canTryProvider()) {
+    const timeoutMs = providerBudget(primaryBudgetMs);
+    const batch = await tryProvider(trace, `OpenAI (${process.env.OPENAI_MODEL || "gpt-4o-mini"})`, prompt, () => recommendWithOpenAI(prompt, temperature, count, includeDiscovery, timeoutMs));
     if (batch) return batch;
   }
 
-  if (process.env.LLM_BASE_URL && process.env.LLM_API_KEY && process.env.LLM_MODEL) {
-    const batch = await tryProvider(trace, `Generic LLM (${process.env.LLM_MODEL})`, prompt, () => recommendWithGenericLLM(prompt, temperature, count, includeDiscovery));
+  if (process.env.LLM_BASE_URL && process.env.LLM_API_KEY && process.env.LLM_MODEL && canTryProvider()) {
+    const timeoutMs = providerBudget(8000);
+    const batch = await tryProvider(trace, `Generic LLM (${process.env.LLM_MODEL})`, prompt, () => recommendWithGenericLLM(prompt, temperature, count, includeDiscovery, timeoutMs));
     if (batch) return batch;
   }
 
-  if (process.env.ANTHROPIC_API_KEY) {
-    const batch = await tryProvider(trace, "Anthropic", prompt, () => recommendWithAnthropic(prompt, temperature, count, includeDiscovery));
+  if (process.env.ANTHROPIC_API_KEY && canTryProvider()) {
+    const timeoutMs = providerBudget(16000);
+    const batch = await tryProvider(trace, "Anthropic", prompt, () => recommendWithAnthropic(prompt, temperature, count, includeDiscovery, timeoutMs));
     if (batch) return batch;
   }
 
@@ -700,7 +713,9 @@ export async function POST(req: Request) {
         // requested language; if the fallback has no titles in that lane (common for non-Hindi),
         // serve the fallback anyway rather than an empty result — the confirmed-mismatch LLM picks
         // are already dropped, which is the primary language-lane guarantee.
-        const fallback = (await enrichBatch(filteredLocalFallback(input, intentContract), country, platforms)).slice(0, count);
+        const trustedFallback = applyTrustFilter(input, filteredLocalFallback(input, intentContract), intentContract);
+        trustRejections.push(...trustedFallback.rejected);
+        const fallback = (await enrichBatch(trustedFallback.accepted, country, platforms)).slice(0, count);
         const filteredFallback = fallback.filter((recommendation) => matchesLanguageRequest(input, recommendation));
         enrichedBatch = filteredFallback.length > 0 ? filteredFallback : fallback;
       }

@@ -128,15 +128,41 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
   if (!raw || typeof raw !== "object") return local;
   const value = raw as Record<string, unknown>;
   const primaryRaw = typeof value.primary === "string" ? value.primary : "";
-  const primary = firstKnownPrimary([primaryRaw, ...stringArray(value.secondary), local.primary]);
+  const inferredPrimary = firstKnownPrimary([primaryRaw, ...stringArray(value.secondary), local.primary]);
+  // A model sometimes promotes a structured avoidance to the primary intent
+  // ("romantic + comforting", avoids=["gore"] → primary "gore"). Explicit
+  // controls are authoritative: an avoided concept cannot become the desired
+  // outcome unless local parsing independently found it as a positive request.
+  const primary = local.hardAvoids.includes(inferredPrimary) &&
+    ![local.primary, ...local.secondary].includes(inferredPrimary)
+    ? local.primary
+    : inferredPrimary;
   const formatRaw = typeof value.format === "string" ? value.format.toLowerCase().trim() : "";
   const intensityRaw = typeof value.intensity === "string" ? value.intensity.toLowerCase().trim() : "";
+  const llmSecondary = stringArray(value.secondary).filter((item) => {
+    const normalized = item.toLowerCase();
+    return !local.hardAvoids.includes(normalized) || [local.primary, ...local.secondary].includes(normalized);
+  });
+  const llmHardAvoids = stringArray(value.hardAvoids).map((item) => item.toLowerCase());
+  const localPrimarySignals = new Set([local.primary, ...local.secondary]);
+  const reconciledLlmHardAvoids = llmHardAvoids.filter((avoid) => {
+    // The semantic classifier may echo a desired genre as an avoidance when a
+    // nearby modifier is negative ("real horror, no jump scares"). Local
+    // structured/negation parsing remains authoritative for explicit avoids.
+    if (avoid === "horror" && localPrimarySignals.has("scare") && !local.hardAvoids.includes("horror")) return false;
+    if (
+      ["gore", "horror", "violence", "graphic violence"].includes(avoid) &&
+      localPrimarySignals.has("gore") &&
+      !local.hardAvoids.includes(avoid)
+    ) return false;
+    return true;
+  });
 
   return {
     primary,
     // Merge local emotional-register signals (bleak, cathartic, weird) — the LLM often omits them
-    secondary: [...new Set([...stringArray(value.secondary), ...local.secondary])].slice(0, 8),
-    hardAvoids: [...new Set([...local.hardAvoids, ...stringArray(value.hardAvoids).map((item) => item.toLowerCase())])],
+    secondary: [...new Set([...llmSecondary, ...local.secondary])].slice(0, 8),
+    hardAvoids: [...new Set([...local.hardAvoids, ...reconciledLlmHardAvoids])],
     softAvoids: [...new Set([...local.softAvoids, ...stringArray(value.softAvoids).map((item) => item.toLowerCase())])],
     format: FORMAT_VALUES.has(formatRaw as IntentContract["format"]) ? formatRaw as IntentContract["format"] : local.format,
     language: typeof value.language === "string" && value.language.trim() ? value.language.trim() : local.language,

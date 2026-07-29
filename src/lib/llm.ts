@@ -90,6 +90,7 @@ export async function recommendWithGenericLLM(
   temperature = 0.85,
   count = 3,
   includeDiscovery = true,
+  timeoutMs = FALLBACK_LLM_TIMEOUT_MS,
 ): Promise<RawRecommendation[]> {
   const baseUrl = process.env.LLM_BASE_URL;
   const apiKey = process.env.LLM_API_KEY;
@@ -112,7 +113,7 @@ export async function recommendWithGenericLLM(
       }),
       signal,
     }),
-    FALLBACK_LLM_TIMEOUT_MS,
+    timeoutMs,
     `Generic LLM (${model})`,
   );
 
@@ -158,6 +159,7 @@ export async function recommendWithAnthropic(
   temperature = 0.85,
   count = 3,
   includeDiscovery = true,
+  timeoutMs = ANTHROPIC_TIMEOUT_MS,
 ): Promise<RawRecommendation[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY");
@@ -178,7 +180,7 @@ export async function recommendWithAnthropic(
       }),
       signal,
     }),
-    ANTHROPIC_TIMEOUT_MS,
+    timeoutMs,
     "Anthropic",
   );
 
@@ -348,12 +350,17 @@ export async function recommendWithOpenAI(
   temperature = 0.85,
   count = 3,
   includeDiscovery = true,
+  timeoutMs = FALLBACK_LLM_TIMEOUT_MS,
 ): Promise<RawRecommendation[]> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
 
   let lastError: unknown;
-  for (const model of uniqueValues([process.env.OPENAI_MODEL, "gpt-4o-mini"])) {
+  const started = Date.now();
+  const models = uniqueValues([process.env.OPENAI_MODEL, "gpt-4o-mini"]);
+  for (const model of models) {
+    const remainingMs = timeoutMs - (Date.now() - started);
+    if (remainingMs < 1000) break;
     try {
       const response = await withTimeout(
         (signal) => fetch("https://api.openai.com/v1/responses", {
@@ -378,7 +385,7 @@ export async function recommendWithOpenAI(
           }),
           signal,
         }),
-        FALLBACK_LLM_TIMEOUT_MS,
+        remainingMs,
         `OpenAI ${model}`,
       );
 
@@ -399,7 +406,10 @@ export async function interpretIntentWithOpenAI(prompt: string): Promise<Record<
   if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
 
   let lastError: unknown;
+  const started = Date.now();
   for (const model of uniqueValues([process.env.OPENAI_MODEL, "gpt-4o-mini"])) {
+    const remainingMs = INTENT_TIMEOUT_MS - (Date.now() - started);
+    if (remainingMs < 500) break;
     try {
       const response = await withTimeout(
         (signal) => fetch("https://api.openai.com/v1/responses", {
@@ -416,7 +426,7 @@ export async function interpretIntentWithOpenAI(prompt: string): Promise<Record<
           }),
           signal,
         }),
-        INTENT_TIMEOUT_MS,
+        remainingMs,
         `OpenAI intent ${model}`,
       );
 

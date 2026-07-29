@@ -265,6 +265,7 @@ function contractFormat(contract?: IntentContract): IntentContract["format"] | n
 }
 
 function runtimeViolation(input: RecommendRequest, rec: RawRecommendation | Recommendation, contract?: IntentContract): string | null {
+  const extractedIntent = extractIntent(input);
   const request = requestText(input).toLowerCase();
   const time = input.time?.toLowerCase();
   const minutes = parseRuntimeMinutes(rec.runtime);
@@ -273,6 +274,15 @@ function runtimeViolation(input: RecommendRequest, rec: RawRecommendation | Reco
     return isEpisodeRuntime(rec) ? null : "time: requested one episode";
   }
   if (!minutes) return null;
+
+  if (
+    extractedIntent.runtimeLimitMinutes &&
+    extractedIntent.runtimeLimitMinutes >= 10 &&
+    extractedIntent.runtimeLimitMinutes <= 240 &&
+    minutes > extractedIntent.runtimeLimitMinutes
+  ) {
+    return `time: ${minutes} min exceeds ${extractedIntent.runtimeLimitMinutes} min request`;
+  }
 
   const freeTextLimit = request.match(/\b(?:under|less than|within|up to|max(?:imum)?|no more than)\s+(\d{1,3})\s*(?:min|mins|minutes)\b/);
   const plainMinuteNeed = request.match(/\b(\d{1,3})\s*(?:min|mins|minutes)\b/);
