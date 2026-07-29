@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import type { RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
 
 type RecommendationRunBody = {
@@ -106,7 +106,7 @@ async function writeToKv(event: RecommendationRunEvent): Promise<void> {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify([JSON.stringify(event)]),
-    signal: AbortSignal.timeout(3000),
+    signal: AbortSignal.timeout(2000),
   });
 }
 
@@ -130,7 +130,13 @@ export async function POST(req: Request) {
       receivedAt: new Date().toISOString(),
     };
 
-    writeToKv(event).catch((error) => console.warn("[FUN recommendation run write failed]", error));
+    after(async () => {
+      try {
+        await writeToKv(event);
+      } catch (error) {
+        console.warn("[FUN recommendation run write failed]", error);
+      }
+    });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ ok: true });
