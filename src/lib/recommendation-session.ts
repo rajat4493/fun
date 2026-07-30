@@ -6,7 +6,7 @@ export const feedbackStorageKey = "fun:recommendation-feedback";
 export const recentRecommendationTitlesKey = "fun:recent-recommendation-titles";
 export const recommendationHistoryKey = "fun:recommendation-history";
 export const dismissedPostWatchPromptKey = "fun:dismissed-post-watch-prompts";
-const sessionIdKey = "fun:session-id";
+export const sessionIdKey = "fun:session-id";
 
 export function getOrCreateSessionId(): string {
   if (typeof window === "undefined") return "ssr";
@@ -118,6 +118,26 @@ export function loadRecommendationMemoryTitles(): string[] {
     seen.add(key);
     return true;
   }).slice(0, 40);
+}
+
+export function loadCompactRecommendationMemoryTitles(): string[] {
+  return loadRecommendationMemoryTitles().slice(0, 8);
+}
+
+export function loadExactRecommendationExclusions(): string[] {
+  const titles = [
+    ...loadSeenTitles(),
+    ...loadRecentRecommendationTitles(),
+    ...loadRecommendationHistory().map((item) => item.title),
+    ...loadRecommendationFeedback().map((item) => item.title),
+  ].filter(Boolean);
+  const seen = new Set<string>();
+  return titles.filter((title) => {
+    const key = recommendationKey(title, "");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 200);
 }
 
 function recommendationKey(title: string, year: string) {

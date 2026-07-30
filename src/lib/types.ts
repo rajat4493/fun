@@ -69,6 +69,11 @@ export type RecommendRequest = {
   reference?: string;
   seenTitles?: string[];
   recentTitles?: string[];
+  // Full device-local exclusion set. This is enforced mechanically by the backend and is never
+  // copied into the LLM prompt; recentTitles remains the small context window shown to the model.
+  excludedTitles?: string[];
+  // Anonymous, device-scoped profile identifier. Used only for product memory and diagnostics.
+  sessionId?: string;
   platformFilter?: "mine" | "any";
   discoveryMode?: "standard" | "indie";
   contextHint?: string; // time-of-day, day, season — influences pick tone

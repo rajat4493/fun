@@ -32,8 +32,9 @@ import {
   defaultRecommendation,
   FeedbackReason,
   getOrCreateSessionId,
+  loadCompactRecommendationMemoryTitles,
+  loadExactRecommendationExclusions,
   loadRecommendationFeedbackContext,
-  loadRecommendationMemoryTitles,
   RecommendationSession,
   recommendationStorageKey,
   rememberRecommendationHistory,
@@ -358,7 +359,12 @@ export default function RecommendationPage() {
           recommendationCount: 2,
           responseDetail: "core",
           precomputedIntentContract: current.intentContract,
-          recentTitles: [...(current.request.recentTitles ?? []), current.recommendation.title].slice(0, 40),
+          recentTitles: [current.recommendation.title, ...(current.request.recentTitles ?? [])].slice(0, 8),
+          excludedTitles: [
+            current.recommendation.title,
+            ...loadExactRecommendationExclusions(),
+          ].slice(0, 200),
+          sessionId: getOrCreateSessionId(),
           runId: fillRunId,
         }),
       });
@@ -451,11 +457,14 @@ export default function RecommendationPage() {
     setShowMorePicks(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
     captureEvent("recommendation", {
+      runId,
       title: batch[0].title,
       year: batch[0].year,
       confidence: batch[0].confidence,
       parsedIntent: batch[0].parsedIntent,
       source: "reroll",
+      availabilityStatus: batch[0].whereToWatch.status,
+      displayState: data._trust?.displayState,
     });
     captureRecommendationRun({
       runId,
@@ -495,7 +504,12 @@ export default function RecommendationPage() {
         await replaceWithBatch({
           ...activeSession.request,
           seenTitles: seen,
-          recentTitles: [...loadRecommendationMemoryTitles(), ...batch.map((item) => item.title)].slice(0, 40),
+          recentTitles: [...batch.map((item) => item.title), ...loadCompactRecommendationMemoryTitles()].slice(0, 8),
+          excludedTitles: [
+            ...batch.map((item) => item.title),
+            ...loadExactRecommendationExclusions(),
+          ].slice(0, 200),
+          sessionId: getOrCreateSessionId(),
           feedbackContext: loadRecommendationFeedbackContext(),
         });
       }
@@ -514,6 +528,7 @@ export default function RecommendationPage() {
     const request = session.request;
     const payload = {
       runId: session.runId,
+      phase: "pre-watch",
       reason,
       title: session.recommendation.title,
       year: session.recommendation.year,
@@ -568,9 +583,14 @@ export default function RecommendationPage() {
         ...session.request,
         platformFilter: "any",
         recentTitles: [
-          ...loadRecommendationMemoryTitles(),
           ...(session.batch ?? [session.recommendation]).map((item) => item.title),
-        ].slice(0, 40),
+          ...loadCompactRecommendationMemoryTitles(),
+        ].slice(0, 8),
+        excludedTitles: [
+          ...(session.batch ?? [session.recommendation]).map((item) => item.title),
+          ...loadExactRecommendationExclusions(),
+        ].slice(0, 200),
+        sessionId: getOrCreateSessionId(),
         feedbackContext: loadRecommendationFeedbackContext(),
       });
     } catch {
@@ -838,7 +858,14 @@ export default function RecommendationPage() {
                   href={primaryAction.href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  onClick={() => captureEvent("watch-click", { title: pick.title, label: primaryAction.label, href: primaryAction.href, verified: primaryAction.verified })}
+                  onClick={() => captureEvent("watch-click", {
+                    runId: session?.runId,
+                    title: pick.title,
+                    year: pick.year,
+                    label: primaryAction.label,
+                    verified: primaryAction.verified,
+                    provider: pick.whereToWatch.primary,
+                  })}
                   className="inline-flex h-16 min-w-[280px] items-center justify-center gap-3 rounded-xl bg-gradient-to-b from-red-400 to-red-800 px-7 text-lg font-semibold text-white shadow-[0_18px_52px_rgba(127,29,29,0.44)] transition hover:brightness-110"
                 >
                   <Play size={20} fill="currentColor" /> {primaryAction.label}

@@ -1,5 +1,6 @@
 import { after, NextResponse } from "next/server";
 import type { RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
+import { appendProfileRecommendation } from "@/lib/anonymous-profile-store";
 
 type RecommendationRunBody = {
   sessionId?: string;
@@ -16,13 +17,21 @@ type RecommendationRunEvent = {
   sessionId: string;
   runId: string;
   source: string;
-  request: Partial<RecommendRequest>;
+  request: CompactRequest;
   recommendation: ReturnType<typeof compactRecommendation> | null;
   batch: ReturnType<typeof compactRecommendation>[];
   displayState?: RecommendationDisplayState;
   promptCollection: "full" | "structured-only";
   clientCreatedAt?: string;
   receivedAt: string;
+};
+
+type CompactRequest = Partial<RecommendRequest> & {
+  exclusionSnapshot?: {
+    count: number;
+    recentSample: string[];
+    fingerprint: string;
+  };
 };
 
 function truncate(value: string | undefined, max = 2000): string | undefined {
@@ -34,8 +43,23 @@ function shouldCollectPrompts(): boolean {
   return process.env.FUN_COLLECT_PROMPTS === "true";
 }
 
-function compactRequest(request: RecommendRequest | undefined, includePromptText: boolean): Partial<RecommendRequest> {
+function exclusionFingerprint(titles: string[]): string {
+  const canonical = [...new Set(titles
+    .map((title) => title.trim().normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, " "))
+    .filter(Boolean))]
+    .sort()
+    .join("|");
+  let hash = 2166136261;
+  for (let index = 0; index < canonical.length; index += 1) {
+    hash ^= canonical.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function compactRequest(request: RecommendRequest | undefined, includePromptText: boolean): CompactRequest {
   if (!request) return {};
+  const excludedTitles = request.excludedTitles?.slice(0, 200) ?? [];
   return {
     mode: request.mode,
     mood: request.mood,
@@ -54,7 +78,12 @@ function compactRequest(request: RecommendRequest | undefined, includePromptText
     contextHint: request.contextHint,
     craziness: request.craziness,
     seenTitles: request.seenTitles?.slice(0, 40),
-    recentTitles: request.recentTitles?.slice(0, 40),
+    recentTitles: request.recentTitles?.slice(0, 8),
+    exclusionSnapshot: {
+      count: excludedTitles.length,
+      recentSample: excludedTitles.slice(0, 20),
+      fingerprint: exclusionFingerprint(excludedTitles),
+    },
     feedbackContext: request.feedbackContext,
   };
 }
@@ -132,7 +161,19 @@ export async function POST(req: Request) {
 
     after(async () => {
       try {
-        await writeToKv(event);
+        await Promise.all([
+          writeToKv(event),
+          primary ? appendProfileRecommendation(event.sessionId, {
+            runId: event.runId,
+            source: event.source,
+            title: primary.title,
+            year: primary.year,
+            format: primary.format,
+            confidence: primary.confidence,
+            displayState: event.displayState,
+            createdAt: event.receivedAt,
+          }) : Promise.resolve(),
+        ]);
       } catch (error) {
         console.warn("[FUN recommendation run write failed]", error);
       }

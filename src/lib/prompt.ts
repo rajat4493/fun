@@ -478,10 +478,10 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
     hardConstraintLines.push(`❌ Hard content gates — NEVER recommend content with or containing: ${avoidanceTiers.hard.join(", ")}. Taste Risk, craziness level, mood signals, novelty, and cinematic quality do NOT override these.`);
   }
   if (input.seenTitles?.length) {
-    hardConstraintLines.push(`❌ Already seen — exclude entirely: ${input.seenTitles.slice(0, 40).join(", ")}`);
+    hardConstraintLines.push(`❌ Already seen — exclude entirely: ${input.seenTitles.slice(0, 12).join(", ")}`);
   }
   if (input.recentTitles?.length) {
-    hardConstraintLines.push(`❌ Recently recommended — do not repeat: ${input.recentTitles.slice(0, 40).join(", ")}`);
+    hardConstraintLines.push(`❌ Recently recommended — do not repeat: ${input.recentTitles.slice(0, 8).join(", ")}`);
   }
   for (const constraint of practicalConstraints) {
     hardConstraintLines.push(`❌ ${constraint}`);

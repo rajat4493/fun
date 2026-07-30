@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
+import { appendProfileFeedback } from "@/lib/anonymous-profile-store";
 
 type FeedbackEvent = {
   sessionId: string;
@@ -64,8 +65,23 @@ export async function POST(req: Request) {
       receivedAt: new Date().toISOString(),
     };
 
-    // Fire-and-forget — don't hold the response for storage
-    writeToKv(event).catch((err) => console.warn("[FUN feedback write failed]", err));
+    after(async () => {
+      try {
+        await Promise.all([
+          writeToKv(event),
+          appendProfileFeedback(event.sessionId, {
+            runId: event.runId,
+            reason: event.reason,
+            phase: event.phase,
+            title: event.title,
+            year: event.year,
+            createdAt: event.receivedAt,
+          }),
+        ]);
+      } catch (error) {
+        console.warn("[FUN feedback write failed]", error);
+      }
+    });
 
     return NextResponse.json({ ok: true });
   } catch {

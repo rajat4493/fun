@@ -15,6 +15,7 @@ import { ONBOARDING_KEY } from "@/components/OnboardingFlow";
 import {
   dismissedPostWatchPromptKey,
   feedbackStorageKey,
+  getOrCreateSessionId,
   hasPostWatchFeedback,
   loadRecommendationHistory,
   recentRecommendationTitlesKey,
@@ -23,6 +24,7 @@ import {
   recommendationHistoryKey,
   savePostWatchFeedback,
   seenTitlesKey,
+  sessionIdKey,
 } from "@/lib/recommendation-session";
 
 type MemoryState = {
@@ -42,6 +44,7 @@ const keys = [
   feedbackStorageKey,
   recommendationHistoryKey,
   dismissedPostWatchPromptKey,
+  sessionIdKey,
 ];
 
 function Logo() {
@@ -93,12 +96,49 @@ export default function MemoryPage() {
   }
 
   function clearAll() {
+    const sessionId = getOrCreateSessionId();
+    fetch("/api/profile-memory", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId }),
+    }).catch(() => {});
     keys.forEach((key) => localStorage.removeItem(key));
     setMemory(readMemory());
   }
 
   function rateHistoryPick(reason: "perfect" | "good-not-perfect" | "not-for-me" | "quit-halfway" | "could-not-find", item: RecommendationHistoryItem) {
     savePostWatchFeedback(reason, item);
+    const payload = {
+      sessionId: getOrCreateSessionId(),
+      runId: item.runId,
+      reason,
+      phase: "post-watch",
+      title: item.title,
+      year: item.year,
+      format: item.format,
+      confidence: item.confidence,
+      country: item.request.country,
+      mood: item.request.mood,
+      wants: item.request.wants,
+      avoids: item.request.avoids,
+      languagePreferences: item.request.languagePreferences,
+      craziness: item.request.craziness,
+      platformFilter: item.request.platformFilter,
+    };
+    fetch("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+    fetch("/api/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: payload.sessionId,
+        type: "feedback",
+        payload: { ...payload, sessionId: undefined },
+      }),
+    }).catch(() => {});
     setMemory(readMemory());
   }
 
@@ -131,7 +171,7 @@ export default function MemoryPage() {
         <section className="py-12">
           <h1 className="font-serif text-[clamp(3.8rem,7vw,7rem)] leading-[0.94]">What F.U.N remembers</h1>
           <p className="mt-5 max-w-3xl text-xl leading-8 text-white/62">
-            For this MVP, memory stays on this device unless feedback/event collection is configured for private product analytics. No accounts are required.
+            F.U.N remembers choices on this device and keeps an anonymous private-preview record so recommendations can improve. No account is required.
           </p>
         </section>
 
@@ -229,8 +269,8 @@ export default function MemoryPage() {
             <h2 className="flex items-center gap-3 text-2xl text-amber-100"><Lock size={23} /> Control</h2>
             <div className="mt-5 space-y-3 text-white/62">
               <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> No streaming passwords are needed.</p>
-              <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> Private preview analytics may store recommendation prompts when enabled, so do not enter sensitive personal information.</p>
-              <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> You can clear local memory anytime.</p>
+              <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> Private-preview analytics stores recommendation activity under an anonymous device ID. Prompt text is stored only when collection is explicitly enabled.</p>
+              <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> Clear all removes device memory and its anonymous profile memory.</p>
             </div>
           </article>
         </section>

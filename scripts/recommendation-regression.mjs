@@ -13,6 +13,7 @@ const cry = /\b(cry|tearjerker|tear jerker|sob|weep|devastating|heartbreaking|ca
 const horror = /\b(horror|gore|gory|bloody|slasher|demonic|haunted|ghost|nightmare|torture|visceral)\b/i;
 const drama = /\b(drama|dramatic|character study|serious|emotional|prestige|social realist|melodrama)\b/i;
 const comfort = /\b(comfort|warm|cozy|feel.good|uplifting|sweet|gentle|heartwarming|charming|hopeful|funny|light|kind|soothing|reassur|laughter|easy)\b/i;
+const restorative = /\b(comfort|warm|cozy|feel.good|uplifting|gentle|heartwarming|hopeful|kind|soothing|reassur|healing|easy|light-hearted|lighthearted)\b/i;
 const emotionalAmplification = /\b(grief|grieving|bereavement|mourning|heartbreak|heartbreaking|breakup|romantic longing|devastating|bleak|harrowing|melancholy|tragic loss)\b/i;
 
 function textOf(rec) {
@@ -195,7 +196,7 @@ const tests = [
     },
     check: (rec) => {
       const labels = [...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].join(" ");
-      return comfort.test(textOf(rec)) && !romance.test(labels) && !emotionallyAmplifying(rec);
+      return comfort.test(textOf(rec)) && restorative.test(labels || textOf(rec)) && !romance.test(labels) && !emotionallyAmplifying(rec);
     },
     why: "Breakup recovery must not be answered with another romance or heartbreak story.",
   },

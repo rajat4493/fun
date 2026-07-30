@@ -22,6 +22,61 @@ export function uniqueValues(values: Array<string | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }
 
+function boundedStrings(value: unknown, maxItems: number, maxLength = 160): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const clean = item.trim().slice(0, maxLength);
+    const key = clean.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, " ");
+    if (!clean || !key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(clean);
+    if (result.length >= maxItems) break;
+  }
+  return result.length > 0 ? result : undefined;
+}
+
+function boundedText(value: unknown, maxLength: number): string | undefined {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) || undefined : undefined;
+}
+
+// Normalize untrusted public API input once so every prompt, trust, fallback, and ranking path
+// receives the same bounded data. This is defensive input handling, not recommendation logic.
+export function normalizeRecommendRequest(input: RecommendRequest): RecommendRequest {
+  const recommendationCount = Number.isFinite(input.recommendationCount)
+    ? Math.min(3, Math.max(1, Math.trunc(input.recommendationCount!)))
+    : undefined;
+  const craziness = Number.isFinite(input.craziness)
+    ? Math.min(3, Math.max(0, Math.trunc(input.craziness!))) as RecommendRequest["craziness"]
+    : undefined;
+
+  return {
+    ...input,
+    mode: input.mode === "self" ? "self" : "choose",
+    mood: boundedStrings(input.mood, 12, 80),
+    wants: boundedStrings(input.wants, 12, 80),
+    avoids: boundedStrings(input.avoids, 12, 80),
+    time: boundedText(input.time, 80),
+    energy: boundedText(input.energy, 80),
+    viewingContext: boundedText(input.viewingContext, 120),
+    country: boundedText(input.country, 80),
+    languagePreferences: boundedStrings(input.languagePreferences, 8, 80),
+    platforms: boundedStrings(input.platforms, 20, 100),
+    selfText: boundedText(input.selfText, 4000),
+    reference: boundedText(input.reference, 500),
+    seenTitles: boundedStrings(input.seenTitles, 40, 200),
+    recentTitles: boundedStrings(input.recentTitles, 8, 200),
+    excludedTitles: boundedStrings(input.excludedTitles, 200, 200),
+    contextHint: boundedText(input.contextHint, 300),
+    sessionId: boundedText(input.sessionId, 96),
+    runId: boundedText(input.runId, 120),
+    recommendationCount,
+    craziness,
+  };
+}
+
 // Takes a factory (not a Promise) so the AbortSignal can be threaded into the underlying fetch —
 // Promise.race alone stops the CALLER from waiting, but never cancels the in-flight request, which
 // leaks a connection-pool slot that later requests queue behind. That leak was the likely root

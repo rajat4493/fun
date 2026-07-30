@@ -44,7 +44,8 @@ import {
   hasPostWatchFeedback,
   loadRecommendationFeedbackContext,
   loadRecommendationHistory,
-  loadRecommendationMemoryTitles,
+  loadCompactRecommendationMemoryTitles,
+  loadExactRecommendationExclusions,
   RecommendationHistoryItem,
   RecommendationSession,
   loadSeenTitles,
@@ -445,15 +446,15 @@ export default function Home() {
     const recentTitles = (() => {
       try {
         const raw = localStorage.getItem(recommendationStorageKey);
-        if (!raw) return loadRecommendationMemoryTitles();
+        if (!raw) return loadCompactRecommendationMemoryTitles();
         const session = JSON.parse(raw) as { recommendation?: Recommendation; batch?: Recommendation[] };
         return [
-          ...loadRecommendationMemoryTitles(),
           session.recommendation?.title,
           ...(session.batch ?? []).map((item) => item.title),
+          ...loadCompactRecommendationMemoryTitles(),
         ].filter((title): title is string => Boolean(title)).slice(0, 40);
       } catch {
-        return loadRecommendationMemoryTitles();
+        return loadCompactRecommendationMemoryTitles();
       }
     })();
 
@@ -475,7 +476,9 @@ export default function Home() {
       selfText: inputMode === "describe" ? selfText.trim() || undefined : undefined,
       reference: inputMode === "describe" ? reference.trim() || undefined : undefined,
       seenTitles: loadSeenTitles(),
-      recentTitles,
+      recentTitles: recentTitles.slice(0, 8),
+      excludedTitles: loadExactRecommendationExclusions(),
+      sessionId: getOrCreateSessionId(),
       platformFilter,
       discoveryMode: inputMode === "describe" ? "standard" : indieMode ? "indie" : "standard",
       contextHint: inputMode === "describe" ? undefined : pickContextHint(),
@@ -539,6 +542,7 @@ export default function Home() {
         )),
       );
       captureEvent("recommendation", {
+        runId,
         title: batch[0].title,
         year: batch[0].year,
         confidence: batch[0].confidence,
@@ -546,6 +550,8 @@ export default function Home() {
         batch: batch.map((item) => ({ title: item.title, year: item.year, confidence: item.confidence })),
         availabilityStatus: batch[0].whereToWatch.status,
         providerCount: batch[0].whereToWatch.providers?.length ?? 0,
+        displayState: data._trust?.displayState,
+        source: "initial",
       });
       captureRecommendationRun({
         runId,

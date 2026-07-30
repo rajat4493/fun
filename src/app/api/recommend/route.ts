@@ -14,11 +14,54 @@ import { buildCompactRetryPrompt, buildRecommendationPrompt } from "@/lib/prompt
 import { activeHardAvoidanceKeys, applyTrustFilter, relatedTitleUnsafe, safeFallback, TrustRejection } from "@/lib/recommendation-trust";
 import { buildIntentContractPrompt, localIntentContract, normalizeIntentContract } from "@/lib/intent-contract";
 import { matchesLanguageRequest, wantsSpecificLanguage } from "@/lib/language-lane";
+import { normalizeRecommendRequest } from "@/lib/recommendation-utils";
 import { IntentContract, RawRecommendation, RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
 
 // Disabled by default while production credentials and fallback behavior are reviewed.
 // Re-enable deliberately after validation with FUN_ENABLE_ANTHROPIC=1.
 const anthropicEnabled = process.env.FUN_ENABLE_ANTHROPIC === "1";
+const MAX_RECOMMEND_REQUEST_BYTES = 131_072;
+
+class RequestTooLargeError extends Error {}
+
+async function readJsonBodyWithLimit(req: Request): Promise<unknown> {
+  const declaredLength = Number(req.headers.get("content-length") ?? 0);
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_RECOMMEND_REQUEST_BYTES) {
+    throw new RequestTooLargeError();
+  }
+
+  if (!req.body) return {};
+
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_RECOMMEND_REQUEST_BYTES) {
+        await reader.cancel();
+        throw new RequestTooLargeError();
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return JSON.parse(new TextDecoder().decode(body));
+}
 
 // TMDB genre IDs that map to user avoidances.
 // Only genres with clear, unambiguous mapping are included — Action (28) is too broad.
@@ -99,10 +142,22 @@ function shouldHideRelatedTitle(input: RecommendRequest, title: string, intentCo
 }
 
 function sanitizeRelatedForRequest(input: RecommendRequest, recommendation: Recommendation, intentContract?: IntentContract): Recommendation {
-  const hiddenTitles = (recommendation.hiddenLayer.titles ?? []).filter((item) => !shouldHideRelatedTitle(input, item.title, intentContract));
+  const seen = new Set<string>([
+    recommendation.title,
+    ...(input.excludedTitles ?? []).slice(0, 200),
+    ...(input.seenTitles ?? []).slice(0, 40),
+    ...(input.recentTitles ?? []).slice(0, 8),
+  ].map(normalizeTitle));
+  const keepRelatedTitle = (title: string) => {
+    const key = normalizeTitle(title);
+    if (!key || seen.has(key) || shouldHideRelatedTitle(input, title, intentContract)) return false;
+    seen.add(key);
+    return true;
+  };
+  const hiddenTitles = (recommendation.hiddenLayer.titles ?? []).filter((item) => keepRelatedTitle(item.title));
   const alternatives = recommendation.alternatives
     .map((item, index) => ({ ...parseRelatedTitle(item), posterUrl: recommendation.alternativePosterUrls?.[index] }))
-    .filter((item) => !shouldHideRelatedTitle(input, item.title, intentContract));
+    .filter((item) => keepRelatedTitle(item.title));
 
   return {
     ...recommendation,
@@ -121,7 +176,11 @@ function hash(value: string): number {
 
 function diversifyFallbackBatch(input: RecommendRequest, batch: RawRecommendation[]): RawRecommendation[] {
   if (batch.length <= 1) return batch;
-  const excluded = new Set([...(input.recentTitles ?? []), ...(input.seenTitles ?? [])].map(normalizeTitle));
+  const excluded = new Set([
+    ...(input.excludedTitles ?? []),
+    ...(input.recentTitles ?? []),
+    ...(input.seenTitles ?? []),
+  ].map(normalizeTitle));
   const available = batch.filter((item) => !excluded.has(normalizeTitle(item.title)));
   const source = available.length > 0 ? available : batch;
   const requestSeed = [
@@ -431,7 +490,11 @@ function fallbackIntentScore(rec: RawRecommendation, intentContract?: IntentCont
 
   if (input) {
     const key = normalizeTitle(rec.title);
-    const seen = new Set([...(input.recentTitles ?? []), ...(input.seenTitles ?? [])].map(normalizeTitle));
+    const seen = new Set([
+      ...(input.excludedTitles ?? []),
+      ...(input.recentTitles ?? []),
+      ...(input.seenTitles ?? []),
+    ].map(normalizeTitle));
     if (seen.has(key)) score -= 50;
   }
 
@@ -645,7 +708,19 @@ function unavailableSubscriptionFallback(
 export async function POST(req: Request) {
   try {
     const requestStarted = Date.now();
-    const input = (await req.json()) as RecommendRequest;
+    let rawInput: unknown;
+    try {
+      rawInput = await readJsonBodyWithLimit(req);
+    } catch (error) {
+      if (error instanceof RequestTooLargeError) {
+        return NextResponse.json({ error: "Request is too large." }, { status: 413 });
+      }
+      return NextResponse.json({ error: "Invalid recommendation request." }, { status: 400 });
+    }
+    if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput)) {
+      return NextResponse.json({ error: "Invalid recommendation request." }, { status: 400 });
+    }
+    const input = normalizeRecommendRequest(rawInput as RecommendRequest);
     const country = input.country || "Poland";
     const platforms = input.platforms ?? [];
     const avoids = activeHardAvoidanceKeys(input);

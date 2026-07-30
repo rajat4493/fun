@@ -18,7 +18,8 @@ const cry = /\b(cry|tearjerker|tear jerker|sob|weep|devastating|heartbreaking|ca
 const drama = /\b(drama|dramatic|character study|serious|emotional|prestige|social realist|melodrama)\b/i;
 const distressing = /\b(horror|gore|suicide|self.harm|massacre|brutal|terror|nightmare|graphic|disturbing|traumatic|harrowing|medical emergency|panic|dread)\b/i;
 const griefTrigger = /\b(child (death|dying)|terminal|suicide|funeral|cancer|dying (dog|pet|mother|father|child)|slowly dying|miscarriage)\b/i;
-const comfort = /\b(comfort|warm|cozy|feel.good|uplifting|sweet|gentle|heartwarming|charming|delightful|hopeful|funny|light|kind|soothing|humane|tender)\b/i;
+const comfort = /\b(comfort|warmth|warm|cozy|feel.good|uplifting|sweet|gentle|heartwarming|charming|delightful|hopeful|funny|light|kind|soothing|humane|tender)\b/i;
+const restorative = /\b(comfort|warmth|warm|cozy|feel.good|uplifting|gentle|heartwarming|hopeful|kind|soothing|reassur\w*|healing|easy|light-hearted|lighthearted)\b/i;
 const emotionalAmplification = /\b(grief|grieving|bereavement|mourning|heartbreak|heartbreaking|breakup|romantic longing|devastating|bleak|harrowing|melancholy|tragic loss)\b/i;
 const gorePositive = /\b(gore|gory|bloody|splatter|body horror|visceral|graphic violence|extreme horror)\b/i;
 const sexuallyExplicit = /\b(porn|pornographic|hardcore|unsimulated sex|explicit sex)\b/i;
@@ -171,7 +172,11 @@ const tests = [
     check: (rec) => {
       const text = textOf(rec);
       const labels = [...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].join(" ");
-      return comfort.test(text) && !romance.test(labels) && !emotionallyAmplifying(rec);
+      // Structured labels are what the backend's own breakupReliefViolation check enforces —
+      // accept restorative evidence from either labels or prose so a real pick isn't flagged
+      // just because its one-liner didn't happen to repeat the same adjective as its labels.
+      const restorativeSignal = comfort.test(labels) || comfort.test(text) || restorative.test(labels) || restorative.test(text);
+      return restorativeSignal && !romance.test(labels) && !emotionallyAmplifying(rec);
     },
     why: "Breakup recovery must offer relief without redirecting the viewer into romance or heartbreak.",
   },
@@ -319,6 +324,10 @@ const tests = [
       recentTitles: [
         "Chef", "Paddington 2", "Hunt for the Wilderpeople", "The Intern",
         "Little Miss Sunshine", "The Good Place", "Ted Lasso", "Derry Girls",
+      ],
+      excludedTitles: [
+        "Chef", "Paddington 2", "Hunt for the Wilderpeople", "The Intern",
+        "Little Miss Sunshine", "The Good Place", "Ted Lasso", "Derry Girls",
         "Always Be My Maybe", "About Time", "The Fundamentals of Caring",
         "The Forty-Year-Old Version", "Brigsby Bear", "Hundreds of Beavers",
         "The Peanut Butter Falcon", "The Intouchables", "Paterson", "Columbus",
@@ -326,15 +335,19 @@ const tests = [
       ],
     },
     check: (rec) => {
-      const excluded = new Set(rec._testInput.recentTitles.map(normalizeTitle));
+      const excluded = new Set(rec._testInput.excludedTitles.map(normalizeTitle));
       const repeatedFinal = excluded.has(normalizeTitle(rec.title));
       const repeatedDuringAttempt = (rec._trust?.rejections ?? []).some((item) =>
         excluded.has(normalizeTitle(item.title)) &&
-        (item.reasons ?? []).some((reason) => /memory: recently recommended/i.test(reason)),
+        (item.reasons ?? []).some((reason) => /memory: (recently|previously) recommended/i.test(reason)),
       );
-      return !repeatedFinal && !repeatedDuringAttempt;
+      const heroKey = normalizeTitle(rec.title);
+      const relatedKeys = relatedTitles(rec).map(normalizeTitle).filter(Boolean);
+      const relatedRepeat = relatedKeys.some((key) => key === heroKey || excluded.has(key));
+      const duplicateRelated = new Set(relatedKeys).size !== relatedKeys.length;
+      return !repeatedFinal && !repeatedDuringAttempt && !relatedRepeat && !duplicateRelated;
     },
-    why: "A long session must not repeat an older recommendation or waste a retry by proposing one before trust filtering.",
+    why: "A long session must not repeat an older recommendation in the hero or related rails, duplicate its own hero, or waste a retry before trust filtering.",
   },
 ];
 

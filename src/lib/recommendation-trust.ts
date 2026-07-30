@@ -127,6 +127,7 @@ const weirdTerms = /\b(weird|strange|unusual|offbeat|quirky|absurd|surreal|exper
 const funnyTerms = /\b(funny|comedy|comic|humor|humour|humorous|witty|satire|satirical|slapstick|banter|absurd|laugh|playful|farce)\b/i;
 const thrillerTerms = /\b(thriller|suspense|mystery|crime|noir|detective|investigation|paranoid|tense|whodunit|conspiracy|killer|murder|cat-and-mouse|cat and mouse)\b/i;
 const romanceTerms = /\b(romance|romantic|love story|love|chemistry|relationship|date|courtship|tender|flirt|heartfelt)\b/i;
+const explicitRomanceTerms = /\b(romance|romantic|love story|courtship|dating|love triangle|romantic longing|heartbreak|breakup)\b/i;
 const fearTerms = /\b(scary|scare|scared|terrify|terrified|terrifying|frighten|frightened|frightening|horror|dread|nightmare|haunted|ghost|possession|demonic|supernatural terror|jump scare|jumpscare|creepy|panic|fear)\b/i;
 const cryTerms = /\b(cry|crying|tearjerker|tear jerker|sob|weep|devastating|heartbreaking|heartbreak|cathartic|moving|emotionally wreck|grief|loss|melancholy|poignant)\b/i;
 const dramaTerms = /\b(drama|dramatic|character study|serious|emotional|prestige|social realist|melodrama)\b/i;
@@ -302,6 +303,7 @@ function runtimeViolation(input: RecommendRequest, rec: RawRecommendation | Reco
 
 function avoidanceViolations(input: RecommendRequest, rec: RawRecommendation | Recommendation): string[] {
   const allowIntensity = explicitlyWantsIntensity(input);
+  const intent = extractIntent(input);
   const avoids = activeHardAvoids(input);
   const text = contentText(rec);
   const titleKey = normalize(rec.title);
@@ -311,6 +313,7 @@ function avoidanceViolations(input: RecommendRequest, rec: RawRecommendation | R
   const terms = structuredTerms(rec);
   const hasStructured = hasStructuredSignals(rec);
   const hasAny = (labels: string[]) => labels.some((label) => terms.has(label));
+  const explicitlyAvoidsRomance = intent.softAvoids.includes("romance");
 
   if (hasStructured) {
     if (!allowIntensity && avoids.has("gore") && (isKnownHorror || hasAny(["gore", "gory", "body-horror", "splatter", "graphic-violence"]))) reasons.push("avoidance: gore");
@@ -318,6 +321,15 @@ function avoidanceViolations(input: RecommendRequest, rec: RawRecommendation | R
     if (!allowIntensity && avoids.has("violence") && (isKnownHorror || hasAny(["violence", "violent", "graphic-violence", "brutal", "war", "combat"]))) reasons.push("avoidance: violence");
     if (!allowIntensity && avoids.has("graphic violence") && (isKnownHorror || hasAny(["graphic-violence", "gore", "body-horror", "brutal"]))) reasons.push("avoidance: graphic violence");
     if (avoids.has("sex") && hasAny(["sex", "sexual", "erotic", "nudity", "raunchy"])) reasons.push("avoidance: explicit sexual content");
+    // Structured labels are the LLM's own self-tagging and can omit "romance" for a title that is
+    // clearly romantic in its actual synopsis (rom-coms often get tagged just "comedy"). Falling
+    // back to the prose text here — same as the unstructured branch below — closes that gap
+    // instead of trusting self-labeling alone, without adding any extra provider call.
+    if (explicitlyAvoidsRomance &&
+      (hasAny(["romance", "romantic", "love-story", "courtship", "dating", "love-triangle", "romantic-longing", "heartbreak", "breakup"]) ||
+        explicitRomanceTerms.test(text))) {
+      reasons.push("avoidance: romance/heartbreak");
+    }
     return [...new Set(reasons)];
   }
 
@@ -326,6 +338,7 @@ function avoidanceViolations(input: RecommendRequest, rec: RawRecommendation | R
   if (!allowIntensity && avoids.has("violence") && (isKnownHorror || violenceTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: violence");
   if (!allowIntensity && avoids.has("graphic violence") && (isKnownHorror || graphicViolenceTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: graphic violence");
   if (avoids.has("sex") && sexualTerms.test(text)) reasons.push("avoidance: explicit sexual content");
+  if (explicitlyAvoidsRomance && explicitRomanceTerms.test(text)) reasons.push("avoidance: romance/heartbreak");
 
   return [...new Set(reasons)];
 }
@@ -334,6 +347,8 @@ function memoryViolation(input: RecommendRequest, rec: RawRecommendation | Recom
   const title = normalize(rec.title);
   const seen = (input.seenTitles ?? []).some((item) => normalize(item) === title);
   if (seen) return "memory: already seen";
+  const excluded = (input.excludedTitles ?? []).slice(0, 200).some((item) => normalize(item) === title);
+  if (excluded) return "memory: previously recommended";
   const recent = (input.recentTitles ?? []).some((item) => normalize(item) === title);
   if (recent) return "memory: recently recommended";
   return null;
@@ -543,6 +558,13 @@ function humaneToneViolation(input: RecommendRequest, rec: RawRecommendation | R
 // "related" rail even though the main pick correctly avoided it.
 export function relatedTitleUnsafe(input: RecommendRequest, title: string, contract?: IntentContract): boolean {
   const key = normalize(title);
+  const excluded = [
+    ...(input.excludedTitles ?? []).slice(0, 200),
+    ...(input.seenTitles ?? []).slice(0, 40),
+    ...(input.recentTitles ?? []).slice(0, 8),
+  ].some((item) => normalize(item) === key);
+  if (excluded) return true;
+
   const hardAvoids = activeHardAvoids(input);
   const avoidingDarkness = ["horror", "gore", "violence", "graphic violence"].some((avoid) => hardAvoids.has(avoid));
   if (avoidingDarkness && knownHorrorOrGoreTitles.has(key)) return true;
@@ -570,12 +592,57 @@ function hiddenGemViolation(input: RecommendRequest, rec: RawRecommendation | Re
     : null;
 }
 
+function breakupReliefViolation(
+  input: RecommendRequest,
+  rec: RawRecommendation | Recommendation,
+  intent = extractIntent(input),
+): string | null {
+  const request = intent.requestText.toLowerCase();
+  const isBreakupRecovery =
+    /\b(dumped|breakup|broke up|broken up|heartbroken|after (a|the|my) breakup)\b/.test(request) &&
+    /\b(comfort|comforting|relief|feel normal|feel better|take my mind off|distract|gentle|light|warm|move on|recover|recovery)\b/.test(request) &&
+    !/\b(make me cry|want to cry|tearjerker|catharsis|cathartic)\b/.test(request);
+
+  if (!isBreakupRecovery) return null;
+
+  const restorativeTerms = [
+    "comfort",
+    "warm",
+    "warmth",
+    "gentle",
+    "cozy",
+    "soothing",
+    "uplifting",
+    "feel-good",
+    "hopeful",
+    "reassurance",
+    "reassuring",
+    "healing",
+    "kind",
+    "easy",
+    "light",
+  ];
+
+  if (hasStructuredSignals(rec)) {
+    const terms = structuredTerms(rec);
+    return restorativeTerms.some((term) => terms.has(term))
+      ? null
+      : "intent: breakup recovery needs emotionally restorative content";
+  }
+
+  const restorativeText = /\b(comfort|warm|gentle|cozy|soothing|uplifting|feel.good|hopeful|reassur|healing|kind|easy|light-hearted|lighthearted)\b/i;
+  return restorativeText.test(contentText(rec))
+    ? null
+    : "intent: breakup recovery needs emotionally restorative content";
+}
+
 function positiveFitViolations(input: RecommendRequest, rec: RawRecommendation | Recommendation, contract?: IntentContract): string[] {
   const intent = extractIntent(input);
   return [
     ...parsedIntentContradictions(input, rec, contract),
     explicitFormatViolation(input, rec, intent, contract),
     hiddenGemViolation(input, rec, intent),
+    breakupReliefViolation(input, rec, intent),
     ...explicitGenreViolations(input, rec, intent, contract),
   ].filter((reason): reason is string => Boolean(reason));
 }
@@ -671,7 +738,11 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
   const wantsGore = !sensitiveState && intent.primaryIntents.includes("gore") && !intent.hardAvoids.some((avoid) => ["gore", "horror", "violence", "graphic violence"].includes(avoid));
   const isExcluded = (title: string) => {
     const key = normalize(title);
-    return [...(input.recentTitles ?? []), ...(input.seenTitles ?? [])].some((item) => normalize(item) === key);
+    return [
+      ...(input.excludedTitles ?? []),
+      ...(input.recentTitles ?? []),
+      ...(input.seenTitles ?? []),
+    ].some((item) => normalize(item) === key);
   };
   const format = "Film" as const;
   const base = {

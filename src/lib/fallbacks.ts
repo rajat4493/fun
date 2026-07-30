@@ -17,16 +17,20 @@ function recommendationText(rec: RawRecommendation): string {
   ].filter(Boolean).join(" ");
 }
 
+function excludedTitles(input: RecommendRequest): string[] {
+  return [
+    ...(input.excludedTitles ?? []),
+    ...(input.recentTitles ?? []),
+    ...(input.seenTitles ?? []),
+  ];
+}
+
 function isKnownFalsePositiveForRequest(input: RecommendRequest, rec: RawRecommendation): boolean {
   const text = requestText(input);
   const title = normalizeForMatch(rec.title);
   const recText = recommendationText(rec);
 
-  if ((input.recentTitles ?? []).some((recentTitle) => normalizeForMatch(recentTitle) === title)) {
-    return true;
-  }
-
-  if ((input.seenTitles ?? []).some((seenTitle) => normalizeForMatch(seenTitle) === title)) {
+  if (excludedTitles(input).some((excludedTitle) => normalizeForMatch(excludedTitle) === title)) {
     return true;
   }
 
@@ -96,7 +100,7 @@ export function filterFalsePositiveRecommendations(input: RecommendRequest, batc
   const text = requestText(input);
   const wantsGore = /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(text) &&
     !hasNegatedConcept(text, /\b(gore|gory|blood|bloody|violence|violent)\b/i);
-  const hasRepeatExclusions = (input.recentTitles?.length ?? 0) > 0 || (input.seenTitles?.length ?? 0) > 0;
+  const hasRepeatExclusions = excludedTitles(input).length > 0;
   if (hasRepeatExclusions) return filtered;
   if (wantsGore) return filtered;
   return filtered.length > 0 ? filtered : batch;
