@@ -343,6 +343,11 @@ export default function RecommendationPage() {
   // subscriptions all request just 1 pick too). Fetch picks 2–3 in the background so they're ready
   // by the time the user rerolls again, without ever blocking on a full 3-pick generation.
   async function runBackgroundFill(current: RecommendationSession) {
+    // Distinct from current.runId — this is a genuinely separate LLM call producing "Similar
+    // picks" tray entries, never the hero recommendation. Without its own tagged runId this
+    // call's results were previously invisible in /api/recommendation-runs entirely, making it
+    // impossible to tell a fill-call title apart from the hero pick after the fact.
+    const fillRunId = `${current.runId}-fill`;
     try {
       const response = await fetch("/api/recommend", {
         method: "POST",
@@ -354,6 +359,7 @@ export default function RecommendationPage() {
           responseDetail: "core",
           precomputedIntentContract: current.intentContract,
           recentTitles: [...(current.request.recentTitles ?? []), current.recommendation.title].slice(0, 40),
+          runId: fillRunId,
         }),
       });
       if (!response.ok) throw new Error("fill failed");
@@ -370,6 +376,15 @@ export default function RecommendationPage() {
       const next: RecommendationSession = { ...latest, batch: mergedBatch, batchComplete: true };
       localStorage.setItem(recommendationStorageKey, JSON.stringify(next));
       setSession(next);
+      if (fillPicks[0]) {
+        captureRecommendationRun({
+          runId: fillRunId,
+          source: "background-fill",
+          request: current.request,
+          recommendation: fillPicks[0],
+          batch: fillPicks,
+        });
+      }
     } catch {
       // Fill failed — mark complete anyway so handleSeenIt doesn't wait forever. It will fall
       // through to the existing full replaceWithBatch regeneration once the batch is exhausted,
@@ -392,6 +407,9 @@ export default function RecommendationPage() {
   }, [session?.runId, session?.batchComplete]);
 
   async function replaceWithBatch(request: RecommendationSession["request"]) {
+    // Generated before the request (not after the response) so the server's own log line for
+    // this call and the client's later /api/recommendation-runs report share one ID.
+    const runId = createRecommendationRunId();
     // Two-phase fetch applies here too, not just the very first load: fetch pick 1 alone so it
     // renders fast, then let the same background-fill effect (below) top the batch up to 3 while
     // the user is already looking at something. Explicitly set to 1 (not just spread from the
@@ -401,6 +419,7 @@ export default function RecommendationPage() {
       recommendationCount: 1,
       responseDetail: "core",
       precomputedIntentContract: undefined,
+      runId,
     };
     const response = await fetch("/api/recommend", {
       method: "POST",
@@ -414,7 +433,6 @@ export default function RecommendationPage() {
       _trust?: { displayState?: RecommendationDisplayState; batchComplete?: boolean; intentContract?: IntentContract };
     };
     const batch = data._batch ?? [data];
-    const runId = createRecommendationRunId();
     rememberRecommendationTitles(batch.map((item) => item.title));
     rememberRecommendationHistory(batch, firstPickRequest, runId);
     const next = createRecommendationSession(

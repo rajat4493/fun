@@ -33,6 +33,15 @@ type AnthropicResponse = {
 };
 
 type OpenAIResponse = {
+  id?: string;
+  status?: "completed" | "failed" | "incomplete" | "in_progress" | "queued";
+  error?: {
+    code?: string;
+    message?: string;
+  } | null;
+  incomplete_details?: {
+    reason?: string;
+  } | null;
   output_text?: string;
   output?: Array<{
     content?: Array<{
@@ -40,7 +49,48 @@ type OpenAIResponse = {
       text?: string;
     }>;
   }>;
+  usage?: {
+    input_tokens?: number;
+    input_tokens_details?: {
+      cached_tokens?: number;
+    };
+    output_tokens?: number;
+    total_tokens?: number;
+  };
 };
+
+function logOpenAICacheUsage(label: string, data: OpenAIResponse): void {
+  if (process.env.FUN_DEBUG_TRACES !== "1" || !data.usage) return;
+  console.log(
+    `[FUN OpenAI usage] ${label} input=${data.usage.input_tokens ?? 0} ` +
+    `cached=${data.usage.input_tokens_details?.cached_tokens ?? 0} ` +
+    `output=${data.usage.output_tokens ?? 0} total=${data.usage.total_tokens ?? 0}`,
+  );
+}
+
+function openAIResponseError(data: OpenAIResponse, requestId?: string | null): Error | null {
+  if (!data.status || data.status === "completed") return null;
+  const detail = data.error?.message ?? data.incomplete_details?.reason ?? "No completion reason supplied";
+  const identifiers = [
+    data.id ? `response=${data.id}` : "",
+    requestId ? `request=${requestId}` : "",
+  ].filter(Boolean).join(", ");
+  return new Error(`OpenAI response ${data.status}: ${detail}${identifiers ? ` (${identifiers})` : ""}`);
+}
+
+async function openAIHttpError(response: Response, model: string): Promise<Error> {
+  const requestId = response.headers.get("x-request-id");
+  let detail = "";
+  try {
+    const body = await response.json() as { error?: { message?: string; code?: string } };
+    detail = body.error?.message ?? body.error?.code ?? "";
+  } catch {
+    // Status and request id still identify the failure when the body is not JSON.
+  }
+  return new Error(
+    `OpenAI ${model} failed with ${response.status}${detail ? `: ${detail}` : ""}${requestId ? ` (request=${requestId})` : ""}`,
+  );
+}
 
 // Standard OpenAI-compatible chat completions response.
 // Supported by Groq, Mistral, Together AI, Ollama, LM Studio, Fireworks, Perplexity,
@@ -372,6 +422,9 @@ export async function recommendWithOpenAI(
           body: JSON.stringify({
             model,
             input: prompt,
+            prompt_cache_key: includeDiscovery
+              ? "fun-recommend-full-v1"
+              : "fun-recommend-core-v1",
             temperature,
             max_output_tokens: outputTokenBudget(count, includeDiscovery),
             text: {
@@ -389,9 +442,18 @@ export async function recommendWithOpenAI(
         `OpenAI ${model}`,
       );
 
-      if (!response.ok) throw new Error(`OpenAI ${model} failed with ${response.status}`);
+      if (!response.ok) throw await openAIHttpError(response, model);
       const data = (await response.json()) as OpenAIResponse;
-      return parseRecommendationJson(openAIText(data));
+      logOpenAICacheUsage(`recommend:${model}`, data);
+      const responseError = openAIResponseError(data, response.headers.get("x-request-id"));
+      if (responseError) throw responseError;
+      const text = openAIText(data);
+      if (!text) {
+        throw new Error(
+          `OpenAI ${model} completed without output text${data.id ? ` (response=${data.id})` : ""}`,
+        );
+      }
+      return parseRecommendationJson(text);
     } catch (error) {
       lastError = error;
       console.warn(`OpenAI ${model} failed:`, error instanceof Error ? error.message : String(error));
@@ -421,6 +483,7 @@ export async function interpretIntentWithOpenAI(prompt: string): Promise<Record<
           body: JSON.stringify({
             model,
             input: prompt,
+            prompt_cache_key: "fun-intent-v1",
             temperature: 0.1,
             max_output_tokens: INTENT_MAX_OUTPUT_TOKENS,
           }),
@@ -430,9 +493,18 @@ export async function interpretIntentWithOpenAI(prompt: string): Promise<Record<
         `OpenAI intent ${model}`,
       );
 
-      if (!response.ok) throw new Error(`OpenAI intent ${model} failed with ${response.status}`);
+      if (!response.ok) throw await openAIHttpError(response, `intent ${model}`);
       const data = (await response.json()) as OpenAIResponse;
-      return parseJsonObject(openAIText(data));
+      logOpenAICacheUsage(`intent:${model}`, data);
+      const responseError = openAIResponseError(data, response.headers.get("x-request-id"));
+      if (responseError) throw responseError;
+      const text = openAIText(data);
+      if (!text) {
+        throw new Error(
+          `OpenAI intent ${model} completed without output text${data.id ? ` (response=${data.id})` : ""}`,
+        );
+      }
+      return parseJsonObject(text);
     } catch (error) {
       lastError = error;
       console.warn(`OpenAI intent ${model} failed:`, error instanceof Error ? error.message : String(error));

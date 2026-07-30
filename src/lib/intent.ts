@@ -115,7 +115,7 @@ export function extractIntent(input: RecommendRequest): RecommendationIntent {
     primaryIntents.add("romance");
   }
   if (/\b(weird|strange|offbeat|surreal|absurd|bizarre|unusual)\b/i.test(text)) primaryIntents.add("weird");
-  if (/\b(calm|calming|soothe|soothing|relax|relaxing|comfort|comforting|cozy|cosy|warm and easy|easy and warm|asks nothing|nothing heavy|not more (sadness|loss|grief)|low.effort|no effort|gentle|holds? me gently|feel.good|feel good|feel better|take my mind off|hug in a movie|wrap(ped)? up|unwind)\b/i.test(text)) primaryIntents.add("comfort");
+  if (/\b(calm|calming|soothe|soothing|relax|relaxing|comfort|comforting|cozy|cosy|warm and easy|easy and warm|feel easy|feel at ease|asks nothing|nothing heavy|not more (sadness|loss|grief)|low.effort|no effort|gentle|holds? me gently|feel.good|feel good|feel better|take my mind off|hug in a movie|wrap(ped)? up|unwind)\b/i.test(text)) primaryIntents.add("comfort");
   if (/\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(text) &&
     !hasNegatedConcept(text, /\b(gore|gory|blood|bloody|violence|violent)\b/i)) {
     primaryIntents.add("gore");

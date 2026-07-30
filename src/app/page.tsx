@@ -457,6 +457,9 @@ export default function Home() {
       }
     })();
 
+    // Generated before the request (not after the response) so the server's own log line for
+    // this call and the client's later /api/recommendation-runs report share one ID.
+    const runId = createRecommendationRunId();
     const requestInput: RecommendRequest = {
       mode: inputMode === "describe" ? "self" : "choose",
       mood: inputMode === "describe" ? undefined : selectedMoods,
@@ -482,6 +485,7 @@ export default function Home() {
       // picks 2–3 in the background once this lands.
       recommendationCount: 1,
       responseDetail: "core",
+      runId,
     };
 
     localStorage.setItem("fun:loading", "true");
@@ -520,7 +524,6 @@ export default function Home() {
         _trust?: { displayState?: RecommendationDisplayState; batchComplete?: boolean; intentContract?: IntentContract };
       };
       const batch = data._batch ?? [data];
-      const runId = createRecommendationRunId();
       rememberRecommendationTitles(batch.map((item) => item.title));
       rememberRecommendationHistory(batch, requestInput, runId);
       localStorage.setItem(

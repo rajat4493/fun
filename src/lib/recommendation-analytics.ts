@@ -3,7 +3,7 @@ import type { RecommendRequest, Recommendation, RecommendationDisplayState } fro
 
 export function captureRecommendationRun(input: {
   runId: string;
-  source: "initial" | "reroll" | "search-all-cinema";
+  source: "initial" | "reroll" | "search-all-cinema" | "background-fill";
   request: RecommendRequest;
   recommendation: Recommendation;
   batch: Recommendation[];

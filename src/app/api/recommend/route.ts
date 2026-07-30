@@ -16,6 +16,10 @@ import { buildIntentContractPrompt, localIntentContract, normalizeIntentContract
 import { matchesLanguageRequest, wantsSpecificLanguage } from "@/lib/language-lane";
 import { IntentContract, RawRecommendation, RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
 
+// Disabled by default while production credentials and fallback behavior are reviewed.
+// Re-enable deliberately after validation with FUN_ENABLE_ANTHROPIC=1.
+const anthropicEnabled = process.env.FUN_ENABLE_ANTHROPIC === "1";
+
 // TMDB genre IDs that map to user avoidances.
 // Only genres with clear, unambiguous mapping are included — Action (28) is too broad.
 const AVOIDANCE_GENRE_MAP: Record<string, number[]> = {
@@ -224,7 +228,7 @@ async function resolveIntentContract(input: RecommendRequest, trace: ProviderTra
   if (process.env.LLM_BASE_URL && process.env.LLM_API_KEY && process.env.LLM_MODEL) {
     return await tryIntent(`Intent Generic LLM (${process.env.LLM_MODEL})`, () => interpretIntentWithGenericLLM(prompt)) ?? local;
   }
-  if (process.env.ANTHROPIC_API_KEY) {
+  if (anthropicEnabled && process.env.ANTHROPIC_API_KEY) {
     return await tryIntent("Intent Anthropic", () => interpretIntentWithAnthropic(prompt)) ?? local;
   }
 
@@ -268,7 +272,8 @@ async function tryProvider(
   }
 }
 
-// Provider chain: OpenAI → generic OpenAI-compatible (Groq/Mistral/Ollama/etc.) → Anthropic → local fallback.
+// Provider chain: OpenAI → generic OpenAI-compatible (Groq/Mistral/Ollama/etc.) →
+// opt-in Anthropic → local fallback.
 // Each provider is tried only when its required env vars are set.
 async function getRecommendations(
   input: RecommendRequest,
@@ -309,7 +314,7 @@ async function getRecommendations(
     if (batch) return batch;
   }
 
-  if (process.env.ANTHROPIC_API_KEY && canTryProvider()) {
+  if (anthropicEnabled && process.env.ANTHROPIC_API_KEY && canTryProvider()) {
     const timeoutMs = providerBudget(16000);
     const batch = await tryProvider(trace, "Anthropic", prompt, () => recommendWithAnthropic(prompt, temperature, count, includeDiscovery, timeoutMs));
     if (batch) return batch;
@@ -842,6 +847,17 @@ export async function POST(req: Request) {
       firstPick.whereToWatch.status === "unverified" ? "unverified" :
       "skipped";
 
+    // Correlation ID: client generates this before the fetch and reuses the same value when it
+    // later reports the displayed pick to /api/recommendation-runs. Logging it here — together
+    // with what this call actually returned — is what makes "the model said X, the user saw Y"
+    // answerable by one ID lookup instead of guessing which of several calls a title came from.
+    const runId = typeof input.runId === "string" && input.runId ? input.runId : `srv-${Date.now().toString(36)}`;
+    console.log(
+      `[FUN recommend] runId=${runId} count=${count} responseDetail=${input.responseDetail ?? "full"} ` +
+      `title=${JSON.stringify(firstPick.title)} batch=${JSON.stringify(enrichedBatch.map((r) => r.title))} ` +
+      `source=${source} degraded=${degradeReason ?? "false"} totalMs=${timings.totalMs}`,
+    );
+
     return NextResponse.json({
       ...firstPick,
       _batch: enrichedBatch,
@@ -855,6 +871,7 @@ export async function POST(req: Request) {
         intentContract,
         batchComplete: count >= 3,
         diagnostics: {
+          runId,
           source,
           providerVerification,
           degraded: Boolean(degradeReason),

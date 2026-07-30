@@ -1,5 +1,5 @@
 import { extractIntent } from "@/lib/intent";
-import { hasNegatedConcept, requestText } from "@/lib/recommendation-utils";
+import { hasNegatedConcept, intentRequestText } from "@/lib/recommendation-utils";
 import { IntentContract, RecommendRequest } from "@/lib/types";
 
 const PRIMARY_VALUES = new Set([
@@ -52,7 +52,7 @@ export function localIntentContract(input: RecommendRequest): IntentContract {
   // "brutal week/day" describes the user's life, not desired content — exclude those idioms.
   // Comfort-seeking language overrides darkness words entirely.
   const extraSecondary: string[] = [];
-  const seekingComfort = /\b(something (kind|warm|gentle|light|easy|comforting)|comfort me|cheer me up|asks nothing|nothing heavy|no heavy|unwind|feel.good|feel better|lift me)\b/i.test(text);
+  const seekingComfort = /\b(something (kind|warm|gentle|light|easy|comforting)|feel easy|feel at ease|comfort me|cheer me up|asks nothing|nothing heavy|no heavy|unwind|feel.good|feel better|lift me)\b/i.test(text);
   const darknessPattern = /\b(bleak|nihilistic|grim|hopeless|morally.(complex|complicated|messy)|disturbing|provocative|brutal(?!\s+(week|day|month|year|shift|commute|schedule))|unflinching|confrontational|harrowing|raw cinema|dark and honest|zero mercy)\b/i;
   const darknessSignal = darknessPattern.test(text) &&
     !hasNegatedConcept(text, /\b(bleak|grim|dark|heavy|disturbing|brutal)\b/i);
@@ -91,6 +91,18 @@ export function localIntentContract(input: RecommendRequest): IntentContract {
   }
   if (/\b(with friends|friends over|group watch|movie night)\b/i.test(text)) {
     extraSituation.push("friends");
+  }
+  if (/\b(with (my )?(parents|family)|family visiting|family movie|family night)\b/i.test(text)) {
+    extraSituation.push("family");
+  }
+  if (/\b(train|plane|flight|cab|taxi|bus|commute|commuting|journey|road trip|in transit|travelling|traveling)\b/i.test(text)) {
+    extraSituation.push("transit");
+  }
+  if (/\b(waiting room|waiting at|delayed train|airport gate|layover|queue)\b/i.test(text)) {
+    extraSituation.push("waiting");
+  }
+  if (/\b(at work|lunch break|between meetings|before (a|my) meeting|office break)\b/i.test(text)) {
+    extraSituation.push("work");
   }
 
   const hasDarkness = extraSecondary.includes("bleak");
@@ -166,8 +178,10 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
     softAvoids: [...new Set([...local.softAvoids, ...stringArray(value.softAvoids).map((item) => item.toLowerCase())])],
     format: FORMAT_VALUES.has(formatRaw as IntentContract["format"]) ? formatRaw as IntentContract["format"] : local.format,
     language: typeof value.language === "string" && value.language.trim() ? value.language.trim() : local.language,
-    // Merge local sensitivity/situation detection so safety mode can't be dropped by the LLM
-    situation: [...new Set([...stringArray(value.situation), ...local.situation])].slice(0, 8),
+    // Situation is a factual viewing constraint, not a creative inference. The
+    // classifier may explain typed context, but it must not invent bedtime,
+    // transit, waiting, or social context that the user never supplied.
+    situation: local.situation,
     intensity: INTENSITY_VALUES.has(intensityRaw as IntentContract["intensity"]) ? intensityRaw as IntentContract["intensity"] : local.intensity,
     emotionalGoal: typeof value.emotionalGoal === "string" && value.emotionalGoal.trim()
       ? value.emotionalGoal.trim()
@@ -180,7 +194,10 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
 
 export function buildIntentContractPrompt(input: RecommendRequest): string {
   const local = localIntentContract(input);
-  const text = requestText(input) || "No free text provided.";
+  // Free text and positive controls belong in the semantic sentence. Avoidance
+  // controls are supplied separately below; including them in both places made
+  // the classifier read "horror" as simultaneously wanted and rejected.
+  const text = intentRequestText(input) || "No free text provided.";
   return `
 You are F.U.N's intent interpreter. Read the viewer request and classify what they actually want.
 Do not recommend a title.
@@ -210,8 +227,10 @@ Return one compact JSON object only:
   "situation": ["partner|friends|family|bedtime|transit|work|waiting when typed"],
   "intensity": "safe|curious|bold|unhinged",
   "emotionalGoal": "one short sentence describing the desired emotional outcome",
-  "confidence": 0.0,
+  "confidence": 0.85,
   "ambiguity": "short note if request has conflicting signals, else empty"
 }
+
+Confidence is a number from 0 to 1 describing how certain you are about the interpretation. Use a realistic value such as 0.85 for a clear request; do not copy the example mechanically. Selected avoids are authoritative boundaries, not evidence that the user wants those concepts.
 `;
 }

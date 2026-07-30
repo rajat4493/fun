@@ -20,6 +20,9 @@ const distressing = /\b(horror|gore|suicide|self.harm|massacre|brutal|terror|nig
 const griefTrigger = /\b(child (death|dying)|terminal|suicide|funeral|cancer|dying (dog|pet|mother|father|child)|slowly dying|miscarriage)\b/i;
 const comfort = /\b(comfort|warm|cozy|feel.good|uplifting|sweet|gentle|heartwarming|charming|delightful|hopeful|funny|light|kind|soothing|humane|tender)\b/i;
 const emotionalAmplification = /\b(grief|grieving|bereavement|mourning|heartbreak|heartbreaking|breakup|romantic longing|devastating|bleak|harrowing|melancholy|tragic loss)\b/i;
+const gorePositive = /\b(gore|gory|bloody|splatter|body horror|visceral|graphic violence|extreme horror)\b/i;
+const sexuallyExplicit = /\b(porn|pornographic|hardcore|unsimulated sex|explicit sex)\b/i;
+const messyFamilyEngine = /\b(family|dysfunctional|chaos|chaotic|survival|class|working.class|morally compromised|adult|dark comedy|loyalty|social pressure)\b/i;
 
 const overRecommendedHiddenGem = new Set(["andhadhun", "drishyam", "kahaani", "masaan", "tumbbad", "se7en", "seven", "gonegirl", "zodiac", "knivesout", "getout", "thesilenceofthelambs"]);
 const unsafeRelatedTitles = new Set([
@@ -89,6 +92,49 @@ const tests = [
         ["romance", "comfort"].some((signal) => positiveSignals.includes(signal));
     },
     why: "A structured gore avoidance must remain a boundary and never become a positive request for gore.",
+  },
+  {
+    id: "GATE-GORE-POSITIVE",
+    category: "positive intensity",
+    input: {
+      mode: "self",
+      selfText: "I want a genuinely gory splatter film where the visceral body horror is the main event. Do not soften it into an ordinary thriller.",
+      country: "Poland",
+      languagePreferences: ["Any language"],
+      platforms: [],
+      platformFilter: "any",
+      craziness: 3,
+    },
+    check: (rec) => {
+      const contract = rec._trust?.intentContract;
+      const labels = [...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].join(" ");
+      const positiveIntent = [contract?.primary, ...(contract?.secondary ?? [])].filter(Boolean).join(" ");
+      return gorePositive.test(positiveIntent) &&
+        (gorePositive.test(labels) || gorePositive.test(textOf(rec))) &&
+        !comfort.test(labels);
+    },
+    why: "An explicit positive gore request must remain an intensity request and must not be softened into safe drama or a generic thriller.",
+  },
+  {
+    id: "GATE-ROMANTIC-NOT-EXPLICIT",
+    category: "romantic boundary",
+    input: {
+      mode: "self",
+      selfText: "A sexy, romantic date-night film with real chemistry and sensuality, but keep it mainstream and not sexually explicit.",
+      country: "Poland",
+      languagePreferences: ["Any language"],
+      platforms: [],
+      platformFilter: "any",
+    },
+    check: (rec) => {
+      const contract = rec._trust?.intentContract;
+      const labels = [...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].join(" ");
+      return contract?.primary === "romance" &&
+        (romance.test(labels) || romance.test(textOf(rec))) &&
+        !sexuallyExplicit.test(labels) &&
+        !sexuallyExplicit.test(textOf(rec));
+    },
+    why: "A sensual romance request should stay romantic and mainstream without escalating into pornographic or explicitly sexual material.",
   },
   {
     id: "GATE-CRY",
@@ -209,6 +255,87 @@ const tests = [
     },
     why: "Text saying someone hates horror/gets scared must be treated as an avoidance/light request, not a scare intent.",
   },
+  {
+    id: "GATE-REFERENCE-AFFECT-BRIDGE",
+    category: "reference translation",
+    input: {
+      mode: "self",
+      selfText: "Something like Succession but much lighter and funnier. Keep the sharp ensemble chemistry and status games, but I want to relax, not feel stressed.",
+      reference: "Succession",
+      country: "Poland",
+      languagePreferences: ["Any language"],
+      platforms: [],
+      platformFilter: "any",
+    },
+    check: (rec) => {
+      const text = textOf(rec);
+      const labels = [...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].join(" ");
+      return !/\bsuccession\b/i.test(rec.title) &&
+        (comedy.test(text) || comfort.test(text) || comedy.test(labels)) &&
+        !/\b(bleak|harrowing|punishing|dread|horror)\b/i.test(labels);
+    },
+    why: "Reference translation must preserve Succession's ensemble/status engine while applying the requested lighter/funnier emotional shift.",
+  },
+  {
+    id: "GATE-REFERENCE-CROSS-LANGUAGE",
+    category: "reference translation",
+    input: {
+      mode: "self",
+      selfText: "I liked Shameless USA and want something similar in Hindi: messy family survival, class pressure, dark adult humor, loyalty, and damaged people. Not just a generic crime thriller.",
+      reference: "Shameless",
+      country: "India",
+      languagePreferences: ["Hindi"],
+      platforms: [],
+      platformFilter: "any",
+    },
+    check: (rec) => {
+      const lang = rec.contentMetadata?.originalLanguage;
+      const countries = rec.contentMetadata?.originCountry ?? [];
+      const languageFits = lang === "hi" || (!lang && countries.length === 0) || (!lang && countries.includes("IN"));
+      const engineText = [
+        rec.vibe,
+        rec.oneLine,
+        ...(rec.whyItFits ?? []),
+        ...(rec.contentCategory ?? []),
+        ...(rec.emotionalEffect ?? []),
+      ].filter(Boolean).join(" ");
+      return languageFits &&
+        !/\bshameless\b/i.test(rec.title) &&
+        messyFamilyEngine.test(engineText) &&
+        !(/generic crime|crime procedural/i.test(engineText));
+    },
+    why: "A cross-language reference must preserve Shameless's messy family/social survival engine while staying in the Hindi content lane.",
+  },
+  {
+    id: "GATE-LONG-SESSION-NO-REPEAT",
+    category: "session memory",
+    input: {
+      mode: "self",
+      selfText: "Something warm, funny, and easy after a long day.",
+      country: "USA",
+      languagePreferences: ["Any language"],
+      platforms: [],
+      platformFilter: "any",
+      recentTitles: [
+        "Chef", "Paddington 2", "Hunt for the Wilderpeople", "The Intern",
+        "Little Miss Sunshine", "The Good Place", "Ted Lasso", "Derry Girls",
+        "Always Be My Maybe", "About Time", "The Fundamentals of Caring",
+        "The Forty-Year-Old Version", "Brigsby Bear", "Hundreds of Beavers",
+        "The Peanut Butter Falcon", "The Intouchables", "Paterson", "Columbus",
+        "Brooklyn Nine-Nine", "Parks and Recreation",
+      ],
+    },
+    check: (rec) => {
+      const excluded = new Set(rec._testInput.recentTitles.map(normalizeTitle));
+      const repeatedFinal = excluded.has(normalizeTitle(rec.title));
+      const repeatedDuringAttempt = (rec._trust?.rejections ?? []).some((item) =>
+        excluded.has(normalizeTitle(item.title)) &&
+        (item.reasons ?? []).some((reason) => /memory: recently recommended/i.test(reason)),
+      );
+      return !repeatedFinal && !repeatedDuringAttempt;
+    },
+    why: "A long session must not repeat an older recommendation or waste a retry by proposing one before trust filtering.",
+  },
 ];
 
 async function runCase(test) {
@@ -228,6 +355,7 @@ async function runCase(test) {
   }
 
   const data = await response.json();
+  data._testInput = test.input;
   const pass = test.check(data);
   return {
     id: test.id,

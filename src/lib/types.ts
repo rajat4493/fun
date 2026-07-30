@@ -83,6 +83,10 @@ export type RecommendRequest = {
   // Lets the background fill call reuse phase 1's already-resolved intent contract instead of
   // paying for a second intent-classification LLM call.
   precomputedIntentContract?: IntentContract;
+  // Client-generated correlation ID (see createRecommendationRunId) sent up front so the server
+  // log line for this call and the client's later /api/recommendation-runs report share one ID —
+  // otherwise there is no way to join "what the model returned" to "what got displayed".
+  runId?: string;
 };
 
 export type WatchProvider = {
