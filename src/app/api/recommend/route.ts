@@ -69,13 +69,13 @@ async function readJsonBodyWithLimit(req: Request): Promise<unknown> {
 // Only genres with clear, unambiguous mapping are included — Action (28) is too broad.
 const AVOIDANCE_GENRE_MAP: Record<string, number[]> = {
   horror: [27],
-  gore: [27],
 };
 
 // Text keywords used as a secondary safety net when TMDB has no genre data.
 // Deliberately narrow — only flag obvious matches, not borderline ones.
 const AVOIDANCE_SUSPICION_KEYWORDS: Record<string, string[]> = {
   horror: ["horror", "haunted", "haunting", "ghost", "demon", "slasher", "zombie", "terrifying", "nightmarish", "supernatural horror"],
+  "supernatural horror": ["supernatural", "haunted", "haunting", "ghost", "demon", "possession", "occult"],
   gore: ["gore", "gory", "torture", "visceral", "graphic violence", "brutal killing"],
   violence: ["disturbing violence", "graphic violence", "brutal", "brutality", "torture", "massacre"],
   "graphic violence": ["disturbing violence", "graphic violence", "brutal", "brutality", "torture", "massacre"],
@@ -613,7 +613,7 @@ async function trustedRawBatch(
     return { batch: localTrusted.accepted.slice(0, count), rejections: allRejections, fallbackUsed: true };
   }
 
-  return { batch: [safeFallback(input)], rejections: allRejections, fallbackUsed: true };
+  return { batch: [safeFallback(input, intentContract)], rejections: allRejections, fallbackUsed: true };
 }
 
 async function enrichBatch(
@@ -710,7 +710,7 @@ async function subscriptionVerifiedChain(
   // Step 3 — curated fallback verified against subscription.
   // Check the full curated pool (not artificially capped at 3).
   const curatedTrusted = applyTrustFilter(input, filteredLocalFallback(input, intentContract), intentContract);
-  const curated = curatedTrusted.accepted.length > 0 ? curatedTrusted.accepted : [safeFallback(input)];
+  const curated = curatedTrusted.accepted.length > 0 ? curatedTrusted.accepted : [safeFallback(input, intentContract)];
   const enrichedCurated = await enrichBatch(curated, country, platforms, timings);
   const verifiedCurated = enrichedCurated.filter(hasSubscriptionProvider).slice(0, count);
   if (verifiedCurated.length > 0) {
@@ -720,7 +720,7 @@ async function subscriptionVerifiedChain(
   // Step 4 — no subscription match.
   // Return a single placeholder pick (not the full teaser batch) so the API response is well-formed.
   // The UI shows a clean no-match state; the pick title is used in the description only.
-  const firstAttempted = enriched1[0] ?? enriched2[0] ?? enrichedCurated[0] ?? await enrichRecommendation(safeFallback(input), country, platforms);
+  const firstAttempted = enriched1[0] ?? enriched2[0] ?? enrichedCurated[0] ?? await enrichRecommendation(safeFallback(input, intentContract), country, platforms);
   return {
     picks: [{
       ...firstAttempted,
@@ -926,7 +926,7 @@ export async function POST(req: Request) {
       } else if (textSafeUnknown.length > 0) {
         enrichedBatch = textSafeUnknown;
       } else {
-        const fallbackRaw = safeFallback(input);
+        const fallbackRaw = safeFallback(input, intentContract);
         const verificationStarted = Date.now();
         const fallback = await enrichRecommendation(fallbackRaw, country, platforms);
         timings.verificationMs += Date.now() - verificationStarted;
@@ -953,7 +953,8 @@ export async function POST(req: Request) {
     }
 
     if (enrichedBatch.length === 0) {
-      const fallbackRaw = applyTrustFilter(input, [safeFallback(input)], intentContract).accepted[0] ?? safeFallback(input);
+      const contractFallback = safeFallback(input, intentContract);
+      const fallbackRaw = applyTrustFilter(input, [contractFallback], intentContract).accepted[0] ?? contractFallback;
       const verificationStarted = Date.now();
       const fallback = await enrichRecommendation(fallbackRaw, country, platforms);
       timings.verificationMs += Date.now() - verificationStarted;

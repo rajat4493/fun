@@ -29,7 +29,11 @@ function firstKnownPrimary(values: string[]): string {
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean).slice(0, 8)
+    ? value
+      .filter((item): item is string => typeof item === "string")
+      .flatMap((item) => item.split("|").map((part) => part.trim()))
+      .filter(Boolean)
+      .slice(0, 8)
     : [];
 }
 
@@ -209,7 +213,13 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
     hardAvoids: [...new Set([...local.hardAvoids, ...reconciledLlmHardAvoids])],
     softAvoids: [...new Set([...local.softAvoids, ...stringArray(value.softAvoids).map((item) => item.toLowerCase())])],
     format: FORMAT_VALUES.has(formatRaw as IntentContract["format"]) ? formatRaw as IntentContract["format"] : local.format,
-    language: typeof value.language === "string" && value.language.trim() ? value.language.trim() : local.language,
+    // Explicit language in free text or controls is factual and outranks an intent model that
+    // answers with the generic "any" lane.
+    language: local.language.toLowerCase() !== "any"
+      ? local.language
+      : typeof value.language === "string" && value.language.trim()
+        ? value.language.trim()
+        : local.language,
     // Situation is a factual viewing constraint, not a creative inference. The
     // classifier may explain typed context, but it must not invent bedtime,
     // transit, waiting, or social context that the user never supplied.
@@ -259,8 +269,8 @@ Return one compact JSON object only:
 {
   "primary": "scare|cry|comedy|thriller|romance|weird|comfort|gore|drama|discovery|unknown",
   "secondary": ["short labels"],
-  "hardAvoids": ["horror|gore|violence|sex|graphic violence when clearly rejected"],
-  "softAvoids": ["slow pacing|heavy drama|sad ending when the user wants less of these"],
+  "hardAvoids": ["horror", "gore", "violence", "sex", "graphic violence"],
+  "softAvoids": ["slow pacing", "heavy drama", "sad ending"],
   "format": "film|series|episode|any",
   "language": "requested language/culture lane or any",
   "situation": ["partner|friends|family|bedtime|transit|work|waiting when typed"],

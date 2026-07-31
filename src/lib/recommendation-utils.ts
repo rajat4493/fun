@@ -119,6 +119,10 @@ export function requestText(input: RecommendRequest): string {
   ].filter(Boolean).join(" ");
 }
 
+export function requestsSingleEpisode(text: string): boolean {
+  return /\b(?:one|1|a single|an)\b(?:\s+\S+){0,6}\s+episode\b|\bepisode\s+only\b/i.test(text);
+}
+
 // Text used to infer positive intent. Structured avoid controls are deliberately
 // excluded: "gore" in the avoids array must never become a request for gore.
 export function intentRequestText(input: RecommendRequest): string {

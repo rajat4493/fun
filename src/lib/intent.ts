@@ -1,5 +1,5 @@
 import { RecommendRequest } from "@/lib/types";
-import { hasNegatedConcept, intentRequestText } from "@/lib/recommendation-utils";
+import { hasNegatedConcept, intentRequestText, requestsSingleEpisode } from "@/lib/recommendation-utils";
 
 export type RecommendationIntent = {
   requestText: string;
@@ -54,7 +54,7 @@ function extractRuntimeLimit(text: string): number | undefined {
 }
 
 function requestedFormat(text: string): RecommendationIntent["requestedFormat"] {
-  if (/\b(one|1)\s+episode\b|\ban episode\b/i.test(text)) return "episode";
+  if (requestsSingleEpisode(text)) return "episode";
   if (/\b(series|show|season|episodes|binge)\b/i.test(text)) return "series";
   if (/\b(movie|film|feature)\b/i.test(text)) return "film";
   return undefined;
@@ -79,7 +79,9 @@ export function extractIntent(input: RecommendRequest): RecommendationIntent {
 
   if (hasNegatedConcept(text, /\bgore|gory|blood|bloody|splatter|body horror\b/i)) hardAvoids.add("gore");
   if (hasNegatedConcept(text, /\bviolence|violent|brutal|graphic violence\b/i)) hardAvoids.add("violence");
-  if (hasNegatedConcept(text, /\bhorror|scary|ghost|haunted|supernatural\b/i)) hardAvoids.add("horror");
+  const specificallyAvoidsSupernaturalHorror = /\b(?:no|not|without|avoid|avoiding)\s+(?:any\s+)?supernatural(?:\s+horror)?\b/i.test(text);
+  if (specificallyAvoidsSupernaturalHorror) hardAvoids.add("supernatural horror");
+  if (!specificallyAvoidsSupernaturalHorror && hasNegatedConcept(text, /\bhorror|scary|ghost|haunted|supernatural\b/i)) hardAvoids.add("horror");
   if (hasNegatedConcept(text, /\bsex|sexual|nudity|erotic|explicit|raunchy|awkward sexual content\b/i)) hardAvoids.add("sex");
 
   if (hasNegatedConcept(text, /\bheavy drama|heavy|trauma|depressing|bleak\b/i)) softAvoids.add("heavy drama");
@@ -108,13 +110,16 @@ export function extractIntent(input: RecommendRequest): RecommendationIntent {
     !hasNegatedConcept(text, /\b(cry|crying|sad|devastating|depressing|bleak|heavy)\b/i)) {
     primaryIntents.add("cry");
   }
-  if (/\b(comedy|funny|laugh|hilarious|witty|humor|humour)\b/i.test(text)) primaryIntents.add("comedy");
-  if (/\b(thriller|suspense|mystery|crime thriller|tense and clever|paranoid|whodunit)\b/i.test(text)) primaryIntents.add("thriller");
+  if (/\b(comedy|funny|laugh|hilarious|witty|humor|humour)\b/i.test(text) &&
+    !hasNegatedConcept(text, /\b(comedy|funny|laugh|hilarious|humor|humour)\b/i)) primaryIntents.add("comedy");
+  if (/\b(thriller|suspense|mystery|crime thriller|tense and clever|paranoid|whodunit)\b/i.test(text) &&
+    !hasNegatedConcept(text, /\b(thriller|suspense|mystery|crime thriller|paranoid|whodunit)\b/i)) primaryIntents.add("thriller");
   if (/\b(romance|romantic|love story|date night)\b/i.test(text) &&
     !hasNegatedConcept(text, /\b(romance|romantic|love story)\b/i)) {
     primaryIntents.add("romance");
   }
-  if (/\b(weird|strange|offbeat|surreal|absurd|bizarre|unusual)\b/i.test(text)) primaryIntents.add("weird");
+  if (/\b(weird|strange|offbeat|surreal|absurd|bizarre|unusual)\b/i.test(text) &&
+    !hasNegatedConcept(text, /\b(weird|strange|offbeat|surreal|absurd|bizarre|unusual)\b/i)) primaryIntents.add("weird");
   if (/\b(calm|calming|soothe|soothing|relax|relaxing|comfort|comforting|cozy|cosy|warm and easy|easy and warm|feel easy|feel at ease|asks nothing|nothing heavy|not more (sadness|loss|grief)|low.effort|no effort|gentle|holds? me gently|feel.good|feel good|feel better|take my mind off|hug in a movie|wrap(ped)? up|unwind)\b/i.test(text)) primaryIntents.add("comfort");
   if (/\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(text) &&
     !hasNegatedConcept(text, /\b(gore|gory|blood|bloody|violence|violent)\b/i)) {

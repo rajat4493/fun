@@ -152,6 +152,12 @@ function parseRecommendationJson(text: string): RawRecommendation[] {
 function hydrateRecommendationDefaults(batch: RawRecommendation[]): RawRecommendation[] {
   return batch.map((recommendation) => ({
     ...recommendation,
+    // Some otherwise valid model responses express confidence as a 0-1 probability even
+    // though F.U.N's public contract uses 0-100. Normalize at the provider boundary so trust,
+    // ranking, retries, and UI all evaluate the same value.
+    confidence: typeof recommendation.confidence === "number" && recommendation.confidence > 0 && recommendation.confidence <= 1
+      ? recommendation.confidence * 100
+      : recommendation.confidence,
     hiddenLayer: recommendation.hiddenLayer ?? {
       headline: "",
       insight: "",
