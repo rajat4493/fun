@@ -345,10 +345,10 @@ function avoidanceViolations(input: RecommendRequest, rec: RawRecommendation | R
     if (!allowIntensity && avoids.has("violence") && hasAny(["violence", "violent", "graphic-violence", "brutal", "war", "combat"])) reasons.push("avoidance: violence");
     if (!allowIntensity && avoids.has("graphic violence") && hasAny(["graphic-violence", "gore", "body-horror", "brutal"])) reasons.push("avoidance: graphic violence");
     if (avoids.has("sex") && hasAny(["sex", "sexual", "erotic", "nudity", "raunchy"])) reasons.push("avoidance: explicit sexual content");
-    // Structured labels are the LLM's own self-tagging and can omit "romance" for a title that is
-    // clearly romantic in its actual synopsis (rom-coms often get tagged just "comedy"). Falling
-    // back to the prose text here — same as the unstructured branch below — closes that gap
-    // instead of trusting self-labeling alone, without adding any extra provider call.
+    // When structured labels exist, they are the recommendation's declared content contract.
+    // Do not re-interpret free-form prose here: compliant explanations often mention the avoided
+    // concept ("not a romance"), and prose matching caused non-romantic comedies to be rejected.
+    // Unstructured legacy/fallback recommendations still use the guarded prose check below.
     // "heartbreak"/"breakup" deliberately excluded from this label list: a model can echo the
     // user's own avoided concept back into contentCategory/emotionalEffect (meant to describe
     // the film, not evaluate it against the request) despite explicit prompt instruction not to.
@@ -357,8 +357,7 @@ function avoidanceViolations(input: RecommendRequest, rec: RawRecommendation | R
     // Dedicated heartbreak/breakup-avoidance nuance for this exact scenario already lives in
     // breakupReliefViolation below; this check now covers only unambiguous romance vocabulary.
     if (explicitlyAvoidsRomance &&
-      (["romance", "romantic", "love-story", "courtship", "love-triangle", "romantic-longing"].includes(primaryCategory ?? "") ||
-        (explicitRomanceTerms.test(text) && !hasNegatedConcept(text, explicitRomanceTerms)))) {
+      ["romance", "romantic", "love-story", "courtship", "love-triangle", "romantic-longing"].includes(primaryCategory ?? "")) {
       reasons.push("avoidance: romance/heartbreak");
     }
     return [...new Set(reasons)];

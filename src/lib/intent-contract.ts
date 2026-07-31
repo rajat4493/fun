@@ -37,6 +37,19 @@ function stringArray(value: unknown): string[] {
     : [];
 }
 
+function requestSupportsHardAvoidance(input: RecommendRequest, avoid: string, local: IntentContract): boolean {
+  const normalized = avoid.toLowerCase().trim();
+  if (local.hardAvoids.includes(normalized)) return true;
+  if (normalized === "romance" && local.softAvoids.includes("romance")) return true;
+
+  // The classifier may discover wording that the deterministic parser does not know yet, but it
+  // may not invent a boundary. Require the user's own text to contain a negated form of the exact
+  // concept before accepting an LLM-only hard avoidance.
+  const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+  if (!escaped) return false;
+  return hasNegatedConcept(intentRequestText(input), new RegExp(`\\b${escaped}\\b`, "i"));
+}
+
 function numberConfidence(value: unknown): number {
   const number = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(number)) return 0.55;
@@ -203,7 +216,9 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
       localPrimarySignals.has("gore") &&
       !local.hardAvoids.includes(avoid)
     ) return false;
-    return true;
+    // A qualified boundary such as "no supernatural horror" must not be widened to all horror.
+    if (avoid === "horror" && local.hardAvoids.includes("supernatural horror") && !local.hardAvoids.includes("horror")) return false;
+    return requestSupportsHardAvoidance(input, avoid, local);
   });
 
   return {

@@ -44,6 +44,22 @@ function runtimeMinutes(rec) {
 
 const tests = [
   {
+    id: "CONTRACT-NO-INVENTED-AVOIDS",
+    input: {
+      mode: "self",
+      selfText: "I am exhausted after a long week. Give me something warm, witty, and easy, but not childish.",
+      country: "United States",
+      languagePreferences: ["Any language"],
+      platforms: [],
+      platformFilter: "any",
+    },
+    check: (rec) => {
+      const hardAvoids = rec._trust?.intentContract?.hardAvoids ?? [];
+      return !["horror", "gore", "violence", "sex", "graphic violence"].some((avoid) => hardAvoids.includes(avoid));
+    },
+    why: "Describe mode must not inherit hard avoidances that the user never stated.",
+  },
+  {
     id: "INT-SCARE-PARTNER",
     input: {
       mode: "self",
