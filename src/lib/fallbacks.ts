@@ -776,6 +776,88 @@ export function localFallback(input: RecommendRequest, intentContract?: IntentCo
     ];
   }
 
+  if (wantsHindi && (wantsScare || wantsGore)) {
+    const baseRec = {
+      format: "Film" as const,
+      whereToWatch: {
+        status: "unverified" as const,
+        primary: "Availability not verified",
+        note: "F.U.N will verify this in real time. Check your apps before watching.",
+      },
+      hiddenLayer: {
+        headline: "Hindi horror beyond the homepage",
+        insight: "Fear-first Hindi cinema goes deeper than the familiar horror-comedy cycle.",
+        classyJab: "The obvious shelf is not the whole genre.",
+      },
+    };
+
+    return [
+      {
+        title: "13B",
+        year: "2009",
+        runtime: "146 min",
+        vibe: "Hindi supernatural horror, ominous, escalating dread",
+        confidence: 81,
+        parsedIntent: { primary: "scare", secondary: ["horror", "dread"], format: "film", language: "Hindi", intensity: "curious" },
+        oneLine: "Watch 13B for a Hindi supernatural mystery that turns everyday television into sustained dread.",
+        whyItFits: [
+          "It is fear-first rather than a comedy wearing horror imagery.",
+          "The domestic setup becomes steadily more ominous and difficult to escape.",
+          "It stays outside the most repeated modern Hindi horror defaults.",
+        ],
+        hiddenTitles: [
+          { title: "Pari", year: "2018" },
+          { title: "Bhoot", year: "2003" },
+          { title: "Ek Thi Daayan", year: "2013" },
+        ],
+        alternatives: ["Pari (2018)", "Bhoot (2003)", "Ek Thi Daayan (2013)"],
+        ...baseRec,
+      },
+      {
+        title: "Pari",
+        year: "2018",
+        runtime: "136 min",
+        vibe: "Hindi occult horror, frightening, bleak",
+        confidence: 79,
+        parsedIntent: { primary: "scare", secondary: ["horror", "terror"], format: "film", language: "Hindi", intensity: "bold" },
+        oneLine: "Watch Pari for Hindi occult horror that stays unsettling, bleak, and serious about its monsters.",
+        whyItFits: [
+          "It answers a strong scare request without retreating into broad comedy.",
+          "The occult mythology creates real threat and disturbing atmosphere.",
+          "It is a less automatic answer than the familiar horror-comedy franchises.",
+        ],
+        hiddenTitles: [
+          { title: "13B", year: "2009" },
+          { title: "Bhoot", year: "2003" },
+          { title: "Pizza", year: "2012" },
+        ],
+        alternatives: ["13B (2009)", "Bhoot (2003)", "Pizza (2012)"],
+        ...baseRec,
+      },
+      {
+        title: "Bhoot",
+        year: "2003",
+        runtime: "113 min",
+        vibe: "Hindi haunted-house horror, frightening, claustrophobic",
+        confidence: 78,
+        parsedIntent: { primary: "scare", secondary: ["horror", "haunted"], format: "film", language: "Hindi", intensity: "curious" },
+        oneLine: "Watch Bhoot for a Hindi haunted-apartment story built around claustrophobia and direct supernatural fear.",
+        whyItFits: [
+          "It treats the haunting as the main event rather than comic decoration.",
+          "The apartment setting keeps the pressure close and increasingly frightening.",
+          "It expands the search without abandoning the requested language or intensity.",
+        ],
+        hiddenTitles: [
+          { title: "13B", year: "2009" },
+          { title: "Pari", year: "2018" },
+          { title: "Ek Thi Daayan", year: "2013" },
+        ],
+        alternatives: ["13B (2009)", "Pari (2018)", "Ek Thi Daayan (2013)"],
+        ...baseRec,
+      },
+    ];
+  }
+
   if (wantsHindi && wantsThriller) {
     const baseRec = {
       format: "Film" as const,

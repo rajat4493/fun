@@ -95,6 +95,16 @@ function textSuggestsAvoidance(avoids: string[], rec: Recommendation): boolean {
   });
 }
 
+function requiresConfirmedHorror(input: RecommendRequest, contract: IntentContract): boolean {
+  if (contract.primary !== "scare") return false;
+  const text = [input.selfText, ...(input.wants ?? [])].filter(Boolean).join(" ");
+  return /\b(really|genuinely|properly|extremely|absolutely|deeply|shit)\s+(?:scary|scared|terrifying|frightening)|\bterrify\s+(?:me|us|my)|\bmake\s+(?:me|us|my partner|them)\s+(?:really\s+)?(?:scared|terrified)|\bscariest\b/i.test(text);
+}
+
+function metadataConfirmsHorror(rec: Recommendation): boolean {
+  return rec.contentMetadata?.genreIds?.includes(27) === true;
+}
+
 function hasSubscriptionProvider(recommendation: Recommendation): boolean {
   return recommendation.whereToWatch.status === "verified" &&
     !recommendation.whereToWatch.notOnUserPlatforms &&
@@ -237,6 +247,21 @@ type RecommendationTimings = {
 
 const CORE_REQUEST_BUDGET_MS = 24000;
 const FULL_REQUEST_BUDGET_MS = 32000;
+
+function applyIntentExclusions(input: RecommendRequest, contract: IntentContract): RecommendRequest {
+  const combined = [
+    ...(contract.negativeReferences ?? []),
+    ...(input.excludedTitles ?? []),
+  ];
+  const seen = new Set<string>();
+  const excludedTitles = combined.filter((title) => {
+    const key = normalizeTitle(title);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 200);
+  return excludedTitles.length ? { ...input, excludedTitles } : input;
+}
 
 async function resolveIntentContract(input: RecommendRequest, trace: ProviderTrace[]): Promise<IntentContract> {
   // Background fill calls (recommendationCount: 2) pass back phase 1's already-resolved contract —
@@ -720,7 +745,7 @@ export async function POST(req: Request) {
     if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput)) {
       return NextResponse.json({ error: "Invalid recommendation request." }, { status: 400 });
     }
-    const input = normalizeRecommendRequest(rawInput as RecommendRequest);
+    let input = normalizeRecommendRequest(rawInput as RecommendRequest);
     const country = input.country || "Poland";
     const platforms = input.platforms ?? [];
     const avoids = activeHardAvoidanceKeys(input);
@@ -750,6 +775,7 @@ export async function POST(req: Request) {
       // to avoid extra concurrent Anthropic calls that push total time past limits.
       const intentStarted = Date.now();
       intentContract = await resolveIntentContract(input, providerTrace);
+      input = applyIntentExclusions(input, intentContract);
       timings.intentMs += Date.now() - intentStarted;
       const recommendationStarted = Date.now();
       const chain = await subscriptionVerifiedChain(input, country, providerTrace, intentContract, count, deadlineAt, timings);
@@ -764,6 +790,7 @@ export async function POST(req: Request) {
       // resolved contract, so this path still costs only one recommendation call for them.
       const intentStarted = Date.now();
       intentContract = await resolveIntentContract(input, providerTrace);
+      input = applyIntentExclusions(input, intentContract);
       timings.intentMs += Date.now() - intentStarted;
       prompt = buildRecommendationPrompt(input, { intentContract, count });
       const recommendationStarted = Date.now();
@@ -791,6 +818,7 @@ export async function POST(req: Request) {
       timings.recommendationMs += parallelTrace.reduce((total, item) => total + item.durationMs, 0);
       providerTrace.push(...parallelTrace);
       intentContract = resolvedContract;
+      input = applyIntentExclusions(input, intentContract);
 
       // Quality gate for the speed optimization: only reuse the precomputed batch (generated from
       // the local contract) when local and LLM intent agree on the primary outcome. On disagreement
@@ -827,6 +855,35 @@ export async function POST(req: Request) {
     // Post-chain gates are skipped when the subscription chain already concluded no-subscription-match.
     // Avoidance and language fallbacks must not quietly replace a declared no-match state
     // with another unverified pick that would confuse the UI.
+
+    // For an explicitly strong fear request, do not trust the model's self-label alone. Confirm
+    // horror against the metadata already fetched for availability/posters. This catches a real
+    // title such as a romance being hallucinated as "psychological horror" without another API call.
+    if (requiresConfirmedHorror(input, intentContract) && displayState !== "no-subscription-match") {
+      const confirmedHorror = enrichedBatch.filter(metadataConfirmsHorror);
+      if (confirmedHorror.length > 0) {
+        const rejected = enrichedBatch.filter((rec) => !metadataConfirmsHorror(rec));
+        trustRejections.push(...rejected.map((rec) => ({
+          title: rec.title,
+          reasons: ["metadata: strong fear request requires confirmed horror"],
+        })));
+        enrichedBatch = confirmedHorror;
+      } else {
+        trustRejections.push(...enrichedBatch.map((rec) => ({
+          title: rec.title,
+          reasons: ["metadata: strong fear request requires confirmed horror"],
+        })));
+        const trustedFallback = applyTrustFilter(input, filteredLocalFallback(input, intentContract), intentContract);
+        trustRejections.push(...trustedFallback.rejected);
+        const fallback = await enrichBatch(trustedFallback.accepted.slice(0, Math.max(count, 3)), country, platforms, timings);
+        const confirmedFallback = fallback
+          .filter(metadataConfirmsHorror)
+          .filter((rec) => matchesLanguageRequest(input, rec))
+          .slice(0, count);
+        enrichedBatch = confirmedFallback;
+        fallbackUsed = true;
+      }
+    }
 
     // Three-bucket genre gate:
     //   verifiedClean    — TMDB returned genre data AND no avoidance violation → serve first

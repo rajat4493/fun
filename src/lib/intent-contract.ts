@@ -39,6 +39,36 @@ function numberConfidence(value: unknown): number {
   return Math.max(0, Math.min(1, number > 1 ? number / 100 : number));
 }
 
+function localDiscoveryPreference(text: string): IntentContract["discoveryPreference"] {
+  return /\b(hidden\s+gem|underrated|overlooked|buried|less\s+obvious|non[- ]?mainstream|not (?:the )?(?:mainstream|obvious|usual|famous) ones?)\b/i.test(text)
+    ? "non-mainstream"
+    : "standard";
+}
+
+// This is deliberately a narrow syntax fallback, not sentiment analysis. The LLM remains
+// authoritative for natural-language meaning; this only protects explicit title lists if the
+// intent-provider call fails (for example: "not mainstream ones like X, Y, or Z").
+function localNegativeReferences(text: string): string[] {
+  const clauses = [
+    /\bnot\s+(?:the\s+)?(?:mainstream|obvious|usual|famous)\s+ones?\s+(?:like|such as|including)\s+([^.;!?]+)/i,
+    /\b(?:anything|everything)\s+(?:but|except)\s+([^.;!?]+)/i,
+    /\b(?:do not|don't|dont|never)\s+recommend\s+([^.;!?]+)/i,
+    /\b(?:exclude|excluding|avoid)\s+(?:titles?\s+)?([^.;!?]+)/i,
+  ];
+  const captured = clauses.map((pattern) => text.match(pattern)?.[1]).find(Boolean);
+  if (!captured) return [];
+
+  return captured
+    .replace(/\s+(?:but|while|although)\s+.*$/i, "")
+    .split(/\s*,\s*|\s+(?:or|and)\s+/i)
+    .map((title) => title
+      .replace(/^\s*(?:and|or)\s+/i, "")
+      .replace(/^["'“”]+|["'“”]+$/g, "")
+      .trim())
+    .filter((title) => title.length >= 2 && title.length <= 100)
+    .slice(0, 12);
+}
+
 export function localIntentContract(input: RecommendRequest): IntentContract {
   const intent = extractIntent(input);
   const text = [input.selfText, ...(input.mood ?? []), ...(input.wants ?? []), ...(input.avoids ?? [])].filter(Boolean).join(" ");
@@ -131,6 +161,8 @@ export function localIntentContract(input: RecommendRequest): IntentContract {
         : "Infer the best emotional outcome from the request while respecting hard constraints.",
     confidence: 0.55,
     ambiguity: "",
+    negativeReferences: localNegativeReferences(text),
+    discoveryPreference: localDiscoveryPreference(text),
     source: "local",
   };
 }
@@ -188,6 +220,13 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
       : local.emotionalGoal,
     confidence: numberConfidence(value.confidence),
     ambiguity: typeof value.ambiguity === "string" ? value.ambiguity.trim() : "",
+    negativeReferences: [...new Set([
+      ...local.negativeReferences,
+      ...stringArray(value.negativeReferences),
+    ])].slice(0, 12),
+    discoveryPreference: value.discoveryPreference === "non-mainstream"
+      ? "non-mainstream"
+      : local.discoveryPreference,
     source: "llm",
   };
 }
@@ -227,10 +266,13 @@ Return one compact JSON object only:
   "situation": ["partner|friends|family|bedtime|transit|work|waiting when typed"],
   "intensity": "safe|curious|bold|unhinged",
   "emotionalGoal": "one short sentence describing the desired emotional outcome",
+  "negativeReferences": ["exact titles explicitly rejected or given as examples of what not to recommend"],
+  "discoveryPreference": "standard|non-mainstream",
   "confidence": 0.85,
   "ambiguity": "short note if request has conflicting signals, else empty"
 }
 
 Confidence is a number from 0 to 1 describing how certain you are about the interpretation. Use a realistic value such as 0.85 for a clear request; do not copy the example mechanically. Selected avoids are authoritative boundaries, not evidence that the user wants those concepts.
+When the viewer says "not X", "anything except X", or "not mainstream ones like X, Y", put the exact title names in negativeReferences. Do not put merely mentioned positive reference titles there.
 `;
 }

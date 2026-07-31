@@ -1,5 +1,5 @@
 import { IntentContract, ParsedRecommendationIntent, RawRecommendation, RecommendRequest, Recommendation } from "@/lib/types";
-import { requestText } from "@/lib/recommendation-utils";
+import { hasNegatedConcept, requestText } from "@/lib/recommendation-utils";
 import { extractIntent, RecommendationIntent } from "@/lib/intent";
 
 export type TrustRejection = {
@@ -127,7 +127,17 @@ const weirdTerms = /\b(weird|strange|unusual|offbeat|quirky|absurd|surreal|exper
 const funnyTerms = /\b(funny|comedy|comic|humor|humour|humorous|witty|satire|satirical|slapstick|banter|absurd|laugh|playful|farce)\b/i;
 const thrillerTerms = /\b(thriller|suspense|mystery|crime|noir|detective|investigation|paranoid|tense|whodunit|conspiracy|killer|murder|cat-and-mouse|cat and mouse)\b/i;
 const romanceTerms = /\b(romance|romantic|love story|love|chemistry|relationship|date|courtship|tender|flirt|heartfelt)\b/i;
-const explicitRomanceTerms = /\b(romance|romantic|love story|courtship|dating|love triangle|romantic longing|heartbreak|breakup)\b/i;
+// Deliberately narrower than the structured-label check below: "heartbreak"/"breakup" are common,
+// legitimate words in non-romantic descriptive prose (grief, loss, poignant comedy — see cryTerms
+// a few lines down, which treats "heartbreak" as ordinary catharsis vocabulary). Matching them as
+// bare words against free text produced false-positive rejections of clearly non-romantic comfort
+// picks (The Intouchables, Paddington 2) whenever their prose used either word in an unrelated
+// sense, which starved the breakup-recovery category down to the static local fallback. A label
+// that explicitly says "heartbreak" is a deliberate category tag and stays a strong signal; a
+// prose sentence that happens to contain the word is not.
+// "dating" excluded: "a tradition/story dating back to..." is common, purely temporal phrasing
+// in film synopses (period pieces especially) and has nothing to do with romantic dating.
+const explicitRomanceTerms = /\b(romance|romantic|love story|courtship|love triangle|romantic longing)\b/i;
 const fearTerms = /\b(scary|scare|scared|terrify|terrified|terrifying|frighten|frightened|frightening|horror|dread|nightmare|haunted|ghost|possession|demonic|supernatural terror|jump scare|jumpscare|creepy|panic|fear)\b/i;
 const cryTerms = /\b(cry|crying|tearjerker|tear jerker|sob|weep|devastating|heartbreaking|heartbreak|cathartic|moving|emotionally wreck|grief|loss|melancholy|poignant)\b/i;
 const dramaTerms = /\b(drama|dramatic|character study|serious|emotional|prestige|social realist|melodrama)\b/i;
@@ -189,12 +199,16 @@ function hasStructuredSignals(rec: RawRecommendation | Recommendation): boolean 
 
 function effectivePrimaryIntents(local: RecommendationIntent, contract?: IntentContract): string[] {
   if (contract && contract.source === "llm" && contract.confidence >= 0.6 && contract.primary !== "unknown") {
-    return [contract.primary, ...contract.secondary].filter(Boolean);
+    // The classifier's secondary labels describe useful nuance; they are not all mandatory genres.
+    // Treating every secondary as a hard requirement made a primary scare request with secondary
+    // "thriller" reject valid horror films for not also self-labeling as thrillers. Preserve the
+    // authoritative primary plus positive intents explicitly present in the user's own request.
+    return [...new Set([contract.primary, ...local.primaryIntents])].filter(Boolean);
   }
   // When extractIntent found no primary (free-text request uses words outside the regex set),
   // fall to local contract so trust filter can still enforce the inferred intent
   if (contract && contract.primary !== "unknown" && local.primaryIntents.length === 0) {
-    return [contract.primary, ...contract.secondary].filter(Boolean);
+    return [contract.primary];
   }
   return local.primaryIntents;
 }
@@ -203,19 +217,21 @@ function parsedIntentContradictions(input: RecommendRequest, rec: RawRecommendat
   const local = extractIntent(input);
   const declared = parsedIntentPrimary(rec.parsedIntent);
   const terms = parsedIntentTerms(rec.parsedIntent);
+  const contentTerms = structuredTerms(rec);
   const ambiguity = rec.parsedIntent?.ambiguity?.toLowerCase() ?? "";
   const reasons: string[] = [];
 
   if (!rec.parsedIntent) return reasons;
 
   const declaredAs = (allowed: string[]) => allowed.some((item) => declared === item || terms.has(item));
+  const contentSupports = (allowed: string[]) => allowed.some((item) => contentTerms.has(item));
   const ambiguityTreatsAsAvoidance = (intent: string) =>
     Boolean(ambiguity) &&
     /\b(avoid|avoidance|boundary|reject|not a desire|not desired|does not want|don't want|hates?|can't stand|cannot stand|dislikes?|despises?)\b/i.test(ambiguity) &&
     new RegExp(`\\b${intent}\\b`, "i").test(ambiguity);
   const requires = (intent: string, allowed: string[]) => {
     if (ambiguityTreatsAsAvoidance(intent)) return;
-    if (effectivePrimaryIntents(local, contract).includes(intent) && !declaredAs(allowed)) {
+    if (effectivePrimaryIntents(local, contract).includes(intent) && !declaredAs(allowed) && !contentSupports(allowed)) {
       reasons.push(`parsedIntent: missed explicit ${intent} intent`);
     }
   };
@@ -314,6 +330,13 @@ function avoidanceViolations(input: RecommendRequest, rec: RawRecommendation | R
   const hasStructured = hasStructuredSignals(rec);
   const hasAny = (labels: string[]) => labels.some((label) => terms.has(label));
   const explicitlyAvoidsRomance = intent.softAvoids.includes("romance");
+  // Deliberately the PRIMARY contentCategory entry only, not the full label set: the model uses
+  // "Romance" loosely for any warm relationship-centered story (a platonic-friendship comfort
+  // film like The Intouchables can still pick up "Romance" as a secondary tag), so checking
+  // presence anywhere in contentCategory/emotionalEffect/parsedIntent.secondary still rejected
+  // clearly non-romantic comfort picks. The first entry is the model's primary characterization
+  // of what the title fundamentally is — that's the only place "Romance" means the premise itself.
+  const primaryCategory = labelTerms(rec.contentCategory)[0];
 
   if (hasStructured) {
     if (!allowIntensity && avoids.has("gore") && (isKnownHorror || hasAny(["gore", "gory", "body-horror", "splatter", "graphic-violence"]))) reasons.push("avoidance: gore");
@@ -325,9 +348,16 @@ function avoidanceViolations(input: RecommendRequest, rec: RawRecommendation | R
     // clearly romantic in its actual synopsis (rom-coms often get tagged just "comedy"). Falling
     // back to the prose text here — same as the unstructured branch below — closes that gap
     // instead of trusting self-labeling alone, without adding any extra provider call.
+    // "heartbreak"/"breakup" deliberately excluded from this label list: a model can echo the
+    // user's own avoided concept back into contentCategory/emotionalEffect (meant to describe
+    // the film, not evaluate it against the request) despite explicit prompt instruction not to.
+    // That made this check reject The Intouchables, Paddington 2, School of Rock, and Kiki's
+    // Delivery Service in the same run, exhausting every candidate into the static local fallback.
+    // Dedicated heartbreak/breakup-avoidance nuance for this exact scenario already lives in
+    // breakupReliefViolation below; this check now covers only unambiguous romance vocabulary.
     if (explicitlyAvoidsRomance &&
-      (hasAny(["romance", "romantic", "love-story", "courtship", "dating", "love-triangle", "romantic-longing", "heartbreak", "breakup"]) ||
-        explicitRomanceTerms.test(text))) {
+      (["romance", "romantic", "love-story", "courtship", "love-triangle", "romantic-longing"].includes(primaryCategory ?? "") ||
+        (explicitRomanceTerms.test(text) && !hasNegatedConcept(text, explicitRomanceTerms)))) {
       reasons.push("avoidance: romance/heartbreak");
     }
     return [...new Set(reasons)];
@@ -338,7 +368,9 @@ function avoidanceViolations(input: RecommendRequest, rec: RawRecommendation | R
   if (!allowIntensity && avoids.has("violence") && (isKnownHorror || violenceTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: violence");
   if (!allowIntensity && avoids.has("graphic violence") && (isKnownHorror || graphicViolenceTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: graphic violence");
   if (avoids.has("sex") && sexualTerms.test(text)) reasons.push("avoidance: explicit sexual content");
-  if (explicitlyAvoidsRomance && explicitRomanceTerms.test(text)) reasons.push("avoidance: romance/heartbreak");
+  if (explicitlyAvoidsRomance && explicitRomanceTerms.test(text) && !hasNegatedConcept(text, explicitRomanceTerms)) {
+    reasons.push("avoidance: romance/heartbreak");
+  }
 
   return [...new Set(reasons)];
 }
@@ -352,6 +384,12 @@ function memoryViolation(input: RecommendRequest, rec: RawRecommendation | Recom
   const recent = (input.recentTitles ?? []).some((item) => normalize(item) === title);
   if (recent) return "memory: recently recommended";
   return null;
+}
+
+function negativeReferenceViolation(rec: RawRecommendation | Recommendation, contract?: IntentContract): string | null {
+  const title = normalize(rec.title);
+  const rejected = (contract?.negativeReferences ?? []).slice(0, 12).some((item) => normalize(item) === title);
+  return rejected ? "intent: explicitly rejected title example" : null;
 }
 
 function confidenceViolation(rec: RawRecommendation | Recommendation): string | null {
@@ -558,6 +596,7 @@ function humaneToneViolation(input: RecommendRequest, rec: RawRecommendation | R
 // "related" rail even though the main pick correctly avoided it.
 export function relatedTitleUnsafe(input: RecommendRequest, title: string, contract?: IntentContract): boolean {
   const key = normalize(title);
+  if ((contract?.negativeReferences ?? []).slice(0, 12).some((item) => normalize(item) === key)) return true;
   const excluded = [
     ...(input.excludedTitles ?? []).slice(0, 200),
     ...(input.seenTitles ?? []).slice(0, 40),
@@ -590,6 +629,23 @@ function hiddenGemViolation(input: RecommendRequest, rec: RawRecommendation | Re
   return overRecommendedHiddenGemTitles.has(normalize(rec.title))
     ? "intent: hidden gem request got an over-recommended title"
     : null;
+}
+
+function strongFearViolation(
+  input: RecommendRequest,
+  rec: RawRecommendation | Recommendation,
+  contract?: IntentContract,
+): string | null {
+  const request = requestText(input);
+  const asksForStrongFear = contract?.primary === "scare" &&
+    /\b(really|genuinely|properly|extremely|absolutely|deeply|shit)\s+(?:scary|scared|terrifying|frightening)|\bterrify\s+(?:me|us|my)|\bmake\s+(?:me|us|my partner|them)\s+(?:really\s+)?(?:scared|terrified)|\bscariest\b/i.test(request);
+  if (!asksForStrongFear) return null;
+
+  const terms = structuredTerms(rec);
+  const strongFearSignals = ["scare", "scary", "fear", "dread", "terror", "terrifying", "frightening", "nightmare", "haunted"];
+  return strongFearSignals.some((term) => terms.has(term)) || /\b(dread|terrifying|frightening|genuinely scary|real fear|nightmare fuel)\b/i.test(contentText(rec))
+    ? null
+    : "intent: strong fear request was softened";
 }
 
 function breakupReliefViolation(
@@ -654,10 +710,12 @@ export function validateRecommendation<T extends RawRecommendation | Recommendat
 ): TrustRejection | null {
   const reasons = [
     memoryViolation(input, rec),
+    negativeReferenceViolation(rec, contract),
     confidenceViolation(rec),
     runtimeViolation(input, rec, contract),
     sensitivityViolation(input, rec, contract),
     humaneToneViolation(input, rec),
+    strongFearViolation(input, rec, contract),
     ...avoidanceViolations(input, rec),
     ...positiveFitViolations(input, rec, contract),
   ].filter((reason): reason is string => Boolean(reason));

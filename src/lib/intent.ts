@@ -127,7 +127,7 @@ export function extractIntent(input: RecommendRequest): RecommendationIntent {
   const runtimeLimitMinutes = extractRuntimeLimit(text);
   if (runtimeLimitMinutes) primaryIntents.add("runtime-limit");
 
-  const hiddenGem = /\b(hidden\s+gem|underrated|overlooked|buried|less\s+obvious|probably haven't seen|probably have not seen)\b/i.test(text);
+  const hiddenGem = /\b(hidden\s+gem|underrated|overlooked|buried|less\s+obvious|non[- ]?mainstream|not (?:the )?(?:mainstream|obvious|usual|famous) ones?|probably haven't seen|probably have not seen)\b/i.test(text);
   if (hiddenGem) primaryIntents.add("hidden-gem");
 
   return {

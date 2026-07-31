@@ -312,6 +312,25 @@ const tests = [
     why: "A cross-language reference must preserve Shameless's messy family/social survival engine while staying in the Hindi content lane.",
   },
   {
+    id: "GATE-NEGATIVE-TITLE-PERSISTS-BEYOND-SUBSCRIPTIONS",
+    category: "intent exclusions",
+    input: {
+      mode: "self",
+      selfText: "A really scary Indian Hindi movie, but not mainstream ones like Stree, Bhool Bhulaiyaa, or Bulbbul.",
+      country: "USA",
+      languagePreferences: ["Hindi"],
+      platforms: [],
+      platformFilter: "any",
+      excludedTitles: ["Stree", "Bhool Bhulaiyaa", "Bulbbul"],
+    },
+    check: (rec) => {
+      const rejected = new Set(rec._testInput.excludedTitles.map(normalizeTitle));
+      return !rejected.has(normalizeTitle(rec.title)) &&
+        relatedTitles(rec).every((title) => !rejected.has(normalizeTitle(title)));
+    },
+    why: "Expanding provider scope must preserve explicit negative title examples in the hero and every related rail.",
+  },
+  {
     id: "GATE-LONG-SESSION-NO-REPEAT",
     category: "session memory",
     input: {

@@ -280,34 +280,6 @@ const INTENT_COMMITMENT: Record<string, string> = {
   comfort: "The pick must be warm, emotionally safe, and easy to enter — low dread, low ambiguity, a clear satisfying shape. Do NOT substitute quiet, precise, contemplative arthouse cinema (slow-cinema character studies, withheld-emotion festival dramas) just because it is well-made — that is homework, not comfort, even when it is critically acclaimed. Do not pick something cold, clinical, or emotionally distant unless the user explicitly asked for that register. The viewer should feel held, not impressed.",
 };
 
-function intentCommitmentClause(intentContract: IntentContract): string {
-  const primary = intentContract.primary;
-  const confidence = intentContract.confidence;
-  if (confidence < 0.5) return "";
-
-  const lines: string[] = [];
-
-  if (INTENT_COMMITMENT[primary]) {
-    lines.push(INTENT_COMMITMENT[primary]);
-  }
-
-  const hasDarknessSecondary = intentContract.secondary.some((s) =>
-    /\b(bleak|dark|grim|nihilistic|morally.complex|morally.complicated|challenging|heavy|disturbing|provocative|brutal|unflinching|raw)\b/i.test(s),
-  );
-  const hasDarknessGoal = /\b(bleak|dark|grim|nihilistic|morally|challenging|heavy|disturbing|provocative|brutal|unflinching|raw|complex)\b/i.test(
-    intentContract.emotionalGoal,
-  );
-
-  if (primary === "drama" && (hasDarknessSecondary || hasDarknessGoal)) {
-    lines.push(
-      "Do NOT soften to accessible, warm, or redemptive drama. The request signals morally complex, bleak, or challenging dramatic territory. Stay there — a crowd-pleasing pick is a failure.",
-    );
-  }
-
-  if (!lines.length) return "";
-  return `\n\nINTENT COMMITMENT — do not soften this primary:\n${lines.map((l) => `- ${l}`).join("\n")}`;
-}
-
 function intentContractClause(intentContract?: IntentContract): string {
   if (!intentContract) return "";
   return `
@@ -322,7 +294,9 @@ AUTHORITATIVE INTENT CONTRACT
 - Situation: ${intentContract.situation.length ? intentContract.situation.join(", ") : "none"}
 - Intensity: ${intentContract.intensity}
 - Emotional goal: ${intentContract.emotionalGoal}
-- Ambiguity note: ${intentContract.ambiguity || "none"}${intentCommitmentClause(intentContract)}
+- Explicitly rejected title examples: ${intentContract.negativeReferences?.length ? intentContract.negativeReferences.join(", ") : "none"}
+- Discovery preference: ${intentContract.discoveryPreference ?? "standard"}
+- Ambiguity note: ${intentContract.ambiguity || "none"}
 
 Use this contract as the source of truth for what the user means. Do not re-infer the opposite from a single word in the raw text.`;
 }
@@ -570,22 +544,9 @@ export function buildCompactRetryPrompt(input: RecommendRequest, rejections: Com
   const rejectionsText = rejections.length
     ? rejections.slice(0, 8).map((item) => `- ${item.title}: ${item.reasons.join("; ")}`).join("\n")
     : "- none";
-  const discoverySchema = includeDiscovery ? `,
-    "hiddenLayer": {
-      "headline": "short headline",
-      "insight": "factual taste insight",
-      "classyJab": "short tasteful line"
-    },
-    "hiddenTitles": [
-      { "title": "string", "year": "string" },
-      { "title": "string", "year": "string" },
-      { "title": "string", "year": "string" }
-    ],
-    "alternatives": ["Title (Year)", "Title (Year)", "Title (Year)"]` : "";
-
   return `
 You are F.U.N. The first recommendation attempt failed backend trust checks.
-Return exactly ${COUNT_WORDS[count] ?? count} different recommendation${count === 1 ? "" : "s"} as valid JSON only. No markdown.
+Return exactly ${COUNT_WORDS[count] ?? count} different recommendation${count === 1 ? "" : "s"}. The API enforces the JSON schema; populate every required field and output no markdown.
 
 User contract:
 - Request text: ${intent.requestText || "not provided"}
@@ -599,6 +560,7 @@ User contract:
 - Requested format: ${intent.requestedFormat ?? "any"}
 - Runtime limit: ${intent.runtimeLimitMinutes ? `${intent.runtimeLimitMinutes} minutes` : "none"}
 - Hidden-gem intent: ${intent.hiddenGem ? "yes" : "no"}
+- Explicitly rejected title examples: ${intentContract?.negativeReferences?.length ? intentContract.negativeReferences.join(", ") : "none"}
 - Recent titles to avoid: ${input.recentTitles?.slice(0, 10).join(", ") || "none"}
 - Already seen to avoid: ${input.seenTitles?.slice(0, 10).join(", ") || "none"}
 
@@ -607,41 +569,11 @@ ${rejectionsText}
 
 Rules:
 - Fix the rejection reason directly. Do not repeat rejected titles or obvious adjacent titles.
+- Never return an explicitly rejected title example. Widening platform scope never relaxes title exclusions, language, format, intensity, or mood.
 - Explicit intent outranks situation and broad mood. If the user asks to be scared, pick real scary/horror. If they ask to cry, pick real catharsis. If they ask comedy, pick comedy.
 - Hard avoids are absolute. If horror/gore/violence/sex are avoided, do not recommend or hide those in related titles.
 - If a film is requested, do not return a series. If one episode is requested, return a specific episode.
 - Fill parsedIntent before choosing the title.
-
-Schema:
-[
-  {
-    "parsedIntent": {
-      "primary": "scare|cry|comedy|thriller|romance|weird|comfort|gore|drama|discovery|unknown",
-      "secondary": [],
-      "hardAvoids": [],
-      "softAvoids": [],
-      "format": "film|series|episode|any",
-      "language": "requested language/culture lane or 'any'",
-      "situation": [],
-      "intensity": "safe|curious|bold|unhinged",
-      "ambiguity": ""
-    },
-    "title": "string",
-    "year": "string",
-    "format": "Film|Series|Episode|Documentary|Unknown",
-    "runtime": "string",
-    "vibe": "string",
-    "contentCategory": ["structured labels for what the title is"],
-    "emotionalEffect": ["structured labels for what the title does emotionally"],
-    "confidence": 75,
-    "oneLine": "one sentence",
-    "whyItFits": ["reason 1", "reason 2", "reason 3"],
-    "whereToWatch": {
-      "status": "unverified",
-      "primary": "Availability not verified",
-      "note": "F.U.N will verify this in real time. Check your apps before watching."
-    }${discoverySchema}
-  }
-]
+Each item must include parsedIntent, title, year, format, runtime, vibe, contentCategory, emotionalEffect, confidence, oneLine, three whyItFits reasons, and unverified whereToWatch.${includeDiscovery ? " Also include hiddenLayer, three hiddenTitles, and three alternatives." : " Do not generate discovery fields."}
 `;
 }

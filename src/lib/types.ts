@@ -40,6 +40,10 @@ export type IntentContract = {
   emotionalGoal: string;
   confidence: number;
   ambiguity: string;
+  // Titles the viewer explicitly used as negative examples ("not X", "anything except Y").
+  // These become mechanical backend exclusions; they are not merely prompt guidance.
+  negativeReferences: string[];
+  discoveryPreference: "standard" | "non-mainstream";
   source: "llm" | "local";
 };
 
