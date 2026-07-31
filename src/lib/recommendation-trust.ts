@@ -12,6 +12,12 @@ export type TrustResult<T extends RawRecommendation | Recommendation> = {
   rejected: TrustRejection[];
 };
 
+export type RecommendationTrustMode = "hybrid" | "llm-only";
+
+export function recommendationTrustMode(): RecommendationTrustMode {
+  return process.env.FUN_SEMANTIC_TRUST_MODE === "llm-only" ? "llm-only" : "hybrid";
+}
+
 function normalize(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
@@ -727,17 +733,30 @@ export function validateRecommendation<T extends RawRecommendation | Recommendat
   rec: T,
   contract?: IntentContract,
 ): TrustRejection | null {
-  const reasons = [
+  const intent = extractIntent(input);
+  const mechanicalReasons = [
     memoryViolation(input, rec),
     negativeReferenceViolation(rec, contract),
     confidenceViolation(rec),
     runtimeViolation(input, rec, contract),
-    sensitivityViolation(input, rec, contract),
-    humaneToneViolation(input, rec),
-    strongFearViolation(input, rec, contract),
-    ...avoidanceViolations(input, rec),
-    ...positiveFitViolations(input, rec, contract),
+    explicitFormatViolation(input, rec, intent, contract),
+    hiddenGemViolation(input, rec, intent),
   ].filter((reason): reason is string => Boolean(reason));
+
+  const semanticReasons = recommendationTrustMode() === "llm-only"
+    ? []
+    : [
+        sensitivityViolation(input, rec, contract),
+        humaneToneViolation(input, rec),
+        strongFearViolation(input, rec, contract),
+        ...avoidanceViolations(input, rec),
+        breakupReliefViolation(input, rec, intent),
+        explicitPacingViolation(input, rec, intent),
+        ...explicitGenreViolations(input, rec, intent, contract),
+        ...parsedIntentContradictions(input, rec, contract),
+      ].filter((reason): reason is string => Boolean(reason));
+
+  const reasons = [...mechanicalReasons, ...semanticReasons];
 
   return reasons.length ? { title: rec.title, reasons } : null;
 }

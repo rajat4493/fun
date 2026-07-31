@@ -12,7 +12,7 @@ import {
 import { extractIntent } from "@/lib/intent";
 import { enrichRecommendation } from "@/lib/metadata";
 import { buildCompactRetryPrompt, buildRecommendationPrompt } from "@/lib/prompt";
-import { activeHardAvoidanceKeys, applyTrustFilter, relatedTitleUnsafe, safeFallback, TrustRejection } from "@/lib/recommendation-trust";
+import { activeHardAvoidanceKeys, applyTrustFilter, recommendationTrustMode, relatedTitleUnsafe, safeFallback, TrustRejection } from "@/lib/recommendation-trust";
 import { buildIntentContractPrompt, localIntentContract, normalizeIntentContract } from "@/lib/intent-contract";
 import { matchesLanguageRequest, wantsSpecificLanguage } from "@/lib/language-lane";
 import { normalizeRecommendRequest } from "@/lib/recommendation-utils";
@@ -1014,6 +1014,7 @@ export async function POST(req: Request) {
     const diagnostics = {
       runId,
       source,
+      trustMode: recommendationTrustMode(),
       providerVerification,
       degraded: Boolean(degradeReason),
       degradeReason,
@@ -1048,7 +1049,7 @@ export async function POST(req: Request) {
     console.log(
       `[FUN recommend] runId=${runId} count=${count} responseDetail=${input.responseDetail ?? "full"} ` +
       `title=${JSON.stringify(firstPick.title)} batch=${JSON.stringify(enrichedBatch.map((r) => r.title))} ` +
-      `source=${source} degraded=${degradeReason ?? "false"} totalMs=${timings.totalMs}`,
+      `source=${source} trustMode=${diagnostics.trustMode} degraded=${degradeReason ?? "false"} totalMs=${timings.totalMs}`,
     );
 
     return NextResponse.json({

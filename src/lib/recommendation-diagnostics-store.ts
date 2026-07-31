@@ -13,6 +13,7 @@ type ProviderTraceRecord = {
 
 type DiagnosticsSummary = {
   source: string;
+  trustMode: "hybrid" | "llm-only";
   providerVerification: string;
   degraded: boolean;
   degradeReason?: string;
