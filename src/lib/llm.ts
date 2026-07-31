@@ -59,6 +59,42 @@ type OpenAIResponse = {
   };
 };
 
+export type LlmCallTelemetry = {
+  provider: "openai";
+  purpose: "intent" | "recommendation";
+  model: string;
+  ok: boolean;
+  durationMs: number;
+  requestId?: string;
+  responseId?: string;
+  status?: string;
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  temperature: number;
+  maxOutputTokens: number;
+  promptCacheKey: string;
+  requestedCount?: number;
+  includeDiscovery?: boolean;
+  promptChars: number;
+  prompt?: string;
+  responseText?: string;
+  error?: string;
+};
+
+export type LlmTelemetryOptions = {
+  captureContent?: boolean;
+  onCall?: (telemetry: LlmCallTelemetry) => void;
+};
+
+function emitOpenAITelemetry(
+  options: LlmTelemetryOptions | undefined,
+  value: Omit<LlmCallTelemetry, "provider">,
+): void {
+  options?.onCall?.({ provider: "openai", ...value });
+}
+
 function logOpenAICacheUsage(label: string, data: OpenAIResponse): void {
   if (process.env.FUN_DEBUG_TRACES !== "1" || !data.usage) return;
   console.log(
@@ -401,6 +437,7 @@ export async function recommendWithOpenAI(
   count = 3,
   includeDiscovery = true,
   timeoutMs = FALLBACK_LLM_TIMEOUT_MS,
+  telemetry?: LlmTelemetryOptions,
 ): Promise<RawRecommendation[]> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
@@ -411,6 +448,9 @@ export async function recommendWithOpenAI(
   for (const model of models) {
     const remainingMs = timeoutMs - (Date.now() - started);
     if (remainingMs < 1000) break;
+    const attemptStarted = Date.now();
+    const maxOutputTokens = outputTokenBudget(count, includeDiscovery);
+    const promptCacheKey = includeDiscovery ? "fun-recommend-full-v1" : "fun-recommend-core-v1";
     try {
       const response = await withTimeout(
         (signal) => fetch("https://api.openai.com/v1/responses", {
@@ -422,11 +462,9 @@ export async function recommendWithOpenAI(
           body: JSON.stringify({
             model,
             input: prompt,
-            prompt_cache_key: includeDiscovery
-              ? "fun-recommend-full-v1"
-              : "fun-recommend-core-v1",
+            prompt_cache_key: promptCacheKey,
             temperature,
-            max_output_tokens: outputTokenBudget(count, includeDiscovery),
+            max_output_tokens: maxOutputTokens,
             text: {
               format: {
                 type: "json_schema",
@@ -453,9 +491,45 @@ export async function recommendWithOpenAI(
           `OpenAI ${model} completed without output text${data.id ? ` (response=${data.id})` : ""}`,
         );
       }
-      return parseRecommendationJson(text);
+      const parsed = parseRecommendationJson(text);
+      emitOpenAITelemetry(telemetry, {
+        purpose: "recommendation",
+        model,
+        ok: true,
+        durationMs: Date.now() - attemptStarted,
+        requestId: response.headers.get("x-request-id") ?? undefined,
+        responseId: data.id,
+        status: data.status,
+        inputTokens: data.usage?.input_tokens,
+        cachedInputTokens: data.usage?.input_tokens_details?.cached_tokens,
+        outputTokens: data.usage?.output_tokens,
+        totalTokens: data.usage?.total_tokens,
+        temperature,
+        maxOutputTokens,
+        promptCacheKey,
+        requestedCount: count,
+        includeDiscovery,
+        promptChars: prompt.length,
+        prompt: telemetry?.captureContent ? prompt : undefined,
+        responseText: telemetry?.captureContent ? text : undefined,
+      });
+      return parsed;
     } catch (error) {
       lastError = error;
+      emitOpenAITelemetry(telemetry, {
+        purpose: "recommendation",
+        model,
+        ok: false,
+        durationMs: Date.now() - attemptStarted,
+        temperature,
+        maxOutputTokens,
+        promptCacheKey,
+        requestedCount: count,
+        includeDiscovery,
+        promptChars: prompt.length,
+        prompt: telemetry?.captureContent ? prompt : undefined,
+        error: error instanceof Error ? error.message : String(error),
+      });
       console.warn(`OpenAI ${model} failed:`, error instanceof Error ? error.message : String(error));
     }
   }
@@ -463,7 +537,10 @@ export async function recommendWithOpenAI(
   throw lastError ?? new Error("OpenAI recommendation failed.");
 }
 
-export async function interpretIntentWithOpenAI(prompt: string): Promise<Record<string, unknown>> {
+export async function interpretIntentWithOpenAI(
+  prompt: string,
+  telemetry?: LlmTelemetryOptions,
+): Promise<Record<string, unknown>> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
 
@@ -472,6 +549,8 @@ export async function interpretIntentWithOpenAI(prompt: string): Promise<Record<
   for (const model of uniqueValues([process.env.OPENAI_MODEL, "gpt-4o-mini"])) {
     const remainingMs = INTENT_TIMEOUT_MS - (Date.now() - started);
     if (remainingMs < 500) break;
+    const attemptStarted = Date.now();
+    const promptCacheKey = "fun-intent-v1";
     try {
       const response = await withTimeout(
         (signal) => fetch("https://api.openai.com/v1/responses", {
@@ -483,7 +562,7 @@ export async function interpretIntentWithOpenAI(prompt: string): Promise<Record<
           body: JSON.stringify({
             model,
             input: prompt,
-            prompt_cache_key: "fun-intent-v1",
+            prompt_cache_key: promptCacheKey,
             temperature: 0.1,
             max_output_tokens: INTENT_MAX_OUTPUT_TOKENS,
           }),
@@ -504,9 +583,41 @@ export async function interpretIntentWithOpenAI(prompt: string): Promise<Record<
           `OpenAI intent ${model} completed without output text${data.id ? ` (response=${data.id})` : ""}`,
         );
       }
-      return parseJsonObject(text);
+      const parsed = parseJsonObject(text);
+      emitOpenAITelemetry(telemetry, {
+        purpose: "intent",
+        model,
+        ok: true,
+        durationMs: Date.now() - attemptStarted,
+        requestId: response.headers.get("x-request-id") ?? undefined,
+        responseId: data.id,
+        status: data.status,
+        inputTokens: data.usage?.input_tokens,
+        cachedInputTokens: data.usage?.input_tokens_details?.cached_tokens,
+        outputTokens: data.usage?.output_tokens,
+        totalTokens: data.usage?.total_tokens,
+        temperature: 0.1,
+        maxOutputTokens: INTENT_MAX_OUTPUT_TOKENS,
+        promptCacheKey,
+        promptChars: prompt.length,
+        prompt: telemetry?.captureContent ? prompt : undefined,
+        responseText: telemetry?.captureContent ? text : undefined,
+      });
+      return parsed;
     } catch (error) {
       lastError = error;
+      emitOpenAITelemetry(telemetry, {
+        purpose: "intent",
+        model,
+        ok: false,
+        durationMs: Date.now() - attemptStarted,
+        temperature: 0.1,
+        maxOutputTokens: INTENT_MAX_OUTPUT_TOKENS,
+        promptCacheKey,
+        promptChars: prompt.length,
+        prompt: telemetry?.captureContent ? prompt : undefined,
+        error: error instanceof Error ? error.message : String(error),
+      });
       console.warn(`OpenAI intent ${model} failed:`, error instanceof Error ? error.message : String(error));
     }
   }

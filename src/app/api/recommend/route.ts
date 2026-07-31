@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { filterFalsePositiveRecommendations, localFallback } from "@/lib/fallbacks";
 import {
   interpretIntentWithAnthropic,
@@ -7,6 +7,7 @@ import {
   recommendWithAnthropic,
   recommendWithGenericLLM,
   recommendWithOpenAI,
+  type LlmCallTelemetry,
 } from "@/lib/llm";
 import { extractIntent } from "@/lib/intent";
 import { enrichRecommendation } from "@/lib/metadata";
@@ -16,6 +17,7 @@ import { buildIntentContractPrompt, localIntentContract, normalizeIntentContract
 import { matchesLanguageRequest, wantsSpecificLanguage } from "@/lib/language-lane";
 import { normalizeRecommendRequest } from "@/lib/recommendation-utils";
 import { IntentContract, RawRecommendation, RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
+import { writeRecommendationDiagnostics } from "@/lib/recommendation-diagnostics-store";
 
 // Disabled by default while production credentials and fallback behavior are reviewed.
 // Re-enable deliberately after validation with FUN_ENABLE_ANTHROPIC=1.
@@ -235,6 +237,7 @@ type ProviderTrace = {
   promptChars: number;
   error?: string;
   count?: number;
+  calls?: LlmCallTelemetry[];
 };
 
 type RecommendationTimings = {
@@ -280,15 +283,20 @@ async function resolveIntentContract(input: RecommendRequest, trace: ProviderTra
   const prompt = buildIntentContractPrompt(input);
   const started = Date.now();
 
-  const tryIntent = async (provider: string, run: () => Promise<Record<string, unknown>>) => {
+  const tryIntent = async (
+    provider: string,
+    run: (record: (value: LlmCallTelemetry) => void) => Promise<Record<string, unknown>>,
+  ) => {
+    const calls: LlmCallTelemetry[] = [];
     try {
-      const raw = await run();
+      const raw = await run((value) => calls.push(value));
       const contract = normalizeIntentContract(raw, input);
       trace.push({
         provider,
         durationMs: Date.now() - started,
         ok: true,
         promptChars: prompt.length,
+        calls: calls.length ? calls : undefined,
       });
       return contract;
     } catch (error) {
@@ -299,6 +307,7 @@ async function resolveIntentContract(input: RecommendRequest, trace: ProviderTra
         ok: false,
         promptChars: prompt.length,
         error: message,
+        calls: calls.length ? calls : undefined,
       });
       console.warn(`${provider} failed:`, message);
       return null;
@@ -307,7 +316,13 @@ async function resolveIntentContract(input: RecommendRequest, trace: ProviderTra
 
   // Try only one configured provider for intent classification to avoid adding another long sequential chain.
   if (process.env.OPENAI_API_KEY) {
-    return await tryIntent(`Intent OpenAI (${process.env.OPENAI_MODEL || "gpt-4o-mini"})`, () => interpretIntentWithOpenAI(prompt)) ?? local;
+    return await tryIntent(
+      `Intent OpenAI (${process.env.OPENAI_MODEL || "gpt-4o-mini"})`,
+      (record) => interpretIntentWithOpenAI(prompt, {
+        captureContent: process.env.FUN_COLLECT_PROMPTS === "true",
+        onCall: record,
+      }),
+    ) ?? local;
   }
   if (process.env.LLM_BASE_URL && process.env.LLM_API_KEY && process.env.LLM_MODEL) {
     return await tryIntent(`Intent Generic LLM (${process.env.LLM_MODEL})`, () => interpretIntentWithGenericLLM(prompt)) ?? local;
@@ -329,17 +344,19 @@ async function tryProvider(
   trace: ProviderTrace[],
   provider: string,
   prompt: string,
-  run: () => Promise<RawRecommendation[]>,
+  run: (record: (value: LlmCallTelemetry) => void) => Promise<RawRecommendation[]>,
 ): Promise<RawRecommendation[] | null> {
   const started = Date.now();
+  const calls: LlmCallTelemetry[] = [];
   try {
-    const batch = await run();
+    const batch = await run((value) => calls.push(value));
     trace.push({
       provider,
       durationMs: Date.now() - started,
       ok: true,
       promptChars: prompt.length,
       count: batch.length,
+      calls: calls.length ? calls : undefined,
     });
     return batch;
   } catch (error) {
@@ -350,6 +367,7 @@ async function tryProvider(
       ok: false,
       promptChars: prompt.length,
       error: message,
+      calls: calls.length ? calls : undefined,
     });
     console.warn(`${provider} failed:`, message);
     return null;
@@ -388,7 +406,15 @@ async function getRecommendations(
 
   if (process.env.OPENAI_API_KEY && canTryProvider()) {
     const timeoutMs = providerBudget(primaryBudgetMs);
-    const batch = await tryProvider(trace, `OpenAI (${process.env.OPENAI_MODEL || "gpt-4o-mini"})`, prompt, () => recommendWithOpenAI(prompt, temperature, count, includeDiscovery, timeoutMs));
+    const batch = await tryProvider(
+      trace,
+      `OpenAI (${process.env.OPENAI_MODEL || "gpt-4o-mini"})`,
+      prompt,
+      (record) => recommendWithOpenAI(prompt, temperature, count, includeDiscovery, timeoutMs, {
+        captureContent: process.env.FUN_COLLECT_PROMPTS === "true",
+        onCall: record,
+      }),
+    );
     if (batch) return batch;
   }
 
@@ -984,6 +1010,40 @@ export async function POST(req: Request) {
     // with what this call actually returned — is what makes "the model said X, the user saw Y"
     // answerable by one ID lookup instead of guessing which of several calls a title came from.
     const runId = typeof input.runId === "string" && input.runId ? input.runId : `srv-${Date.now().toString(36)}`;
+    const diagnostics = {
+      runId,
+      source,
+      providerVerification,
+      degraded: Boolean(degradeReason),
+      degradeReason,
+      timings,
+      retryCount: Math.max(0, providerTrace.filter((item) =>
+        !item.provider.startsWith("Intent ") &&
+        !item.provider.startsWith("parallel-batch discarded"),
+      ).length - 1),
+    };
+
+    // Persist after the response lifecycle so diagnostics never add latency to the recommendation.
+    // Full provider prompts/responses are included only when FUN_COLLECT_PROMPTS=true.
+    after(async () => {
+      try {
+        await writeRecommendationDiagnostics({
+          runId,
+          request: input,
+          intentContract,
+          recommendation: firstPick,
+          batch: enrichedBatch,
+          rejections: trustRejections,
+          fallbackUsed,
+          displayState,
+          diagnostics,
+          providerTrace,
+        });
+      } catch (error) {
+        console.warn("[FUN diagnostics write failed]", error);
+      }
+    });
+
     console.log(
       `[FUN recommend] runId=${runId} count=${count} responseDetail=${input.responseDetail ?? "full"} ` +
       `title=${JSON.stringify(firstPick.title)} batch=${JSON.stringify(enrichedBatch.map((r) => r.title))} ` +
@@ -1002,18 +1062,7 @@ export async function POST(req: Request) {
         // that fill call reuse this response's intent contract instead of re-classifying intent.
         intentContract,
         batchComplete: count >= 3,
-        diagnostics: {
-          runId,
-          source,
-          providerVerification,
-          degraded: Boolean(degradeReason),
-          degradeReason,
-          timings,
-          retryCount: Math.max(0, providerTrace.filter((item) =>
-            !item.provider.startsWith("Intent ") &&
-            !item.provider.startsWith("parallel-batch discarded"),
-          ).length - 1),
-        },
+        diagnostics,
         ...(process.env.NODE_ENV !== "production" || process.env.FUN_DEBUG_TRACES === "1" ? { providerTrace } : {}),
       },
     });
