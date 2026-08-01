@@ -14,7 +14,8 @@ import { buildCompactRetryPrompt, buildRecommendationPrompt } from "@/lib/prompt
 import { activeHardAvoidanceKeys, applyTrustFilter, relatedTitleUnsafe, safeFallback, TrustRejection } from "@/lib/recommendation-trust";
 import { buildIntentContractPrompt, localIntentContract, normalizeIntentContract } from "@/lib/intent-contract";
 import { matchesLanguageRequest, wantsSpecificLanguage } from "@/lib/language-lane";
-import { normalizeRecommendRequest } from "@/lib/recommendation-utils";
+import { isPlotIdentificationRequest, normalizeRecommendRequest, requestText } from "@/lib/recommendation-utils";
+import { callerIp, checkRateLimit } from "@/lib/rate-limit";
 import { IntentContract, RawRecommendation, RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
 
 // Disabled by default while production credentials and fallback behavior are reviewed.
@@ -109,6 +110,20 @@ function hasSubscriptionProvider(recommendation: Recommendation): boolean {
   return recommendation.whereToWatch.status === "verified" &&
     !recommendation.whereToWatch.notOnUserPlatforms &&
     (recommendation.whereToWatch.providers ?? []).some((provider) => provider.access === "subscription");
+}
+
+function catalogConfirmed(recommendation: Recommendation): boolean {
+  return recommendation.contentMetadata?.catalogConfirmed !== false;
+}
+
+function genreNeutralBingeShouldAvoidHorror(input: RecommendRequest, contract: IntentContract): boolean {
+  const request = requestText(input).toLowerCase();
+  const asksForBinge = /\b(binge|weekend binge|hook me fast|hooks? me fast|easy to binge|one more episode)\b/.test(request);
+  if (!asksForBinge) return false;
+  if (["scare", "gore", "thriller"].includes(contract.primary)) return false;
+  if (/\b(horror|scary|scare|terrify|terrifying|gore|gory|bloody|ghost|haunted|demon|supernatural)\b/.test(request)) return false;
+  if (/\b(thriller|crime|mystery|detective|murder|suspense)\b/.test(request)) return false;
+  return true;
 }
 
 
@@ -526,6 +541,78 @@ function fallbackIntentScore(rec: RawRecommendation, intentContract?: IntentCont
   return score;
 }
 
+function acceptedBatchScore(rec: RawRecommendation, intentContract?: IntentContract, input?: RecommendRequest): number {
+  let score = fallbackIntentScore(rec, intentContract, input);
+  const labels = new Set([
+    normalizeSignal(rec.parsedIntent?.primary),
+    ...(rec.parsedIntent?.secondary ?? []).map(normalizeSignal),
+    ...(rec.contentCategory ?? []).map(normalizeSignal),
+    ...(rec.emotionalEffect ?? []).map(normalizeSignal),
+  ]);
+
+  if (intentContract) {
+    const isReliefState = intentContract.situation.some((value) => value.includes("breakup-recovery") || value.includes("grief-relief") || value.includes("panic"));
+    if (intentContract.primary === "comfort" || isReliefState) {
+      if (["comedy", "funny", "laughter", "light", "warm", "warmth", "gentle", "reassurance", "reassuring", "easy", "feel-good"].some((label) => labels.has(label))) score += 8;
+      if (["heartbreak", "heartbreaking", "grief", "loss", "bleak", "harrowing", "melancholy", "devastating"].some((label) => labels.has(label))) score -= 10;
+      if (labels.has("drama") && !labels.has("comedy")) score -= 6;
+    }
+
+    if (intentContract.primary === "thriller") {
+      if (["thriller", "suspense", "mystery", "crime", "tension", "tense", "paranoid", "investigation"].some((label) => labels.has(label))) score += 8;
+      if (labels.has("drama") && !["thriller", "suspense", "mystery", "crime", "tension", "tense"].some((label) => labels.has(label))) score -= 8;
+    }
+
+    if (intentContract.primary === "cry") {
+      if (["cry", "tearjerker", "catharsis", "cathartic", "moving", "poignant", "grief", "loss", "heartbreaking"].some((label) => labels.has(label))) score += 8;
+      if (["comfort", "warm", "warmth", "easy", "feel-good"].some((label) => labels.has(label)) && !["cry", "catharsis", "heartbreaking", "moving", "poignant"].some((label) => labels.has(label))) score -= 8;
+      if (intentContract.format === "any") {
+        if (rec.format === "Film") score += 4;
+        if (rec.format === "Series" || rec.format === "Episode") score -= 4;
+      }
+    }
+
+    // Same pattern as comfort/thriller/cry above: prefer candidates whose own labels actually
+    // support the primary intent, and penalize a softer register that would quietly dilute it —
+    // the exact "safe pick softens the ask" drift this session repeatedly found bugs in.
+    if (intentContract.primary === "scare") {
+      if (["scare", "scary", "horror", "fear", "dread", "terror", "terrifying", "frightening", "nightmare", "haunted"].some((label) => labels.has(label))) score += 8;
+      if (["comfort", "warm", "warmth", "feel-good", "gentle", "cozy"].some((label) => labels.has(label))) score -= 10;
+    }
+
+    if (intentContract.primary === "gore") {
+      if (["gore", "gory", "body-horror", "splatter", "graphic-violence", "visceral"].some((label) => labels.has(label))) score += 8;
+      if (["comfort", "warm", "warmth", "feel-good", "gentle"].some((label) => labels.has(label))) score -= 10;
+    }
+
+    if (intentContract.primary === "romance") {
+      if (["romance", "romantic", "love-story", "chemistry", "tender"].some((label) => labels.has(label))) score += 8;
+    }
+
+    if (intentContract.primary === "weird") {
+      if (["weird", "surreal", "absurd", "offbeat", "bizarre", "experimental", "strange"].some((label) => labels.has(label))) score += 8;
+    }
+
+    if (intentContract.primary === "drama") {
+      if (["drama", "character-study", "serious", "emotional", "prestige"].some((label) => labels.has(label))) score += 6;
+    }
+
+    if (intentContract.primary === "discovery" || intentContract.discoveryPreference === "non-mainstream") {
+      if (["hidden-gem", "underrated", "discovery", "overlooked"].some((label) => labels.has(label))) score += 6;
+    }
+  }
+
+  return score;
+}
+
+function rankAcceptedBatch(batch: RawRecommendation[], intentContract?: IntentContract, input?: RecommendRequest): RawRecommendation[] {
+  if (batch.length <= 1) return batch;
+  return batch
+    .map((rec, index) => ({ rec, index, score: acceptedBatchScore(rec, intentContract, input) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((item) => item.rec);
+}
+
 function rankFallbacksByContract(batch: RawRecommendation[], intentContract?: IntentContract, input?: RecommendRequest): RawRecommendation[] {
   if ((!intentContract || intentContract.primary === "unknown") && !input) return batch;
   return batch
@@ -573,8 +660,9 @@ async function trustedRawBatch(
     const trusted = applyTrustFilter(input, normalizedBatch, intentContract);
     allRejections.push(...trusted.rejected);
     if (trusted.accepted.length > 0) {
+      const rankedAccepted = rankAcceptedBatch(trusted.accepted, intentContract, input);
       return {
-        batch: trusted.accepted.slice(0, count),
+        batch: rankedAccepted.slice(0, count),
         rejections: allRejections,
         fallbackUsed: trace.slice(traceStart).some((item) => item.provider === "local fallback"),
       };
@@ -604,7 +692,23 @@ async function enrichBatch(
   timings?: RecommendationTimings,
 ): Promise<Recommendation[]> {
   const started = Date.now();
-  const recommendations = await Promise.all(batch.map((pick) => enrichRecommendation(pick, country, platforms)));
+  const recommendations = await Promise.all(batch.map(async (pick) => {
+    try {
+      return await enrichRecommendation(pick, country, platforms);
+    } catch {
+      return {
+        ...pick,
+        whereToWatch: {
+          status: "unverified" as const,
+          primary: "Availability not verified yet",
+          note: "Check your apps — metadata lookup timed out.",
+          providers: [],
+          country,
+          notOnUserPlatforms: false,
+        },
+      };
+    }
+  }));
   if (timings) timings.verificationMs += Date.now() - started;
   return recommendations;
 }
@@ -737,9 +841,50 @@ function unavailableSubscriptionFallback(
   };
 }
 
+// F.U.N matches a mood to a title; it does not identify a specific half-remembered film from
+// plot fragments. Rather than force that request through the mood pipeline and risk the model
+// fabricating a plausible-sounding but nonexistent title, decline honestly and say what this
+// product actually does. See isPlotIdentificationRequest for the detection heuristic.
+function plotIdentificationDeclineResponse(country: string): Recommendation {
+  return {
+    title: "F.U.N can't identify a movie from a plot description",
+    year: "",
+    format: "Unknown",
+    runtime: "",
+    vibe: "",
+    confidence: 0,
+    oneLine: "F.U.N matches how you want to feel tonight to a title — it doesn't identify a specific half-remembered movie from a scene or plot fragment.",
+    whyItFits: [
+      "Try describing the mood or vibe you're after instead, and F.U.N will find a real match.",
+      "For identifying a specific half-remembered film, a dedicated tip-of-my-tongue community or search is a better fit.",
+    ],
+    whereToWatch: {
+      status: "unverified",
+      primary: "Not applicable",
+      note: "This request needs film identification, not mood matching.",
+      providers: [],
+      country,
+    },
+    hiddenLayer: { headline: "", insight: "", classyJab: "" },
+    alternatives: [],
+    contentCategory: [],
+    emotionalEffect: [],
+  };
+}
+
 export async function POST(req: Request) {
   try {
     const requestStarted = Date.now();
+
+    // Checked before any body parsing or LLM call — a blocked request must cost nothing.
+    const rateLimit = await checkRateLimit(callerIp(req));
+    if (rateLimit.limited) {
+      return NextResponse.json(
+        { error: "You've hit the free limit for now. Please try again shortly." },
+        { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } },
+      );
+    }
+
     let rawInput: unknown;
     try {
       rawInput = await readJsonBodyWithLimit(req);
@@ -754,6 +899,17 @@ export async function POST(req: Request) {
     }
     let input = normalizeRecommendRequest(rawInput as RecommendRequest);
     const country = input.country || "Poland";
+
+    // Bail out before any LLM call — this request type is out of scope for mood matching,
+    // and attempting it anyway is exactly what produced a fabricated, nonexistent title.
+    if (input.selfText && isPlotIdentificationRequest(input.selfText)) {
+      return NextResponse.json({
+        ...plotIdentificationDeclineResponse(country),
+        displayState: "unverified",
+        _trust: { diagnostics: { source: "declined", degraded: false, retryCount: 0 } },
+      });
+    }
+
     const platforms = input.platforms ?? [];
     const avoids = activeHardAvoidanceKeys(input);
     const subscriptionOnly = input.platformFilter === "mine";
@@ -863,6 +1019,34 @@ export async function POST(req: Request) {
     // Avoidance and language fallbacks must not quietly replace a declared no-match state
     // with another unverified pick that would confuse the UI.
 
+    if (displayState !== "no-subscription-match") {
+      const confirmed = enrichedBatch.filter(catalogConfirmed);
+      if (confirmed.length > 0 && confirmed.length < enrichedBatch.length) {
+        trustRejections.push(...enrichedBatch
+          .filter((rec) => !catalogConfirmed(rec))
+          .map((rec) => ({
+            title: rec.title,
+            reasons: ["metadata: title not confirmed in TMDB/OMDb/catalogue data"],
+          })));
+        enrichedBatch = confirmed;
+      }
+    }
+
+    if (displayState !== "no-subscription-match" && genreNeutralBingeShouldAvoidHorror(input, intentContract)) {
+      const nonHorror = enrichedBatch.filter((rec) =>
+        !(rec.contentMetadata?.genreIds?.includes(27) || textSuggestsAvoidance(["horror"], rec))
+      );
+      if (nonHorror.length > 0) {
+        trustRejections.push(...enrichedBatch
+          .filter((rec) => rec.contentMetadata?.genreIds?.includes(27) || textSuggestsAvoidance(["horror"], rec))
+          .map((rec) => ({
+            title: rec.title,
+            reasons: ["intent: genre-neutral binge request defaulted to horror"],
+          })));
+        enrichedBatch = nonHorror;
+      }
+    }
+
     // For an explicitly strong fear request, do not trust the model's self-label alone. Confirm
     // horror against the metadata already fetched for availability/posters. This catches a real
     // title such as a romance being hallucinated as "psychological horror" without another API call.
@@ -896,10 +1080,20 @@ export async function POST(req: Request) {
     //   verifiedClean    — TMDB returned genre data AND no avoidance violation → serve first
     //   textSafeUnknown  — TMDB had no genre data AND title/vibe text isn't suspicious → serve if no verifiedClean
     //   everything else  — confirmed violation OR suspicious text → fail closed with safe fallback
-    if (avoids.length > 0 && displayState !== "no-subscription-match") {
+    //
+    // "gore" maps to the same TMDB genre id as "horror" (27) — TMDB has no distinct gore genre.
+    // For a genuine "scare" request, requiresConfirmedHorror above already filtered enrichedBatch
+    // down to genre-27-confirmed titles specifically because scare needs that genre. Checking
+    // "gore" against genre 27 here would then reject every one of those candidates on the very
+    // property that made them valid, making "scary but no gore" — one of the most common ways
+    // people phrase a scare request — structurally unsatisfiable. Gore avoidance for a scare
+    // primary is enforced via the text/label signal below instead; the genre-id proxy is only
+    // meaningful for gore avoidance when horror itself isn't the desired outcome.
+    const genreGateAvoids = intentContract.primary === "scare" ? avoids.filter((avoid) => avoid !== "gore") : avoids;
+    if (genreGateAvoids.length > 0 && displayState !== "no-subscription-match") {
       const withGenreData = enrichedBatch.filter((rec) => (rec.contentMetadata?.genreIds?.length ?? 0) > 0);
       const withoutGenreData = enrichedBatch.filter((rec) => (rec.contentMetadata?.genreIds?.length ?? 0) === 0);
-      const verifiedClean = withGenreData.filter((rec) => !genreViolatesAvoidance(avoids, rec.contentMetadata!.genreIds!));
+      const verifiedClean = withGenreData.filter((rec) => !genreViolatesAvoidance(genreGateAvoids, rec.contentMetadata!.genreIds!));
       const textSafeUnknown = withoutGenreData.filter((rec) => !textSuggestsAvoidance(avoids, rec));
 
       if (verifiedClean.length > 0) {

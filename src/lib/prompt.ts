@@ -50,6 +50,7 @@ CORE DECISION POLICY
 - Unnegated requests for gore, gory, bloody, splatter, or body horror are positive intensity requests. Do not soften them into generic action, quiet drama, or merely dark prestige.
 - Romantic/sexy requests mean sensual mainstream adult storytelling, never pornographic or sexually explicit material unless the user unmistakably requests that boundary.
 - For cross-language references, preserve the viewer job before translating culture: e.g. "Shameless but Hindi" still needs messy family survival, class pressure, compromised people, adult edges, loyalty, and damage beneath the humor—not merely a popular Hindi comedy or crime title.
+- When several titles would satisfy the request equally well, do not always default to the single most famous or most obvious one. Being the correct answer does not require being the most predictable one — let genuinely different eras, profiles, and lesser-known titles compete on equal footing with the obvious choice.
 
 OUTPUT POLICY
 - Fill parsedIntent before choosing the title. contentCategory describes what the title is; emotionalEffect describes what it does. Never copy avoided concepts into those fields merely to say the title avoids them.
@@ -335,6 +336,9 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
   const hiddenGemClause = /hidden\s+gem|underrated|overlooked|buried|less\s+obvious/i.test(userContext)
     ? "\n- Hidden-gem intent: Prefer a quieter, less obvious high-quality title over the most famous prestige answer. It can still be acclaimed, but it should feel like a discovery."
     : "";
+  const surpriseMeClause = intent.surpriseMe
+    ? "\n- \"Surprise me\" / dealer's-choice intent: there is no specific mood to anchor on. Default to something broadly engaging, satisfying, and accessible — a genuine delightful discovery. Do not default to the single heaviest, bleakest, or most demanding possible title (e.g. an arthouse film centered on suicide or extreme despair) just because it is acclaimed. Surprise should feel like a gift, not a gut-punch."
+    : "";
   const indieClause = indieMode
     ? "\n- Indie/discovery mode is ON: prefer smaller, independent, festival, regional, under-marketed, or platform-buried titles that still strongly fit the emotional job. Do not choose obscure for obscurity's sake. If the best pick is on YouTube, MUBI, public broadcaster catalogues, or a smaller local service, that is acceptable when it fits."
     : "";
@@ -511,7 +515,7 @@ User context:
 - Mood/request: ${userContext}
 - Discovery mode: ${indieMode ? "Indie / hidden cinema" : "Standard"}${indieClause}
 
-Request-specific policy:${contractClause}${hiddenGemClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${fearIntentClause}${crazinessClause}${softMoodDirectionClause}${feedbackRepairClause}${sensitivityClause}${humaneToneClause}${contextAmplifier}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
+Request-specific policy:${contractClause}${hiddenGemClause}${surpriseMeClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${fearIntentClause}${crazinessClause}${softMoodDirectionClause}${feedbackRepairClause}${sensitivityClause}${humaneToneClause}${contextAmplifier}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
 
 Return one JSON object with a "recommendations" array containing exactly ${COUNT_WORDS[count] ?? String(count)} item${count === 1 ? "" : "s"}. The API enforces the full schema; populate every required field and output no markdown.
 Each item must include parsedIntent, title, year, format, runtime, vibe, contentCategory, emotionalEffect, confidence, oneLine, three whyItFits reasons, and unverified whereToWatch.${includeDiscovery ? " Also include hiddenLayer, three hiddenTitles, and three alternatives." : ""}

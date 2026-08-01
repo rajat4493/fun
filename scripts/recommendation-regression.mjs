@@ -66,7 +66,10 @@ const tests = [
       platforms: [],
       platformFilter: "any",
     },
-    check: (rec) => cry.test(textOf(rec)),
+    check: (rec) => {
+      const labels = [...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].join(" ");
+      return cry.test(labels) || cry.test(textOf(rec));
+    },
     why: "Cry request must return catharsis/tearjerker emotional material.",
   },
   {
@@ -113,6 +116,19 @@ const tests = [
     },
     check: (rec) => /\b(episode|per episode)\b/i.test(`${rec.format} ${rec.runtime}`),
     why: "One episode request must return episode/per-episode format.",
+  },
+  {
+    id: "FORMAT-NO-KEYWORD-ANY",
+    input: {
+      mode: "self",
+      selfText: "Something inspiring for tonight, feeling a bit low energy",
+      country: "Poland",
+      languagePreferences: ["Any language"],
+      platforms: ["Netflix"],
+      platformFilter: "mine",
+    },
+    check: (rec) => rec._trust?.intentContract?.format === "any",
+    why: "Keyword-free request must not have the LLM invent a film/series/episode format.",
   },
   {
     id: "TIME-DRAMA-UNDER-90",

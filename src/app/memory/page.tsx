@@ -271,6 +271,7 @@ export default function MemoryPage() {
               <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> No streaming passwords are needed.</p>
               <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> Private-preview analytics stores recommendation activity under an anonymous device ID. Prompt text is stored only when collection is explicitly enabled.</p>
               <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> Clear all removes device memory and its anonymous profile memory.</p>
+              <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> Posters, ratings, and where-to-watch data are provided by <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer" className="underline hover:text-amber-100">TMDB</a>. F.U.N uses the TMDB API but is not endorsed or certified by TMDB.</p>
             </div>
           </article>
         </section>

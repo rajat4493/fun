@@ -30,6 +30,72 @@ function contentText(rec: RawRecommendation | Recommendation): string {
   ].filter(Boolean).join(" ");
 }
 
+const DECADE_WORD_MAP: Record<string, string> = {
+  sixties: "1960s",
+  seventies: "1970s",
+  eighties: "1980s",
+  nineties: "1990s",
+};
+
+function normalizeDecadeToken(raw: string): string | null {
+  const lower = raw.toLowerCase();
+  if (DECADE_WORD_MAP[lower]) return DECADE_WORD_MAP[lower];
+  const shortForm = lower.match(/^'?(\d0)s$/);
+  if (shortForm) {
+    const twoDigit = Number(shortForm[1]);
+    return twoDigit <= 30 ? `20${shortForm[1]}s` : `19${shortForm[1]}s`;
+  }
+  const fullForm = lower.match(/^(19[0-9]0|20[0-3]0)s$/);
+  return fullForm ? `${fullForm[1]}s` : null;
+}
+
+// Phrases that frame a decade as the STORY's setting or as a comparative homage ("channels 90s
+// teen comedies") rather than a factual claim about this title's own vintage — both are legitimate
+// and must not be compared against the release year.
+const NON_LITERAL_DECADE_CLAUSE = /\b(?:set in|set during|takes place in|is set in|returns to|set against|set amid|vibe of|energy of|channels?|reminiscent of|homage to|throwback to|callback to|in the spirit of|harkens? back to|nostalgia for|nostalgic for|feels like|evokes)\b[^.,;]{0,60}/gi;
+
+function decadeMentions(text: string): string[] {
+  const literalOnly = text.replace(NON_LITERAL_DECADE_CLAUSE, " ");
+  const pattern = /\b(1[89]\d0s|20[0-3]0s|'?\d0s|sixties|seventies|eighties|nineties)\b/gi;
+  const found: string[] = [];
+  for (const match of literalOnly.matchAll(pattern)) {
+    const normalized = normalizeDecadeToken(match[0]);
+    if (normalized) found.push(normalized);
+  }
+  return found;
+}
+
+function releaseDecade(year: string): string | null {
+  const parsed = Number.parseInt(year, 10);
+  if (!Number.isFinite(parsed) || parsed < 1900 || parsed > 2100) return null;
+  return `${Math.floor(parsed / 10) * 10}s`;
+}
+
+// Copy fields only — deliberately excludes title/format/runtime. A title like "That '70s Show"
+// (a real 1998 sitcom) would otherwise self-trigger a false mismatch against its own name.
+function groundingCopyText(rec: RawRecommendation | Recommendation): string {
+  return [
+    rec.vibe,
+    rec.oneLine,
+    ...(rec.whyItFits ?? []),
+    rec.hiddenLayer?.headline,
+    rec.hiddenLayer?.insight,
+    rec.hiddenLayer?.classyJab,
+  ].filter(Boolean).join(" ");
+}
+
+// Guards against the model's own copy contradicting itself — e.g. calling a 2015 film "a defining
+// piece of 90s nostalgia" with no "set in"/homage framing. Genuine period pieces and comparative
+// homages are exempted above; this only catches an ungrounded vintage claim about the title itself.
+function copyGroundingViolation(rec: RawRecommendation | Recommendation): string | null {
+  const actual = releaseDecade(rec.year);
+  if (!actual) return null;
+  const contradicting = decadeMentions(groundingCopyText(rec)).find((decade) => decade !== actual);
+  return contradicting
+    ? `grounding: copy claims ${contradicting} but ${rec.title} released in ${actual}`
+    : null;
+}
+
 function wantsFamilySafe(input: RecommendRequest): boolean {
   const text = [requestText(input), input.contextHint].filter(Boolean).join(" ");
   return /\b(family safe|family-safe|family|with family|with parents|parents|kids|children|work safe|work-safe|at work|office)\b/i.test(text);
@@ -287,6 +353,7 @@ function runtimeViolation(input: RecommendRequest, rec: RawRecommendation | Reco
   const time = input.time?.toLowerCase();
   const minutes = parseRuntimeMinutes(rec.runtime);
   const asksForEpisode = contractFormat(contract) === "episode" || time?.includes("one episode") || /\b(one|1)\s+episode\b|\ban episode\b/.test(request);
+  const asksForSeries = contractFormat(contract) === "series" || /\b(series|show|season|episodes|binge)\b/.test(request);
   if (asksForEpisode) {
     return isEpisodeRuntime(rec) ? null : "time: requested one episode";
   }
@@ -304,16 +371,20 @@ function runtimeViolation(input: RecommendRequest, rec: RawRecommendation | Reco
   const freeTextLimit = request.match(/\b(?:under|less than|within|up to|max(?:imum)?|no more than)\s+(\d{1,3})\s*(?:min|mins|minutes)\b/);
   const plainMinuteNeed = request.match(/\b(\d{1,3})\s*(?:min|mins|minutes)\b/);
   const requestedLimit = freeTextLimit ? Number(freeTextLimit[1]) : plainMinuteNeed ? Number(plainMinuteNeed[1]) : null;
+  const isSeriesLike = /\b(series|episode|season)\b/.test(`${rec.format} ${rec.runtime}`.toLowerCase());
+  if ((requestedLimit || time?.includes("under 2") || time?.includes("90")) && isSeriesLike && !asksForSeries) {
+    return "time: runtime-limited request defaulted to series/episode";
+  }
   if (requestedLimit && requestedLimit >= 10 && requestedLimit <= 240 && minutes > requestedLimit) {
     return `time: ${minutes} min exceeds ${requestedLimit} min request`;
   }
-  if (/\b(?:under|less than|within|up to|max(?:imum)?|no more than)\s+(?:two|2)\s+hours?\b/.test(request) && minutes > 120) {
+  if (/\b(?:under|less than|within|up to|max(?:imum)?|no more than)\s+(?:two|2)\s+hours?\b/.test(request) && minutes > 130) {
     return `time: ${minutes} min exceeds under 2 hours`;
   }
 
   if (!time || time === "no preference") return null;
   if (time.includes("90") && !isEpisodeRuntime(rec) && minutes > 110) return `time: ${minutes} min exceeds 90 min mood`;
-  if (time.includes("under 2") && !isEpisodeRuntime(rec) && minutes > 120) return `time: ${minutes} min exceeds under 2 hours`;
+  if (time.includes("under 2") && !isEpisodeRuntime(rec) && minutes > 130) return `time: ${minutes} min exceeds under 2 hours`;
   return null;
 }
 
@@ -393,7 +464,9 @@ function negativeReferenceViolation(rec: RawRecommendation | Recommendation, con
 }
 
 function confidenceViolation(rec: RawRecommendation | Recommendation): string | null {
-  return typeof rec.confidence === "number" && rec.confidence < 60 ? `confidence: ${rec.confidence} below minimum` : null;
+  if (typeof rec.confidence !== "number" || !Number.isFinite(rec.confidence)) return null;
+  const normalized = rec.confidence <= 1 ? rec.confidence * 100 : rec.confidence;
+  return normalized < 60 ? `confidence: ${normalized} below minimum` : null;
 }
 
 const overRecommendedHiddenGemTitles = new Set([
@@ -527,6 +600,10 @@ function sensitivityViolation(
   if (situation.some((s) => s.toLowerCase().includes("panic") || s.toLowerCase().includes("anxiety"))) {
     if (panicUnsafeTerms.test(text) || activating.some((label) => terms.has(label))) {
       return "sensitivity: panic/anxiety state — pick is too activating";
+    }
+    const containingSignals = ["comfort", "warm", "warmth", "gentle", "cozy", "soothing", "uplifting", "feel-good", "light", "reassurance", "reassuring", "easy"];
+    if (hasStructuredSignals(rec) && !containingSignals.some((label) => terms.has(label))) {
+      return "sensitivity: panic/anxiety state — pick is not actively containing";
     }
   }
 
@@ -716,6 +793,7 @@ export function validateRecommendation<T extends RawRecommendation | Recommendat
     sensitivityViolation(input, rec, contract),
     humaneToneViolation(input, rec),
     strongFearViolation(input, rec, contract),
+    copyGroundingViolation(rec),
     ...avoidanceViolations(input, rec),
     ...positiveFitViolations(input, rec, contract),
   ].filter((reason): reason is string => Boolean(reason));
@@ -780,6 +858,25 @@ export function rejectionPrompt(rejections: TrustRejection[]): string {
 ${rejections.slice(0, 8).map((item) => `- "${item.title}" rejected: ${item.reasons.join("; ")}`).join("\n")}
 ${avoidanceNote}${memoryNote}${runtimeNote}${intentNote}${sensitivityNote}${humaneToneNote}
 Return three completely different valid candidates that preserve the emotional job while staying strictly inside all boundaries.`;
+}
+
+function hashSeed(value: string): number {
+  return value.split("").reduce((total, char) => ((total << 5) - total + char.charCodeAt(0)) | 0, 0);
+}
+
+// safeFallback's category pools previously always returned candidates[0] via
+// `.find(...) ?? candidates[0]` — deterministic across every session, forever, for the same
+// category match. That's the concrete mechanism behind titles like The Intouchables or The
+// Grand Budapest Hotel repeating across unrelated requests: this is the last-resort path, and
+// with no per-session exclusion to break the tie, index 0 always wins. Rotating the starting
+// point by a hash of the actual request text means different phrasings naturally spread across
+// the pool, while the exact same input still deterministically reproduces the same pick (needed
+// for testing) — no added randomness, no new infrastructure, no cross-session state.
+function pickWithRotation<T>(candidates: T[], isExcluded: (title: string) => boolean, seed: string, titleOf: (item: T) => string): T {
+  const available = candidates.filter((item) => !isExcluded(titleOf(item)));
+  const pool = available.length > 0 ? available : candidates;
+  const start = Math.abs(hashSeed(seed)) % pool.length;
+  return pool[start];
 }
 
 export function safeFallback(input: RecommendRequest): RawRecommendation {
@@ -930,7 +1027,7 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
       });
     }
 
-    return scaryFallbacks.find((candidate) => !isExcluded(candidate.title)) ?? scaryFallbacks[0];
+    return pickWithRotation(scaryFallbacks, isExcluded, text, (c) => c.title);
   }
 
   if (intent.requestedFormat === "episode") {
@@ -1017,7 +1114,7 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
         alternatives: ["The Good Place (2016)", "Abbott Elementary (2021)", "Parks and Recreation (2009)"],
       },
     ];
-    return episodeFallbacks.find((candidate) => !isExcluded(candidate.title)) ?? episodeFallbacks[0];
+    return pickWithRotation(episodeFallbacks, isExcluded, text, (c) => c.title);
   }
 
   // Runtime is a hard practical constraint, not a taste preference — it must outrank mood-matching
@@ -1108,7 +1205,7 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
         ...base,
       },
     ];
-    return shortRuntimeFallbacks.find((candidate) => !isExcluded(candidate.title)) ?? shortRuntimeFallbacks[0];
+    return pickWithRotation(shortRuntimeFallbacks, isExcluded, text, (c) => c.title);
   }
 
   if (wantsHindi && wantsThriller) {
@@ -1174,7 +1271,7 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
         ...base,
       },
     ];
-    return hindiThrillers.find((rec) => !isExcluded(rec.title)) ?? hindiThrillers[0];
+    return pickWithRotation(hindiThrillers, isExcluded, text, (c) => c.title);
   }
 
   if (wantsHindi) {
@@ -1220,7 +1317,7 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
         ...base,
       },
     ];
-    return hindiFallbacks.find((candidate) => !isExcluded(candidate.title)) ?? hindiFallbacks[0];
+    return pickWithRotation(hindiFallbacks, isExcluded, text, (c) => c.title);
   }
 
   if (wantsWeirdSafe) {
@@ -1286,7 +1383,7 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
         ...base,
       },
     ];
-    return weirdFallbacks.find((candidate) => !isExcluded(candidate.title)) ?? weirdFallbacks[0];
+    return pickWithRotation(weirdFallbacks, isExcluded, text, (c) => c.title);
   }
 
   const gentleFallbacks: RawRecommendation[] = [
@@ -1352,5 +1449,5 @@ export function safeFallback(input: RecommendRequest): RawRecommendation {
     },
   ];
 
-  return gentleFallbacks.find((candidate) => !isExcluded(candidate.title)) ?? gentleFallbacks[0];
+  return pickWithRotation(gentleFallbacks, isExcluded, text, (c) => c.title);
 }

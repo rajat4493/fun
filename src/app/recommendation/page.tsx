@@ -43,6 +43,7 @@ import {
   toTitleCase,
 } from "@/lib/recommendation-session";
 import { captureRecommendationRun } from "@/lib/recommendation-analytics";
+import { applyAffiliateTag } from "@/lib/affiliate-links";
 import { IntentContract, Recommendation, RecommendationDisplayState, WatchProvider } from "@/lib/types";
 
 const LOADING_KEY = "fun:loading";
@@ -160,11 +161,11 @@ function watchAction(pick: Recommendation, providers: WatchProvider[], platforms
     return { label: "Find where to watch", href: fallbackUrl, verified: false };
   }
   if (provider.url && provider.urlKind === "title") {
-    return { label: `Watch on ${provider.name}`, href: provider.url, verified: true };
+    return { label: `Watch on ${provider.name}`, href: applyAffiliateTag(provider.name, provider.url), verified: true };
   }
   const searchUrl = providerSearchUrl(provider, pick.title);
   if (searchUrl && (provider.access === "subscription" || provider.access === "included")) {
-    return { label: `Open ${provider.name}`, href: searchUrl, verified: true };
+    return { label: `Open ${provider.name}`, href: applyAffiliateTag(provider.name, searchUrl), verified: true };
   }
   return { label: "Find where to watch", href: fallbackUrl, verified: false };
 }
@@ -199,7 +200,7 @@ function ProviderLogo({ provider }: { provider: WatchProvider }) {
 
 function ProviderCard({ provider }: { provider: WatchProvider }) {
   const detail = provider.note ?? provider.price ?? (provider.access === "rent" ? "Rent" : provider.access === "buy" ? "Buy" : "Included");
-  const href = provider.url && provider.urlKind === "title" ? provider.url : undefined;
+  const href = provider.url && provider.urlKind === "title" ? applyAffiliateTag(provider.name, provider.url) : undefined;
   const content = (
     <>
       <ProviderLogo provider={provider} />
@@ -433,6 +434,11 @@ export default function RecommendationPage() {
       cache: "no-store",
       body: JSON.stringify(firstPickRequest),
     });
+    if (response.status === 429) {
+      const retryAfter = Number(response.headers.get("Retry-After") ?? 60);
+      const minutes = Math.max(1, Math.round(retryAfter / 60));
+      throw new Error(`You've hit the free limit for now. Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`);
+    }
     if (!response.ok) throw new Error("failed");
     const data = await response.json() as Recommendation & {
       _batch?: Recommendation[];
@@ -513,8 +519,10 @@ export default function RecommendationPage() {
           feedbackContext: loadRecommendationFeedbackContext(),
         });
       }
-    } catch {
-      setFetchError("Could not find another pick. Please try a new mood.");
+    } catch (error) {
+      setFetchError(error instanceof Error && error.message.startsWith("You've hit the free limit")
+        ? error.message
+        : "Could not find another pick. Please try a new mood.");
     } finally {
       setRerolling(false);
     }
@@ -593,8 +601,10 @@ export default function RecommendationPage() {
         sessionId: getOrCreateSessionId(),
         feedbackContext: loadRecommendationFeedbackContext(),
       });
-    } catch {
-      setFetchError("Could not search beyond your subscriptions. Try again.");
+    } catch (error) {
+      setFetchError(error instanceof Error && error.message.startsWith("You've hit the free limit")
+        ? error.message
+        : "Could not search beyond your subscriptions. Try again.");
     } finally {
       setRerolling(false);
     }
@@ -645,10 +655,18 @@ export default function RecommendationPage() {
         icon: BadgeCheck,
         tone: "text-emerald-300",
       }
+    : pick.confidence >= 70
+    ? {
+        eyebrow: "Your one pick",
+        line: "Strong fit, not fully confirmed",
+        detail: "This matches your mood well — we just couldn't confirm it's on your exact service. Use watch options to check.",
+        icon: Search,
+        tone: "text-white/52",
+      }
     : {
         eyebrow: "Your one pick",
-        line: "Availability not verified",
-        detail: "Use watch options to confirm before watching.",
+        line: "Our best honest guess",
+        detail: "Fit and availability both need a quick check before you commit.",
         icon: Search,
         tone: "text-white/38",
       };
@@ -1104,6 +1122,7 @@ export default function RecommendationPage() {
           <span className="ml-6 gap-4 inline-flex">
             <Link href="/privacy" className="hover:text-white/70">Privacy</Link>
             <a href="mailto:feedback@findurnext.com" className="hover:text-white/70">Give feedback</a>
+            <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer" className="hover:text-white/70">Powered by TMDB</a>
           </span>
         </footer>
       </section>

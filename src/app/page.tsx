@@ -521,6 +521,11 @@ export default function Home() {
         body: JSON.stringify(requestInput),
         signal: controller.signal,
       });
+      if (response.status === 429) {
+        const retryAfter = Number(response.headers.get("Retry-After") ?? 60);
+        const minutes = Math.max(1, Math.round(retryAfter / 60));
+        throw new Error(`You've hit the free limit for now. Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`);
+      }
       if (!response.ok) throw new Error("Could not generate a pick.");
       const data = await response.json() as Recommendation & {
         _batch?: Recommendation[];

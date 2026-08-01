@@ -108,6 +108,8 @@ function withMediaType(result: TmdbSearchResult, mediaType: "movie" | "tv"): Tmd
 function titleTokens(value: string): string[] {
   return value
     .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/&/g, " and ")
     .replace(/\b(19|20)\d{2}\b/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
@@ -333,6 +335,12 @@ export async function enrichRecommendation(
   const tmdbPoster = mainMovie?.poster_path && posterTitleMatches(raw.title, mainMovie.matchedTitle)
     ? `https://image.tmdb.org/t/p/w500${mainMovie.poster_path}`
     : undefined;
+  const tmdbTitleConfirmed = Boolean(mainMovie?.matchedTitle && posterTitleMatches(raw.title, mainMovie.matchedTitle));
+  const omdbTitleConfirmed = Boolean(
+    omdbMain?.Response === "True" &&
+    omdbMain.Title &&
+    posterTitleMatches(raw.title, omdbMain.Title)
+  );
   const omdbPoster = omdbMain?.Response === "True" &&
     omdbMain.Poster &&
     omdbMain.Poster !== "N/A" &&
@@ -363,6 +371,7 @@ export async function enrichRecommendation(
       originalLanguage: mainMovie?.original_language,
       originCountry: mainMovie?.origin_country,
       genreIds: mainMovie?.genre_ids,
+      catalogConfirmed: localAvailability.status === "verified" || tmdbTitleConfirmed || omdbTitleConfirmed,
     },
     hiddenLayer: {
       ...raw.hiddenLayer,

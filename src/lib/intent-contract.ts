@@ -33,10 +33,28 @@ function stringArray(value: unknown): string[] {
     : [];
 }
 
+function signalArray(value: unknown): string[] {
+  return stringArray(value)
+    .flatMap((item) => item.split("|").map((part) => part.trim()))
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
 function numberConfidence(value: unknown): number {
   const number = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(number)) return 0.55;
   return Math.max(0, Math.min(1, number > 1 ? number / 100 : number));
+}
+
+function requestSupportsFormat(local: IntentContract, requested: string, input: RecommendRequest): boolean {
+  if (!requested || requested === "any") return false;
+  if (local.format === requested) return true;
+
+  const text = intentRequestText(input).toLowerCase();
+  if (requested === "episode") return /\b(one|1)\s+episode\b|\ban episode\b|\bper episode\b/.test(text);
+  if (requested === "series") return /\b(series|show|season|episodes|binge|watch over a few nights)\b/.test(text);
+  if (requested === "film") return /\b(movie|film|feature)\b/.test(text);
+  return false;
 }
 
 function localDiscoveryPreference(text: string): IntentContract["discoveryPreference"] {
@@ -187,7 +205,7 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
     const normalized = item.toLowerCase();
     return !local.hardAvoids.includes(normalized) || [local.primary, ...local.secondary].includes(normalized);
   });
-  const llmHardAvoids = stringArray(value.hardAvoids).map((item) => item.toLowerCase());
+  const llmHardAvoids = signalArray(value.hardAvoids).map((item) => item.toLowerCase());
   const localPrimarySignals = new Set([local.primary, ...local.secondary]);
   const reconciledLlmHardAvoids = llmHardAvoids.filter((avoid) => {
     // The semantic classifier may echo a desired genre as an avoidance when a
@@ -202,13 +220,20 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
     return true;
   });
 
+  const resolvedFormat = FORMAT_VALUES.has(formatRaw as IntentContract["format"]) &&
+    requestSupportsFormat(local, formatRaw, input)
+    ? formatRaw as IntentContract["format"]
+    : local.format;
+  const resolvedHardAvoids = [...new Set([...local.hardAvoids, ...reconciledLlmHardAvoids])]
+    .filter((avoid) => avoid !== primary);
+
   return {
     primary,
     // Merge local emotional-register signals (bleak, cathartic, weird) — the LLM often omits them
     secondary: [...new Set([...llmSecondary, ...local.secondary])].slice(0, 8),
-    hardAvoids: [...new Set([...local.hardAvoids, ...reconciledLlmHardAvoids])],
-    softAvoids: [...new Set([...local.softAvoids, ...stringArray(value.softAvoids).map((item) => item.toLowerCase())])],
-    format: FORMAT_VALUES.has(formatRaw as IntentContract["format"]) ? formatRaw as IntentContract["format"] : local.format,
+    hardAvoids: resolvedHardAvoids,
+    softAvoids: [...new Set([...local.softAvoids, ...signalArray(value.softAvoids).map((item) => item.toLowerCase())])],
+    format: resolvedFormat,
     language: typeof value.language === "string" && value.language.trim() ? value.language.trim() : local.language,
     // Situation is a factual viewing constraint, not a creative inference. The
     // classifier may explain typed context, but it must not invent bedtime,
@@ -259,8 +284,8 @@ Return one compact JSON object only:
 {
   "primary": "scare|cry|comedy|thriller|romance|weird|comfort|gore|drama|discovery|unknown",
   "secondary": ["short labels"],
-  "hardAvoids": ["horror|gore|violence|sex|graphic violence when clearly rejected"],
-  "softAvoids": ["slow pacing|heavy drama|sad ending when the user wants less of these"],
+  "hardAvoids": ["horror", "gore", "violence", "sex", "graphic violence when clearly rejected"],
+  "softAvoids": ["slow pacing", "heavy drama", "sad ending when the user wants less of these"],
   "format": "film|series|episode|any",
   "language": "requested language/culture lane or any",
   "situation": ["partner|friends|family|bedtime|transit|work|waiting when typed"],

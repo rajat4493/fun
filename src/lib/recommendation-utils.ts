@@ -119,6 +119,20 @@ export function requestText(input: RecommendRequest): string {
   ].filter(Boolean).join(" ");
 }
 
+// F.U.N matches a described mood to a title; it has no mechanism to identify a specific,
+// half-remembered film from plot fragments ("tip of my tongue" requests — a real, common
+// request type, but a structurally different task). Left unhandled, the recommendation
+// pipeline forces this into the mood-matching shape and the model fabricates a plausible-
+// sounding but nonexistent title rather than admitting it doesn't know. Detect this pattern
+// so the route can decline honestly instead of hallucinating a fake film.
+export function isPlotIdentificationRequest(text: string): boolean {
+  // Deliberately requires a definite reference to one specific, already-seen-but-forgotten
+  // film ("this/that movie," "the name/title") rather than a bare "help me find" — that
+  // phrase alone is also how people phrase ordinary new-discovery requests ("help me find a
+  // hidden gem thriller"), which must not be declined.
+  return /\b(trying to (find|identify) (this|that|the) (movie|show|film)|what('?s| is) (this|that) (movie|show|film) called|can'?t remember the (name|title)|i only remember (one|a|the) (scene|part|detail)|half[- ]remembered|forgot the name of (this|that|the) (movie|show|film))\b/i.test(text);
+}
+
 // Text used to infer positive intent. Structured avoid controls are deliberately
 // excluded: "gore" in the avoids array must never become a request for gore.
 export function intentRequestText(input: RecommendRequest): string {

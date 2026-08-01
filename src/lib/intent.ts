@@ -12,6 +12,7 @@ export type RecommendationIntent = {
   hiddenGem: boolean;
   familySafe: boolean;
   workSafe: boolean;
+  surpriseMe: boolean;
 };
 
 const LANGUAGE_NAMES: Array<[RegExp, string]> = [
@@ -138,6 +139,12 @@ export function extractIntent(input: RecommendRequest): RecommendationIntent {
   const hiddenGem = /\b(hidden\s+gem|underrated|overlooked|buried|less\s+obvious|non[- ]?mainstream|not (?:the )?(?:mainstream|obvious|usual|famous) ones?|probably haven't seen|probably have not seen)\b/i.test(text);
   if (hiddenGem) primaryIntents.add("hidden-gem");
 
+  // A genuine "no preference, dealer's choice" request — distinct from hidden-gem (which still
+  // wants a specific taste lane, just a less obvious one). With zero mood signal to anchor on,
+  // defaulting to the single heaviest/most demanding possible pick (e.g. an arthouse film about
+  // suicide) is a poor "surprise me" — this should bias toward broadly engaging discovery instead.
+  const surpriseMe = /\b(surprise me|dealer'?s choice|surprise pick|random movie|something i'?ve never heard of|no preference|don'?t (?:really )?(?:have|know) a (?:genre|mood) in mind|you (?:choose|pick|decide))\b/i.test(text);
+
   return {
     requestText: text,
     primaryIntents: unique([...primaryIntents]),
@@ -149,5 +156,6 @@ export function extractIntent(input: RecommendRequest): RecommendationIntent {
     hiddenGem,
     familySafe,
     workSafe,
+    surpriseMe,
   };
 }

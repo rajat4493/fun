@@ -151,6 +151,7 @@ export type Recommendation = {
     originalLanguage?: string;
     originCountry?: string[];
     genreIds?: number[];
+    catalogConfirmed?: boolean;
   };
   parsedIntent?: ParsedRecommendationIntent;
   contentCategory?: string[];
