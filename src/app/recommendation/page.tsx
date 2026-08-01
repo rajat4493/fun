@@ -654,6 +654,7 @@ export default function RecommendationPage() {
       };
   const StateIcon = stateCopy.icon;
   const primaryVibe = toTitleCase(pick.vibe.split(",")[0] || pick.format);
+  const confidenceLabel = pick.confidence >= 85 ? "Great match" : pick.confidence >= 70 ? "Strong fit" : "Possible fit";
   const mainTitleKey = relatedTitleKey(pick.title);
   const hiddenTitles = (pick.hiddenLayer.titles ?? [])
     .filter((title) => isDisplayableRelatedTitle(title.title) && relatedTitleKey(title.title) !== mainTitleKey)
@@ -942,7 +943,7 @@ export default function RecommendationPage() {
                 <div className="text-center">
                   <p className="text-sm text-white/64">Mood match</p>
                   <p className="text-4xl font-semibold">{pick.confidence}%</p>
-                  <p className="text-sm text-white/44">Great match</p>
+                  <p className="text-sm text-white/44">{confidenceLabel}</p>
                 </div>
               </div>
               <div className="relative mx-auto h-[520px] w-full max-w-[330px] overflow-hidden rounded-2xl border border-white/14 bg-white/[0.05] shadow-[0_28px_100px_rgba(0,0,0,0.56),inset_0_1px_0_rgba(255,255,255,0.08)]">

@@ -79,7 +79,15 @@ export function extractIntent(input: RecommendRequest): RecommendationIntent {
 
   if (hasNegatedConcept(text, /\bgore|gory|blood|bloody|splatter|body horror\b/i)) hardAvoids.add("gore");
   if (hasNegatedConcept(text, /\bviolence|violent|brutal|graphic violence\b/i)) hardAvoids.add("violence");
-  if (hasNegatedConcept(text, /\bhorror|scary|ghost|haunted|supernatural\b/i)) hardAvoids.add("horror");
+  const specificallyAvoidsSupernaturalHorror =
+    /\b(?:no|not|without|avoid|avoiding)\s+(?:any\s+)?supernatural(?:\s+horror)?\b/i.test(text) ||
+    hasNegatedConcept(text, /\bsupernatural(?:\s+horror)?\b/i);
+  if (specificallyAvoidsSupernaturalHorror) hardAvoids.add("supernatural horror");
+  const specificallyAvoidsBodyHorror =
+    /\b(?:no|not|without|avoid|avoiding)\s+(?:any\s+)?body\s+horror\b/i.test(text) ||
+    hasNegatedConcept(text, /\bbody\s+horror\b/i);
+  if (specificallyAvoidsBodyHorror) hardAvoids.add("body horror");
+  if (!specificallyAvoidsSupernaturalHorror && !specificallyAvoidsBodyHorror && hasNegatedConcept(text, /\bhorror|scary|ghost|haunted|supernatural\b/i)) hardAvoids.add("horror");
   if (hasNegatedConcept(text, /\bsex|sexual|nudity|erotic|explicit|raunchy|awkward sexual content\b/i)) hardAvoids.add("sex");
 
   if (hasNegatedConcept(text, /\bheavy drama|heavy|trauma|depressing|bleak\b/i)) softAvoids.add("heavy drama");

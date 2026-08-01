@@ -587,6 +587,13 @@ async function trustedRawBatch(
     return { batch: localTrusted.accepted.slice(0, count), rejections: allRejections, fallbackUsed: true };
   }
 
+  if (allRejections.length === 0) {
+    allRejections.push({
+      title: "all candidates",
+      reasons: ["pipeline: no candidates survived mechanical+semantic review"],
+    });
+  }
+
   return { batch: [safeFallback(input)], rejections: allRejections, fallbackUsed: true };
 }
 
@@ -966,7 +973,7 @@ export async function POST(req: Request) {
       !item.provider.startsWith("Intent ") &&
       !item.provider.startsWith("parallel-batch discarded"),
     );
-    const source = successfulProvider?.provider === "local fallback" || fallbackUsed ? "fallback" : "llm";
+    const source = successfulProvider?.provider === "local fallback" ? "local-fallback" : fallbackUsed ? "fallback" : "llm";
     const failedProviders = providerTrace.filter((item) => !item.ok);
     const degradeReason =
       displayState === "no-subscription-match" ? "no_clean_match" :
