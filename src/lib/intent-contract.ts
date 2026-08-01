@@ -29,39 +29,14 @@ function firstKnownPrimary(values: string[]): string {
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value)
-    ? value
-      .filter((item): item is string => typeof item === "string")
-      .flatMap((item) => item.split("|").map((part) => part.trim()))
-      .filter(Boolean)
-      .slice(0, 8)
+    ? value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean).slice(0, 8)
     : [];
-}
-
-function requestSupportsHardAvoidance(input: RecommendRequest, avoid: string, local: IntentContract): boolean {
-  const normalized = avoid.toLowerCase().trim();
-  if (local.hardAvoids.includes(normalized)) return true;
-  if (normalized === "romance" && local.softAvoids.includes("romance")) return true;
-
-  // The classifier may discover wording that the deterministic parser does not know yet, but it
-  // may not invent a boundary. Require the user's own text to contain a negated form of the exact
-  // concept before accepting an LLM-only hard avoidance.
-  const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
-  if (!escaped) return false;
-  return hasNegatedConcept(intentRequestText(input), new RegExp(`\\b${escaped}\\b`, "i"));
 }
 
 function numberConfidence(value: unknown): number {
   const number = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(number)) return 0.55;
   return Math.max(0, Math.min(1, number > 1 ? number / 100 : number));
-}
-
-function normalizedPrimaryCandidates(primaryRaw: string, secondary: string[], fallback: string): string[] {
-  const primaryParts = primaryRaw
-    .split("|")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  return [...primaryParts, ...secondary, fallback];
 }
 
 function localDiscoveryPreference(text: string): IntentContract["discoveryPreference"] {
@@ -197,8 +172,7 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
   if (!raw || typeof raw !== "object") return local;
   const value = raw as Record<string, unknown>;
   const primaryRaw = typeof value.primary === "string" ? value.primary : "";
-  const llmSecondaryRaw = stringArray(value.secondary);
-  const inferredPrimary = firstKnownPrimary(normalizedPrimaryCandidates(primaryRaw, llmSecondaryRaw, local.primary));
+  const inferredPrimary = firstKnownPrimary([primaryRaw, ...stringArray(value.secondary), local.primary]);
   // A model sometimes promotes a structured avoidance to the primary intent
   // ("romantic + comforting", avoids=["gore"] → primary "gore"). Explicit
   // controls are authoritative: an avoided concept cannot become the desired
@@ -209,7 +183,7 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
     : inferredPrimary;
   const formatRaw = typeof value.format === "string" ? value.format.toLowerCase().trim() : "";
   const intensityRaw = typeof value.intensity === "string" ? value.intensity.toLowerCase().trim() : "";
-  const llmSecondary = llmSecondaryRaw.filter((item) => {
+  const llmSecondary = stringArray(value.secondary).filter((item) => {
     const normalized = item.toLowerCase();
     return !local.hardAvoids.includes(normalized) || [local.primary, ...local.secondary].includes(normalized);
   });
@@ -225,9 +199,7 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
       localPrimarySignals.has("gore") &&
       !local.hardAvoids.includes(avoid)
     ) return false;
-    // A qualified boundary such as "no supernatural horror" must not be widened to all horror.
-    if (avoid === "horror" && local.hardAvoids.includes("supernatural horror") && !local.hardAvoids.includes("horror")) return false;
-    return requestSupportsHardAvoidance(input, avoid, local);
+    return true;
   });
 
   return {
@@ -235,15 +207,9 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
     // Merge local emotional-register signals (bleak, cathartic, weird) — the LLM often omits them
     secondary: [...new Set([...llmSecondary, ...local.secondary])].slice(0, 8),
     hardAvoids: [...new Set([...local.hardAvoids, ...reconciledLlmHardAvoids])],
-    softAvoids: [...local.softAvoids],
+    softAvoids: [...new Set([...local.softAvoids, ...stringArray(value.softAvoids).map((item) => item.toLowerCase())])],
     format: FORMAT_VALUES.has(formatRaw as IntentContract["format"]) ? formatRaw as IntentContract["format"] : local.format,
-    // Explicit language in free text or controls is factual and outranks an intent model that
-    // answers with the generic "any" lane.
-    language: local.language.toLowerCase() !== "any"
-      ? local.language
-      : typeof value.language === "string" && value.language.trim()
-        ? value.language.trim()
-        : local.language,
+    language: typeof value.language === "string" && value.language.trim() ? value.language.trim() : local.language,
     // Situation is a factual viewing constraint, not a creative inference. The
     // classifier may explain typed context, but it must not invent bedtime,
     // transit, waiting, or social context that the user never supplied.
@@ -289,12 +255,24 @@ User text and controls:
 - Language preference: ${input.languagePreferences?.join(", ") || "any"}
 - Taste risk: ${local.intensity}
 
-Return one compact JSON object only, matching the provided schema exactly.
-Important:
-- Arrays must be empty when the request does not support them. Never copy example values or possible options into hardAvoids, softAvoids, or situation.
-- Selected avoids are authoritative boundaries, not evidence that the user wants those concepts.
-- Confidence is a number from 0 to 1.
-- If the user did not ask for a soft avoidance such as romance, slow pacing, heavy drama, or sad ending, leave softAvoids empty.
+Return one compact JSON object only:
+{
+  "primary": "scare|cry|comedy|thriller|romance|weird|comfort|gore|drama|discovery|unknown",
+  "secondary": ["short labels"],
+  "hardAvoids": ["horror|gore|violence|sex|graphic violence when clearly rejected"],
+  "softAvoids": ["slow pacing|heavy drama|sad ending when the user wants less of these"],
+  "format": "film|series|episode|any",
+  "language": "requested language/culture lane or any",
+  "situation": ["partner|friends|family|bedtime|transit|work|waiting when typed"],
+  "intensity": "safe|curious|bold|unhinged",
+  "emotionalGoal": "one short sentence describing the desired emotional outcome",
+  "negativeReferences": ["exact titles explicitly rejected or given as examples of what not to recommend"],
+  "discoveryPreference": "standard|non-mainstream",
+  "confidence": 0.85,
+  "ambiguity": "short note if request has conflicting signals, else empty"
+}
+
+Confidence is a number from 0 to 1 describing how certain you are about the interpretation. Use a realistic value such as 0.85 for a clear request; do not copy the example mechanically. Selected avoids are authoritative boundaries, not evidence that the user wants those concepts.
 When the viewer says "not X", "anything except X", or "not mainstream ones like X, Y", put the exact title names in negativeReferences. Do not put merely mentioned positive reference titles there.
 `;
 }

@@ -12,8 +12,7 @@
     "lint": "sh scripts/with-node-20.sh tsc -p tsconfig.lint.json --noEmit --pretty false",
     "test:availability": "sh scripts/with-node-20.sh node scripts/check-availability.mjs",
     "test:recommendation": "sh scripts/with-node-20.sh node scripts/recommendation-regression.mjs",
-    "test:gate": "sh scripts/with-node-20.sh node scripts/qa-gate.mjs",
-    "diagnostics:export": "sh scripts/with-node-20.sh node scripts/export-recommendation-diagnostics.mjs"
+    "test:gate": "sh scripts/with-node-20.sh node scripts/qa-gate.mjs"
   },
   "dependencies": {
     "lucide-react": "0.562.0",

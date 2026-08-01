@@ -44,22 +44,6 @@ function runtimeMinutes(rec) {
 
 const tests = [
   {
-    id: "CONTRACT-NO-INVENTED-AVOIDS",
-    input: {
-      mode: "self",
-      selfText: "I am exhausted after a long week. Give me something warm, witty, and easy, but not childish.",
-      country: "United States",
-      languagePreferences: ["Any language"],
-      platforms: [],
-      platformFilter: "any",
-    },
-    check: (rec) => {
-      const hardAvoids = rec._trust?.intentContract?.hardAvoids ?? [];
-      return !["horror", "gore", "violence", "sex", "graphic violence"].some((avoid) => hardAvoids.includes(avoid));
-    },
-    why: "Describe mode must not inherit hard avoidances that the user never stated.",
-  },
-  {
     id: "INT-SCARE-PARTNER",
     input: {
       mode: "self",
@@ -131,19 +115,6 @@ const tests = [
     why: "One episode request must return episode/per-episode format.",
   },
   {
-    id: "FORMAT-WEIRD-FUNNY-EPISODE",
-    input: {
-      mode: "self",
-      selfText: "One funny and weird episode for friends. It must work without watching the whole series.",
-      country: "United States",
-      languagePreferences: ["Any language"],
-      platforms: [],
-      platformFilter: "any",
-    },
-    check: (rec) => /\bepisode\b/i.test(rec.format) && !/hundreds of beavers/i.test(rec.title),
-    why: "A strict episode request must never degrade into the generic weird-film fallback.",
-  },
-  {
     id: "TIME-DRAMA-UNDER-90",
     input: {
       mode: "self",
@@ -156,9 +127,9 @@ const tests = [
     check: (rec) => {
       const text = textOf(rec);
       const intentLabel = rec.parsedIntent?.primary ?? "";
-      return (runtimeMinutes(rec) ?? 999) <= 100 && /\bfilm\b/i.test(rec.format) && (drama.test(text) || /^drama$/i.test(intentLabel));
+      return (runtimeMinutes(rec) ?? 999) <= 90 && /\bfilm\b/i.test(rec.format) && (drama.test(text) || /^drama$/i.test(intentLabel));
     },
-    why: "Under-90 drama should stay close to runtime, allowing a small overage, and return a drama film, not a TV series.",
+    why: "Under-90 drama must stay inside runtime and return a drama film, not a TV series.",
   },
   {
     id: "AVOID-WEIRD-NO-HORROR",
@@ -199,55 +170,6 @@ const tests = [
       return isNotScare && hasPositiveSignal;
     },
     why: "Text saying someone hates horror/gets scared must be treated as an avoidance/light request — parsedIntent.primary must not be scare/horror and the pick must have a positive warmth/comedy/romance signal.",
-  },
-  {
-    id: "NEGATED-COMEDY-SCARE",
-    input: {
-      mode: "self",
-      selfText: "Recommend something that will genuinely terrify my partner. High energy, no comedy, no gore.",
-      country: "United States",
-      languagePreferences: ["Any language"],
-      platforms: [],
-      platformFilter: "any",
-    },
-    check: (rec) => {
-      const labels = [...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].join(" ");
-      return scary.test(textOf(rec)) && !comedy.test(labels) && !/^(comedy)$/i.test(rec.parsedIntent?.primary ?? "");
-    },
-    why: "No-comedy is an avoidance, never a positive comedy requirement on a scare request.",
-  },
-  {
-    id: "QUALIFIED-AVOID-KOREAN-THRILLER",
-    input: {
-      mode: "self",
-      selfText: "A tense Korean crime thriller that moves quickly and stays grounded. No supernatural horror.",
-      country: "United States",
-      languagePreferences: ["Any language"],
-      platforms: [],
-      platformFilter: "any",
-    },
-    check: (rec) => {
-      const text = textOf(rec);
-      const labels = [...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].join(" ");
-      return thriller.test(text) && !/hunt for the wilderpeople/i.test(rec.title) && !/\b(supernatural|ghost|haunted|possession|demonic)\b/i.test(labels);
-    },
-    why: "No supernatural horror must not become a blanket rejection of grounded Korean crime thrillers.",
-  },
-  {
-    id: "PACING-NOTHING-SLOW",
-    input: {
-      mode: "self",
-      selfText: "I want a genuinely gripping thriller tonight, but nothing slow or emotionally exhausting.",
-      country: "United States",
-      languagePreferences: ["Any language"],
-      platforms: [],
-      platformFilter: "any",
-    },
-    check: (rec) => {
-      const pacingSignals = [rec.vibe, ...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].filter(Boolean).join(" ");
-      return thriller.test(textOf(rec)) && !/\b(slow|slow[- ]burn|methodical|meditative|leisurely|deliberate pace)\b/i.test(pacingSignals);
-    },
-    why: "An explicit nothing-slow request must reject a recommendation that describes itself as methodical or slow.",
   },
   {
     id: "GRIEF-RELIEF-NOT-CATHARSIS",

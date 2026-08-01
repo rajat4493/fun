@@ -201,8 +201,8 @@ const tests = [
     id: "GATE-RUNTIME-UNDER-TWO-HOURS",
     category: "runtime",
     input: { mode: "self", selfText: "I want a Korean thriller with momentum and tension, not a slow drama.", time: "under 2 hours", country: "Poland", languagePreferences: ["Korean"], platforms: [], platformFilter: "any" },
-    check: (rec) => (runtimeMinutes(rec) ?? 999) <= 135,
-    why: "An under-two-hours control allows a small overage when the fit is clearly stronger.",
+    check: (rec) => (runtimeMinutes(rec) ?? 999) <= 120,
+    why: "An explicit under-two-hour control must reject titles longer than 120 minutes.",
   },
   {
     id: "GATE-LANGUAGE",

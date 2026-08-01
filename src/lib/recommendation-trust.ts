@@ -1,6 +1,6 @@
 import { IntentContract, ParsedRecommendationIntent, RawRecommendation, RecommendRequest, Recommendation } from "@/lib/types";
-import { hasNegatedConcept, requestText, requestsSingleEpisode } from "@/lib/recommendation-utils";
-import { extractIntent, RecommendationIntent, resolveRuntimeConstraint } from "@/lib/intent";
+import { hasNegatedConcept, requestText } from "@/lib/recommendation-utils";
+import { extractIntent, RecommendationIntent } from "@/lib/intent";
 
 export type TrustRejection = {
   title: string;
@@ -11,12 +11,6 @@ export type TrustResult<T extends RawRecommendation | Recommendation> = {
   accepted: T[];
   rejected: TrustRejection[];
 };
-
-export type RecommendationTrustMode = "contract-v2" | "llm-only";
-
-export function recommendationTrustMode(): RecommendationTrustMode {
-  return process.env.FUN_SEMANTIC_TRUST_MODE === "llm-only" ? "llm-only" : "contract-v2";
-}
 
 function normalize(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -59,9 +53,8 @@ export function activeHardAvoidanceKeys(input: RecommendRequest): string[] {
 function explicitlyWantsIntensity(input: RecommendRequest): boolean {
   const text = requestText(input);
   const avoids = activeHardAvoids(input);
-  if (avoids.has("gore") || avoids.has("violence") || avoids.has("horror") || avoids.has("supernatural horror")) return false;
-  const intensityTerms = /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror|brutal horror|horror)\b/i;
-  return intensityTerms.test(text) && !hasNegatedConcept(text, intensityTerms);
+  if (avoids.has("gore") || avoids.has("violence") || avoids.has("horror")) return false;
+  return /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror|brutal horror|horror)\b/i.test(text);
 }
 
 const knownHorrorOrGoreTitles = new Set([
@@ -97,6 +90,7 @@ const knownHorrorOrGoreTitles = new Set([
   "hishouse",
   "thewailing",
   "isawthedevil",
+  "thechaser",
   "goodnightmommy",
   "theconjuring",
   "sinister",
@@ -288,29 +282,38 @@ function contractFormat(contract?: IntentContract): IntentContract["format"] | n
 }
 
 function runtimeViolation(input: RecommendRequest, rec: RawRecommendation | Recommendation, contract?: IntentContract): string | null {
+  const extractedIntent = extractIntent(input);
   const request = requestText(input).toLowerCase();
   const time = input.time?.toLowerCase();
   const minutes = parseRuntimeMinutes(rec.runtime);
-  const asksForEpisode = contractFormat(contract) === "episode" || time?.includes("one episode") || requestsSingleEpisode(request);
+  const asksForEpisode = contractFormat(contract) === "episode" || time?.includes("one episode") || /\b(one|1)\s+episode\b|\ban episode\b/.test(request);
   if (asksForEpisode) {
-    return /\bepisode\b/i.test(rec.format) ? null : "time: requested one specific episode";
+    return isEpisodeRuntime(rec) ? null : "time: requested one episode";
   }
   if (!minutes) return null;
 
-  const runtimeConstraint = resolveRuntimeConstraint(input);
-  if (runtimeConstraint) {
-    const allowed = runtimeConstraint.limitMinutes + runtimeConstraint.toleranceMinutes;
-    if (minutes > allowed) {
-      const label = runtimeConstraint.strict
-        ? `${runtimeConstraint.limitMinutes} min hard cap`
-        : `${runtimeConstraint.limitMinutes} min target (+${runtimeConstraint.toleranceMinutes})`;
-      return `time: ${minutes} min exceeds ${label}`;
-    }
+  if (
+    extractedIntent.runtimeLimitMinutes &&
+    extractedIntent.runtimeLimitMinutes >= 10 &&
+    extractedIntent.runtimeLimitMinutes <= 240 &&
+    minutes > extractedIntent.runtimeLimitMinutes
+  ) {
+    return `time: ${minutes} min exceeds ${extractedIntent.runtimeLimitMinutes} min request`;
+  }
+
+  const freeTextLimit = request.match(/\b(?:under|less than|within|up to|max(?:imum)?|no more than)\s+(\d{1,3})\s*(?:min|mins|minutes)\b/);
+  const plainMinuteNeed = request.match(/\b(\d{1,3})\s*(?:min|mins|minutes)\b/);
+  const requestedLimit = freeTextLimit ? Number(freeTextLimit[1]) : plainMinuteNeed ? Number(plainMinuteNeed[1]) : null;
+  if (requestedLimit && requestedLimit >= 10 && requestedLimit <= 240 && minutes > requestedLimit) {
+    return `time: ${minutes} min exceeds ${requestedLimit} min request`;
+  }
+  if (/\b(?:under|less than|within|up to|max(?:imum)?|no more than)\s+(?:two|2)\s+hours?\b/.test(request) && minutes > 120) {
+    return `time: ${minutes} min exceeds under 2 hours`;
   }
 
   if (!time || time === "no preference") return null;
   if (time.includes("90") && !isEpisodeRuntime(rec) && minutes > 110) return `time: ${minutes} min exceeds 90 min mood`;
-  if (time.includes("under 2") && !isEpisodeRuntime(rec) && minutes > 135) return `time: ${minutes} min exceeds under 2 hours`;
+  if (time.includes("under 2") && !isEpisodeRuntime(rec) && minutes > 120) return `time: ${minutes} min exceeds under 2 hours`;
   return null;
 }
 
@@ -336,16 +339,15 @@ function avoidanceViolations(input: RecommendRequest, rec: RawRecommendation | R
   const primaryCategory = labelTerms(rec.contentCategory)[0];
 
   if (hasStructured) {
-    if (!allowIntensity && avoids.has("gore") && hasAny(["gore", "gory", "body-horror", "splatter", "graphic-violence"])) reasons.push("avoidance: gore");
+    if (!allowIntensity && avoids.has("gore") && (isKnownHorror || hasAny(["gore", "gory", "body-horror", "splatter", "graphic-violence"]))) reasons.push("avoidance: gore");
     if (!allowIntensity && avoids.has("horror") && (isKnownHorror || hasAny(["horror", "gore", "body-horror", "haunted", "supernatural", "nightmare"]))) reasons.push("avoidance: horror");
-    if (!allowIntensity && avoids.has("supernatural horror") && hasAny(["haunted", "ghost", "supernatural", "demonic", "possession", "occult"])) reasons.push("avoidance: supernatural horror");
-    if (!allowIntensity && avoids.has("violence") && hasAny(["violence", "violent", "graphic-violence", "brutal", "war", "combat"])) reasons.push("avoidance: violence");
-    if (!allowIntensity && avoids.has("graphic violence") && hasAny(["graphic-violence", "gore", "body-horror", "brutal"])) reasons.push("avoidance: graphic violence");
+    if (!allowIntensity && avoids.has("violence") && (isKnownHorror || hasAny(["violence", "violent", "graphic-violence", "brutal", "war", "combat"]))) reasons.push("avoidance: violence");
+    if (!allowIntensity && avoids.has("graphic violence") && (isKnownHorror || hasAny(["graphic-violence", "gore", "body-horror", "brutal"]))) reasons.push("avoidance: graphic violence");
     if (avoids.has("sex") && hasAny(["sex", "sexual", "erotic", "nudity", "raunchy"])) reasons.push("avoidance: explicit sexual content");
-    // When structured labels exist, they are the recommendation's declared content contract.
-    // Do not re-interpret free-form prose here: compliant explanations often mention the avoided
-    // concept ("not a romance"), and prose matching caused non-romantic comedies to be rejected.
-    // Unstructured legacy/fallback recommendations still use the guarded prose check below.
+    // Structured labels are the LLM's own self-tagging and can omit "romance" for a title that is
+    // clearly romantic in its actual synopsis (rom-coms often get tagged just "comedy"). Falling
+    // back to the prose text here — same as the unstructured branch below — closes that gap
+    // instead of trusting self-labeling alone, without adding any extra provider call.
     // "heartbreak"/"breakup" deliberately excluded from this label list: a model can echo the
     // user's own avoided concept back into contentCategory/emotionalEffect (meant to describe
     // the film, not evaluate it against the request) despite explicit prompt instruction not to.
@@ -354,17 +356,17 @@ function avoidanceViolations(input: RecommendRequest, rec: RawRecommendation | R
     // Dedicated heartbreak/breakup-avoidance nuance for this exact scenario already lives in
     // breakupReliefViolation below; this check now covers only unambiguous romance vocabulary.
     if (explicitlyAvoidsRomance &&
-      ["romance", "romantic", "love-story", "courtship", "love-triangle", "romantic-longing"].includes(primaryCategory ?? "")) {
+      (["romance", "romantic", "love-story", "courtship", "love-triangle", "romantic-longing"].includes(primaryCategory ?? "") ||
+        (explicitRomanceTerms.test(text) && !hasNegatedConcept(text, explicitRomanceTerms)))) {
       reasons.push("avoidance: romance/heartbreak");
     }
     return [...new Set(reasons)];
   }
 
-  if (!allowIntensity && avoids.has("gore") && goreTerms.test(text)) reasons.push("avoidance: gore");
+  if (!allowIntensity && avoids.has("gore") && (isKnownHorror || goreTerms.test(text))) reasons.push("avoidance: gore");
   if (!allowIntensity && avoids.has("horror") && (isKnownHorror || horrorTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: horror");
-  if (!allowIntensity && avoids.has("supernatural horror") && /\b(haunted|ghost|supernatural|demonic|possession|occult)\b/i.test(text)) reasons.push("avoidance: supernatural horror");
-  if (!allowIntensity && avoids.has("violence") && (violenceTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: violence");
-  if (!allowIntensity && avoids.has("graphic violence") && (graphicViolenceTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: graphic violence");
+  if (!allowIntensity && avoids.has("violence") && (isKnownHorror || violenceTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: violence");
+  if (!allowIntensity && avoids.has("graphic violence") && (isKnownHorror || graphicViolenceTerms.test(text) || goreTerms.test(text))) reasons.push("avoidance: graphic violence");
   if (avoids.has("sex") && sexualTerms.test(text)) reasons.push("avoidance: explicit sexual content");
   if (explicitlyAvoidsRomance && explicitRomanceTerms.test(text) && !hasNegatedConcept(text, explicitRomanceTerms)) {
     reasons.push("avoidance: romance/heartbreak");
@@ -391,9 +393,7 @@ function negativeReferenceViolation(rec: RawRecommendation | Recommendation, con
 }
 
 function confidenceViolation(rec: RawRecommendation | Recommendation): string | null {
-  if (typeof rec.confidence !== "number" || !Number.isFinite(rec.confidence)) return null;
-  const normalized = rec.confidence <= 1 ? rec.confidence * 100 : rec.confidence;
-  return normalized < 60 ? `confidence: ${rec.confidence} below minimum` : null;
+  return typeof rec.confidence === "number" && rec.confidence < 60 ? `confidence: ${rec.confidence} below minimum` : null;
 }
 
 const overRecommendedHiddenGemTitles = new Set([
@@ -425,14 +425,11 @@ function explicitFormatViolation(input: RecommendRequest, rec: RawRecommendation
   const request = intent.requestText || requestText(input);
   const format = `${rec.format} ${rec.runtime}`.toLowerCase();
   const declaredFormat = contractFormat(contract);
-  const explicitFilmRequest = /\b(movie|film|feature)\b/i.test(request);
-  const explicitSeriesRequest = /\b(series|show|season|episodes|binge)\b/i.test(request);
-  const explicitEpisodeRequest = requestsSingleEpisode(request);
-  const asksForFilm = intent.requestedFormat === "film" || explicitFilmRequest || (declaredFormat === "film" && explicitFilmRequest);
-  const asksForSeries = intent.requestedFormat === "series" || explicitSeriesRequest || (declaredFormat === "series" && explicitSeriesRequest);
-  const asksForEpisode = intent.requestedFormat === "episode" || explicitEpisodeRequest || declaredFormat === "episode";
+  const asksForFilm = intent.requestedFormat === "film" || declaredFormat === "film" || /\b(movie|film|feature)\b/i.test(request);
+  const asksForSeries = intent.requestedFormat === "series" || declaredFormat === "series" || /\b(series|show|season|episodes|binge)\b/i.test(request);
+  const asksForEpisode = intent.requestedFormat === "episode" || declaredFormat === "episode" || /\b(one|1)\s+episode\b|\ban episode\b/i.test(request);
 
-  if (asksForEpisode && !/\bepisode\b/.test(rec.format.toLowerCase())) return "intent: requested one specific episode";
+  if (asksForEpisode && !/\b(episode|per episode)\b/.test(format)) return "intent: requested one specific episode";
   if (asksForFilm && /\b(series|episode|season)\b/.test(format)) return "intent: requested a film/movie, got series/episode";
   if (asksForSeries && rec.format === "Film") return "intent: requested a series/show/episode, got film";
   return null;
@@ -702,26 +699,8 @@ function positiveFitViolations(input: RecommendRequest, rec: RawRecommendation |
     explicitFormatViolation(input, rec, intent, contract),
     hiddenGemViolation(input, rec, intent),
     breakupReliefViolation(input, rec, intent),
-    explicitPacingViolation(input, rec, intent),
     ...explicitGenreViolations(input, rec, intent, contract),
   ].filter((reason): reason is string => Boolean(reason));
-}
-
-function explicitPacingViolation(
-  input: RecommendRequest,
-  rec: RawRecommendation | Recommendation,
-  intent: RecommendationIntent,
-): string | null {
-  if (!intent.softAvoids.includes("slow pacing")) return null;
-  const request = requestText(input);
-  const makesPacingCritical = /\b(nothing|not|no)\s+(?:too\s+)?slow\b|\bavoid\s+(?:anything\s+)?slow\b|\bfast[- ]paced\b|\bmoves? quickly\b|\bstrong momentum\b/i.test(request);
-  if (!makesPacingCritical) return null;
-
-  const slowPacingTerms = /\b(slow(?:ly)?|slow[- ]burn|methodical|meditative|leisurely|deliberate pace|gradual pace|patiently paced)\b/i;
-  const text = contentText(rec);
-  return slowPacingTerms.test(text) && !hasNegatedConcept(text, slowPacingTerms)
-    ? "intent: explicitly rejected slow pacing"
-    : null;
 }
 
 export function validateRecommendation<T extends RawRecommendation | Recommendation>(
@@ -729,67 +708,18 @@ export function validateRecommendation<T extends RawRecommendation | Recommendat
   rec: T,
   contract?: IntentContract,
 ): TrustRejection | null {
-  const intent = extractIntent(input);
-  const mechanicalReasons = [
-    memoryViolation(input, rec),
-    negativeReferenceViolation(rec, contract),
-    confidenceViolation(rec),
-    runtimeViolation(input, rec, contract),
-    explicitFormatViolation(input, rec, intent, contract),
-    hiddenGemViolation(input, rec, intent),
-  ].filter((reason): reason is string => Boolean(reason));
-
-  const semanticReasons = recommendationTrustMode() === "llm-only"
-    ? []
-    : [
-        sensitivityViolation(input, rec, contract),
-        humaneToneViolation(input, rec),
-        strongFearViolation(input, rec, contract),
-        ...avoidanceViolations(input, rec),
-        breakupReliefViolation(input, rec, intent),
-        explicitPacingViolation(input, rec, intent),
-        ...explicitGenreViolations(input, rec, intent, contract),
-        ...parsedIntentContradictions(input, rec, contract),
-      ].filter((reason): reason is string => Boolean(reason));
-
-  const reasons = [...mechanicalReasons, ...semanticReasons];
-
-  return reasons.length ? { title: rec.title, reasons } : null;
-}
-
-export function validateMechanicalRecommendation<T extends RawRecommendation | Recommendation>(
-  input: RecommendRequest,
-  rec: T,
-  contract?: IntentContract,
-): TrustRejection | null {
-  const intent = extractIntent(input);
   const reasons = [
     memoryViolation(input, rec),
     negativeReferenceViolation(rec, contract),
     confidenceViolation(rec),
     runtimeViolation(input, rec, contract),
-    explicitFormatViolation(input, rec, intent, contract),
-    hiddenGemViolation(input, rec, intent),
-  ].filter((reason): reason is string => Boolean(reason));
-  return reasons.length ? { title: rec.title, reasons } : null;
-}
-
-export function validateSemanticRecommendation<T extends RawRecommendation | Recommendation>(
-  input: RecommendRequest,
-  rec: T,
-  contract?: IntentContract,
-): TrustRejection | null {
-  const intent = extractIntent(input);
-  const reasons = [
     sensitivityViolation(input, rec, contract),
     humaneToneViolation(input, rec),
     strongFearViolation(input, rec, contract),
     ...avoidanceViolations(input, rec),
-    breakupReliefViolation(input, rec, intent),
-    explicitPacingViolation(input, rec, intent),
-    ...explicitGenreViolations(input, rec, intent, contract),
-    ...parsedIntentContradictions(input, rec, contract),
+    ...positiveFitViolations(input, rec, contract),
   ].filter((reason): reason is string => Boolean(reason));
+
   return reasons.length ? { title: rec.title, reasons } : null;
 }
 
@@ -852,22 +782,18 @@ ${avoidanceNote}${memoryNote}${runtimeNote}${intentNote}${sensitivityNote}${huma
 Return three completely different valid candidates that preserve the emotional job while staying strictly inside all boundaries.`;
 }
 
-export function safeFallback(input: RecommendRequest, contract?: IntentContract): RawRecommendation {
+export function safeFallback(input: RecommendRequest): RawRecommendation {
   const intent = extractIntent(input);
   const text = requestText(input);
-  const requestedFormat = intent.requestedFormat ?? (contract?.format && contract.format !== "any" ? contract.format : undefined);
-  const primary = contract?.primary && contract.primary !== "unknown"
-    ? contract.primary
-    : intent.primaryIntents[0];
   // Acute emotional state overrides genre pulls: a panic/grief viewer must never get a horror
   // last-resort pick, even if they also expressed a scare/gore preference. This mirrors the
   // sensitivityViolation gate so the last-resort path can't reintroduce what the gate rejected.
   const sensitiveState = /\b(panic attack|panic|anxiety|anxious|spiraling|overwhelmed|grief|grieving|bereaved|mourning|lost (my|someone|a)|breakdown)\b/i.test(text);
   const wantsHindi = /\bhindi\b/i.test(text) || (input.languagePreferences ?? []).some((language) => /hindi/i.test(language));
-  const wantsThriller = !sensitiveState && (primary === "thriller" || /\b(thriller|suspense|mystery|crime thriller|tense and clever)\b/i.test(text));
-  const wantsWeirdSafe = primary === "weird" || contract?.secondary.includes("weird") || /\b(weird|strange|unusual|offbeat|quirky|absurd|surreal|funny|comedy)\b/i.test(text) || (input.craziness ?? 0) >= 2;
-  const wantsScare = !sensitiveState && (primary === "scare" || intent.primaryIntents.includes("scare")) && !intent.hardAvoids.includes("horror");
-  const wantsGore = !sensitiveState && (primary === "gore" || intent.primaryIntents.includes("gore")) && !intent.hardAvoids.some((avoid) => ["gore", "horror", "violence", "graphic violence"].includes(avoid));
+  const wantsThriller = !sensitiveState && /\b(thriller|suspense|mystery|crime thriller|tense and clever)\b/i.test(text);
+  const wantsWeirdSafe = /\b(weird|strange|unusual|offbeat|quirky|absurd|surreal|funny|comedy)\b/i.test(text) || (input.craziness ?? 0) >= 2;
+  const wantsScare = !sensitiveState && intent.primaryIntents.includes("scare") && !intent.hardAvoids.includes("horror");
+  const wantsGore = !sensitiveState && intent.primaryIntents.includes("gore") && !intent.hardAvoids.some((avoid) => ["gore", "horror", "violence", "graphic violence"].includes(avoid));
   const isExcluded = (title: string) => {
     const key = normalize(title);
     return [
@@ -891,7 +817,7 @@ export function safeFallback(input: RecommendRequest, contract?: IntentContract)
     },
   };
 
-  if ((wantsScare || wantsGore) && requestedFormat !== "episode") {
+  if ((wantsScare || wantsGore) && intent.requestedFormat !== "episode") {
     const scaryFallbacks: RawRecommendation[] = [
       {
         ...base,
@@ -1007,7 +933,7 @@ export function safeFallback(input: RecommendRequest, contract?: IntentContract)
     return scaryFallbacks.find((candidate) => !isExcluded(candidate.title)) ?? scaryFallbacks[0];
   }
 
-  if (requestedFormat === "episode") {
+  if (intent.requestedFormat === "episode") {
     const episodeFallbacks: RawRecommendation[] = [
       ...(wantsScare ? [{
         ...base,
@@ -1035,32 +961,6 @@ export function safeFallback(input: RecommendRequest, contract?: IntentContract)
           { title: "Inside No. 9: The Riddle of the Sphinx", year: "2017" },
         ],
         alternatives: ["Black Mirror: Playtest (2016)", "Cabinet of Curiosities: The Autopsy (2022)", "Inside No. 9: The Riddle of the Sphinx (2017)"],
-      }] : []),
-      ...(wantsWeirdSafe ? [{
-        ...base,
-        title: "Adventure Time: I Remember You",
-        year: "2012",
-        format: "Episode" as const,
-        runtime: "24 min",
-        vibe: "funny, weird, unexpectedly moving",
-        confidence: 80,
-        parsedIntent: {
-          primary: "comedy" as const,
-          secondary: ["weird"],
-          format: "episode" as const,
-          language: "any",
-          intensity: "curious" as const,
-        },
-        contentCategory: ["comedy", "weird", "fantasy"],
-        emotionalEffect: ["laughter", "surprise", "warmth"],
-        oneLine: "Watch I Remember You for one strange, funny episode that works as its own memorable experience.",
-        whyItFits: [
-          "It is one named episode, not a whole-series assignment.",
-          "The surreal comedy satisfies the weird brief without losing the group-watch energy.",
-          "Its compact story still lands even if nobody continues the series.",
-        ],
-        hiddenTitles: [],
-        alternatives: [],
       }] : []),
       {
         ...base,
