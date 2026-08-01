@@ -14,6 +14,12 @@ export type RecommendationIntent = {
   workSafe: boolean;
 };
 
+export type RuntimeConstraint = {
+  limitMinutes: number;
+  strict: boolean;
+  toleranceMinutes: number;
+};
+
 const LANGUAGE_NAMES: Array<[RegExp, string]> = [
   [/\bhindi\b/i, "Hindi"],
   [/\bmalayalam\b/i, "Malayalam"],
@@ -53,11 +59,40 @@ function extractRuntimeLimit(text: string): number | undefined {
   return undefined;
 }
 
+function runtimeToleranceMinutes(limitMinutes: number): number {
+  if (limitMinutes <= 60) return 5;
+  if (limitMinutes <= 100) return 10;
+  return 15;
+}
+
+function hasStrictRuntimeLanguage(text: string): boolean {
+  return /\b(exactly|strict(?:ly)?|hard limit|must be|cannot exceed|can't exceed|at most|only have|just have|have only|no more than)\b/i.test(text);
+}
+
 function requestedFormat(text: string): RecommendationIntent["requestedFormat"] {
   if (requestsSingleEpisode(text)) return "episode";
   if (/\b(series|show|season|episodes|binge)\b/i.test(text)) return "series";
   if (/\b(movie|film|feature)\b/i.test(text)) return "film";
   return undefined;
+}
+
+export function resolveRuntimeConstraint(input: RecommendRequest): RuntimeConstraint | null {
+  const text = intentRequestText(input);
+  const textLimit = extractRuntimeLimit(text);
+  if (textLimit && textLimit >= 10 && textLimit <= 240) {
+    const strict = hasStrictRuntimeLanguage(text);
+    return {
+      limitMinutes: textLimit,
+      strict,
+      toleranceMinutes: strict ? 0 : runtimeToleranceMinutes(textLimit),
+    };
+  }
+
+  const time = input.time?.toLowerCase().trim();
+  if (!time || time === "no preference" || time.includes("episode")) return null;
+  if (time.includes("90")) return { limitMinutes: 90, strict: false, toleranceMinutes: runtimeToleranceMinutes(90) };
+  if (time.includes("under 2")) return { limitMinutes: 120, strict: false, toleranceMinutes: runtimeToleranceMinutes(120) };
+  return null;
 }
 
 export function extractIntent(input: RecommendRequest): RecommendationIntent {
@@ -85,6 +120,7 @@ export function extractIntent(input: RecommendRequest): RecommendationIntent {
   if (hasNegatedConcept(text, /\bsex|sexual|nudity|erotic|explicit|raunchy|awkward sexual content\b/i)) hardAvoids.add("sex");
 
   if (hasNegatedConcept(text, /\bheavy drama|heavy|trauma|depressing|bleak\b/i)) softAvoids.add("heavy drama");
+  if (hasNegatedConcept(text, /\b(emotionally exhausting|emotionally draining|draining|harrowing|punishing|too intense)\b/i)) softAvoids.add("heavy drama");
   if (hasNegatedConcept(text, /\bsad ending|tragic ending|sad\b/i)) softAvoids.add("sad ending");
   if (hasNegatedConcept(text, /\bslow|slow burn|slow-burn\b/i)) softAvoids.add("slow pacing");
   if (hasNegatedConcept(text, /\bromance|romantic|love story\b/i)) softAvoids.add("romance");

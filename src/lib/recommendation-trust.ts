@@ -1,6 +1,6 @@
 import { IntentContract, ParsedRecommendationIntent, RawRecommendation, RecommendRequest, Recommendation } from "@/lib/types";
 import { hasNegatedConcept, requestText, requestsSingleEpisode } from "@/lib/recommendation-utils";
-import { extractIntent, RecommendationIntent } from "@/lib/intent";
+import { extractIntent, RecommendationIntent, resolveRuntimeConstraint } from "@/lib/intent";
 
 export type TrustRejection = {
   title: string;
@@ -12,10 +12,10 @@ export type TrustResult<T extends RawRecommendation | Recommendation> = {
   rejected: TrustRejection[];
 };
 
-export type RecommendationTrustMode = "hybrid" | "llm-only";
+export type RecommendationTrustMode = "contract-v2" | "llm-only";
 
 export function recommendationTrustMode(): RecommendationTrustMode {
-  return process.env.FUN_SEMANTIC_TRUST_MODE === "llm-only" ? "llm-only" : "hybrid";
+  return process.env.FUN_SEMANTIC_TRUST_MODE === "llm-only" ? "llm-only" : "contract-v2";
 }
 
 function normalize(value: string): string {
@@ -288,7 +288,6 @@ function contractFormat(contract?: IntentContract): IntentContract["format"] | n
 }
 
 function runtimeViolation(input: RecommendRequest, rec: RawRecommendation | Recommendation, contract?: IntentContract): string | null {
-  const extractedIntent = extractIntent(input);
   const request = requestText(input).toLowerCase();
   const time = input.time?.toLowerCase();
   const minutes = parseRuntimeMinutes(rec.runtime);
@@ -298,28 +297,20 @@ function runtimeViolation(input: RecommendRequest, rec: RawRecommendation | Reco
   }
   if (!minutes) return null;
 
-  if (
-    extractedIntent.runtimeLimitMinutes &&
-    extractedIntent.runtimeLimitMinutes >= 10 &&
-    extractedIntent.runtimeLimitMinutes <= 240 &&
-    minutes > extractedIntent.runtimeLimitMinutes
-  ) {
-    return `time: ${minutes} min exceeds ${extractedIntent.runtimeLimitMinutes} min request`;
-  }
-
-  const freeTextLimit = request.match(/\b(?:under|less than|within|up to|max(?:imum)?|no more than)\s+(\d{1,3})\s*(?:min|mins|minutes)\b/);
-  const plainMinuteNeed = request.match(/\b(\d{1,3})\s*(?:min|mins|minutes)\b/);
-  const requestedLimit = freeTextLimit ? Number(freeTextLimit[1]) : plainMinuteNeed ? Number(plainMinuteNeed[1]) : null;
-  if (requestedLimit && requestedLimit >= 10 && requestedLimit <= 240 && minutes > requestedLimit) {
-    return `time: ${minutes} min exceeds ${requestedLimit} min request`;
-  }
-  if (/\b(?:under|less than|within|up to|max(?:imum)?|no more than)\s+(?:two|2)\s+hours?\b/.test(request) && minutes > 120) {
-    return `time: ${minutes} min exceeds under 2 hours`;
+  const runtimeConstraint = resolveRuntimeConstraint(input);
+  if (runtimeConstraint) {
+    const allowed = runtimeConstraint.limitMinutes + runtimeConstraint.toleranceMinutes;
+    if (minutes > allowed) {
+      const label = runtimeConstraint.strict
+        ? `${runtimeConstraint.limitMinutes} min hard cap`
+        : `${runtimeConstraint.limitMinutes} min target (+${runtimeConstraint.toleranceMinutes})`;
+      return `time: ${minutes} min exceeds ${label}`;
+    }
   }
 
   if (!time || time === "no preference") return null;
   if (time.includes("90") && !isEpisodeRuntime(rec) && minutes > 110) return `time: ${minutes} min exceeds 90 min mood`;
-  if (time.includes("under 2") && !isEpisodeRuntime(rec) && minutes > 120) return `time: ${minutes} min exceeds under 2 hours`;
+  if (time.includes("under 2") && !isEpisodeRuntime(rec) && minutes > 135) return `time: ${minutes} min exceeds under 2 hours`;
   return null;
 }
 
@@ -400,7 +391,9 @@ function negativeReferenceViolation(rec: RawRecommendation | Recommendation, con
 }
 
 function confidenceViolation(rec: RawRecommendation | Recommendation): string | null {
-  return typeof rec.confidence === "number" && rec.confidence < 60 ? `confidence: ${rec.confidence} below minimum` : null;
+  if (typeof rec.confidence !== "number" || !Number.isFinite(rec.confidence)) return null;
+  const normalized = rec.confidence <= 1 ? rec.confidence * 100 : rec.confidence;
+  return normalized < 60 ? `confidence: ${rec.confidence} below minimum` : null;
 }
 
 const overRecommendedHiddenGemTitles = new Set([
@@ -432,9 +425,12 @@ function explicitFormatViolation(input: RecommendRequest, rec: RawRecommendation
   const request = intent.requestText || requestText(input);
   const format = `${rec.format} ${rec.runtime}`.toLowerCase();
   const declaredFormat = contractFormat(contract);
-  const asksForFilm = intent.requestedFormat === "film" || declaredFormat === "film" || /\b(movie|film|feature)\b/i.test(request);
-  const asksForSeries = intent.requestedFormat === "series" || declaredFormat === "series" || /\b(series|show|season|episodes|binge)\b/i.test(request);
-  const asksForEpisode = intent.requestedFormat === "episode" || declaredFormat === "episode" || requestsSingleEpisode(request);
+  const explicitFilmRequest = /\b(movie|film|feature)\b/i.test(request);
+  const explicitSeriesRequest = /\b(series|show|season|episodes|binge)\b/i.test(request);
+  const explicitEpisodeRequest = requestsSingleEpisode(request);
+  const asksForFilm = intent.requestedFormat === "film" || explicitFilmRequest || (declaredFormat === "film" && explicitFilmRequest);
+  const asksForSeries = intent.requestedFormat === "series" || explicitSeriesRequest || (declaredFormat === "series" && explicitSeriesRequest);
+  const asksForEpisode = intent.requestedFormat === "episode" || explicitEpisodeRequest || declaredFormat === "episode";
 
   if (asksForEpisode && !/\bepisode\b/.test(rec.format.toLowerCase())) return "intent: requested one specific episode";
   if (asksForFilm && /\b(series|episode|season)\b/.test(format)) return "intent: requested a film/movie, got series/episode";
@@ -758,6 +754,42 @@ export function validateRecommendation<T extends RawRecommendation | Recommendat
 
   const reasons = [...mechanicalReasons, ...semanticReasons];
 
+  return reasons.length ? { title: rec.title, reasons } : null;
+}
+
+export function validateMechanicalRecommendation<T extends RawRecommendation | Recommendation>(
+  input: RecommendRequest,
+  rec: T,
+  contract?: IntentContract,
+): TrustRejection | null {
+  const intent = extractIntent(input);
+  const reasons = [
+    memoryViolation(input, rec),
+    negativeReferenceViolation(rec, contract),
+    confidenceViolation(rec),
+    runtimeViolation(input, rec, contract),
+    explicitFormatViolation(input, rec, intent, contract),
+    hiddenGemViolation(input, rec, intent),
+  ].filter((reason): reason is string => Boolean(reason));
+  return reasons.length ? { title: rec.title, reasons } : null;
+}
+
+export function validateSemanticRecommendation<T extends RawRecommendation | Recommendation>(
+  input: RecommendRequest,
+  rec: T,
+  contract?: IntentContract,
+): TrustRejection | null {
+  const intent = extractIntent(input);
+  const reasons = [
+    sensitivityViolation(input, rec, contract),
+    humaneToneViolation(input, rec),
+    strongFearViolation(input, rec, contract),
+    ...avoidanceViolations(input, rec),
+    breakupReliefViolation(input, rec, intent),
+    explicitPacingViolation(input, rec, intent),
+    ...explicitGenreViolations(input, rec, intent, contract),
+    ...parsedIntentContradictions(input, rec, contract),
+  ].filter((reason): reason is string => Boolean(reason));
   return reasons.length ? { title: rec.title, reasons } : null;
 }
 

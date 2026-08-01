@@ -14,7 +14,16 @@ export type RecommendationDisplayState =
   | "verified"
   | "unverified"
   | "avoidance-fallback"
+  | "no-confident-match"
   | "no-subscription-match";
+
+export type SemanticCandidateReview = {
+  title: string;
+  hardViolations: string[];
+  emotionalFit: number;
+  confidence: number;
+  reason: string;
+};
 
 export type ParsedRecommendationIntent = {
   primary?: string;

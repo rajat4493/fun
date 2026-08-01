@@ -1,5 +1,5 @@
 import { hasNegatedConcept, requestsSingleEpisode } from "@/lib/recommendation-utils";
-import { extractIntent, RecommendationIntent } from "@/lib/intent";
+import { extractIntent, RecommendationIntent, resolveRuntimeConstraint } from "@/lib/intent";
 import { IntentContract, RecommendRequest } from "./types";
 
 function buildTasteFingerprint(userContext: string) {
@@ -56,6 +56,7 @@ OUTPUT POLICY
 - Confidence: 90-100 certain; 75-89 strong with small doubts; 60-74 a clear compromise; below 60 must be replaced.
 - whyItFits must prove the match with concrete request traits, not generic praise.
 - For tired, depleted, or comfort-seeking viewers, minimize regret and prefer emotionally resolving endings unless Bold/Unhinged explicitly calls for challenge.
+- Hidden discovery must remain watchable for this viewer. "Hidden gem" means less obvious and well matched, not automatically austere, canonical, awards-led, or demanding. Standard/Curious discovery should favor accessible overlooked work; reserve formally difficult arthouse choices for explicit requests or Bold/Unhinged.
 - Keep visible copy factual, classy, and specific. Do not expose private reasoning or mention inferred time/social context unless the user typed or selected it.`;
 
 function situationSource(input: RecommendRequest): string {
@@ -119,8 +120,6 @@ function buildSituationClause(input: RecommendRequest, intent: RecommendationInt
 function buildPracticalConstraints(input: RecommendRequest, userContext: string, intent: RecommendationIntent): string[] {
   const constraints: string[] = [];
   const text = userContext.toLowerCase();
-  const minuteLimit = text.match(/\b(?:under|less than|within|up to|max(?:imum)?|no more than)\s+(\d{1,3})\s*(?:min|mins|minutes)\b/);
-  const plainMinutes = text.match(/\b(\d{1,3})\s*(?:min|mins|minutes)\b/);
 
   if (intent.requestedFormat === "episode" || requestsSingleEpisode(text) || input.time?.toLowerCase().includes("one episode")) {
     constraints.push("Format/time: the user wants ONE SPECIFIC EPISODE — not a film, not a whole series, not a season. A feature-length film is NOT a valid answer here under any circumstances, no matter how good the mood match is — this is the most common mistake, avoid it. Pick one show and name one specific episode (or a strong representative episode if none is named). Set \"format\" to \"Episode\" and make \"runtime\" state the per-episode length (e.g. \"22 min\"), not the show's total length.");
@@ -130,11 +129,13 @@ function buildPracticalConstraints(input: RecommendRequest, userContext: string,
     constraints.push("Format: recommend a series/show, not a film, unless availability makes a film the only honest fit.");
   }
 
-  const limit = intent.runtimeLimitMinutes ?? (minuteLimit ? Number(minuteLimit[1]) : plainMinutes ? Number(plainMinutes[1]) : null);
-  if (limit && limit >= 10 && limit <= 240) {
-    constraints.push(`Runtime: stay within ${limit} minutes.`);
-  } else if (/\b(?:under|less than|within|up to|max(?:imum)?|no more than)\s+(?:two|2)\s+hours?\b/i.test(text) || input.time?.toLowerCase().includes("under 2")) {
-    constraints.push("Runtime: stay under two hours.");
+  const runtimeConstraint = resolveRuntimeConstraint(input);
+  if (runtimeConstraint) {
+    if (runtimeConstraint.strict) {
+      constraints.push(`Runtime: this is a hard cap. Do not exceed ${runtimeConstraint.limitMinutes} minutes.`);
+    } else {
+      constraints.push(`Runtime: aim for about ${runtimeConstraint.limitMinutes} minutes. A small overage is acceptable when the fit is clearly stronger.`);
+    }
   }
 
   if (intent.familySafe || /\b(family safe|family-safe|with family|with parents|parents|kids|children)\b/i.test(text)) {
@@ -514,7 +515,7 @@ User context:
 Request-specific policy:${contractClause}${hiddenGemClause}${languagePreferenceClause}${avoidObviousHindiHiddenGems}${intensityClause}${fearIntentClause}${crazinessClause}${softMoodDirectionClause}${feedbackRepairClause}${sensitivityClause}${humaneToneClause}${contextAmplifier}${tasteFingerprint}${crossLanguageReferenceClause}${scopeClause}
 
 Return one JSON object with a "recommendations" array containing exactly ${COUNT_WORDS[count] ?? String(count)} item${count === 1 ? "" : "s"}. The API enforces the full schema; populate every required field and output no markdown.
-Each item must include parsedIntent, title, year, format, runtime, vibe, contentCategory, emotionalEffect, confidence, oneLine, three whyItFits reasons, and unverified whereToWatch.${includeDiscovery ? " Also include hiddenLayer, three hiddenTitles, and three alternatives." : ""}
+Each item must include parsedIntent, title, year, format, runtime, vibe, contentCategory, emotionalEffect, confidence, oneLine, and three whyItFits reasons.${includeDiscovery ? " Also include hiddenLayer, three hiddenTitles, and three alternatives." : ""}
 
 For each recommendation:
 - ${discoveryInstructions}
@@ -558,7 +559,7 @@ User contract:
 - Hard avoids: ${intent.hardAvoids.length ? intent.hardAvoids.join(", ") : "none"}
 - Soft avoids: ${intent.softAvoids.length ? intent.softAvoids.join(", ") : "none"}
 - Requested format: ${intent.requestedFormat ?? "any"}
-- Runtime limit: ${intent.runtimeLimitMinutes ? `${intent.runtimeLimitMinutes} minutes` : "none"}
+- Runtime target: ${resolveRuntimeConstraint(input)?.limitMinutes ? `${resolveRuntimeConstraint(input)?.limitMinutes} minutes${resolveRuntimeConstraint(input)?.strict ? " hard cap" : " with small tolerance if the fit is stronger"}` : "none"}
 - Hidden-gem intent: ${intent.hiddenGem ? "yes" : "no"}
 - Explicitly rejected title examples: ${intentContract?.negativeReferences?.length ? intentContract.negativeReferences.join(", ") : "none"}
 - Recent titles to avoid: ${input.recentTitles?.slice(0, 10).join(", ") || "none"}
@@ -574,6 +575,6 @@ Rules:
 - Hard avoids are absolute. If horror/gore/violence/sex are avoided, do not recommend or hide those in related titles.
 - If a film is requested, do not return a series. If one episode is requested, return a specific episode.
 - Fill parsedIntent before choosing the title.
-Each item must include parsedIntent, title, year, format, runtime, vibe, contentCategory, emotionalEffect, confidence, oneLine, three whyItFits reasons, and unverified whereToWatch.${includeDiscovery ? " Also include hiddenLayer, three hiddenTitles, and three alternatives." : " Do not generate discovery fields."}
+Each item must include parsedIntent, title, year, format, runtime, vibe, contentCategory, emotionalEffect, confidence, oneLine, and three whyItFits reasons.${includeDiscovery ? " Also include hiddenLayer, three hiddenTitles, and three alternatives." : " Do not generate discovery fields."}
 `;
 }

@@ -156,9 +156,9 @@ const tests = [
     check: (rec) => {
       const text = textOf(rec);
       const intentLabel = rec.parsedIntent?.primary ?? "";
-      return (runtimeMinutes(rec) ?? 999) <= 90 && /\bfilm\b/i.test(rec.format) && (drama.test(text) || /^drama$/i.test(intentLabel));
+      return (runtimeMinutes(rec) ?? 999) <= 100 && /\bfilm\b/i.test(rec.format) && (drama.test(text) || /^drama$/i.test(intentLabel));
     },
-    why: "Under-90 drama must stay inside runtime and return a drama film, not a TV series.",
+    why: "Under-90 drama should stay close to runtime, allowing a small overage, and return a drama film, not a TV series.",
   },
   {
     id: "AVOID-WEIRD-NO-HORROR",

@@ -1,4 +1,4 @@
-import { RawRecommendation } from "@/lib/types";
+import { RawRecommendation, SemanticCandidateReview } from "@/lib/types";
 import { extractJson, uniqueValues, withTimeout } from "@/lib/recommendation-utils";
 
 const ANTHROPIC_TIMEOUT_MS = 25000;
@@ -59,9 +59,30 @@ type OpenAIResponse = {
   };
 };
 
+const INTENT_CONTRACT_SCHEMA = {
+  type: "object",
+  properties: {
+    primary: { type: "string", enum: ["scare", "cry", "comedy", "thriller", "romance", "weird", "comfort", "gore", "drama", "discovery", "unknown"] },
+    secondary: { type: "array", items: { type: "string" } },
+    hardAvoids: { type: "array", items: { type: "string" } },
+    softAvoids: { type: "array", items: { type: "string" } },
+    format: { type: "string", enum: ["film", "series", "episode", "any"] },
+    language: { type: "string" },
+    situation: { type: "array", items: { type: "string" } },
+    intensity: { type: "string", enum: ["safe", "curious", "bold", "unhinged"] },
+    emotionalGoal: { type: "string" },
+    negativeReferences: { type: "array", items: { type: "string" } },
+    discoveryPreference: { type: "string", enum: ["standard", "non-mainstream"] },
+    confidence: { type: "number" },
+    ambiguity: { type: "string" },
+  },
+  required: ["primary", "secondary", "hardAvoids", "softAvoids", "format", "language", "situation", "intensity", "emotionalGoal", "negativeReferences", "discoveryPreference", "confidence", "ambiguity"],
+  additionalProperties: false,
+};
+
 export type LlmCallTelemetry = {
   provider: "openai";
-  purpose: "intent" | "recommendation";
+  purpose: "intent" | "recommendation" | "semantic-review";
   model: string;
   ok: boolean;
   durationMs: number;
@@ -162,6 +183,11 @@ function hydrateRecommendationDefaults(batch: RawRecommendation[]): RawRecommend
       headline: "",
       insight: "",
       classyJab: "",
+    },
+    whereToWatch: recommendation.whereToWatch ?? {
+      status: "unverified",
+      primary: "Availability",
+      note: "Availability needs checking for your region.",
     },
     hiddenTitles: recommendation.hiddenTitles ?? [],
     alternatives: recommendation.alternatives ?? [],
@@ -360,16 +386,6 @@ const RECOMMENDATION_ITEM_SCHEMA = {
     confidence: { type: "number" },
     oneLine: { type: "string" },
     whyItFits: { type: "array", items: { type: "string" } },
-    whereToWatch: {
-      type: "object",
-      properties: {
-        status: { type: "string", enum: ["unverified"] },
-        primary: { type: "string" },
-        note: { type: "string" },
-      },
-      required: ["status", "primary", "note"],
-      additionalProperties: false,
-    },
     hiddenLayer: {
       type: "object",
       properties: {
@@ -394,7 +410,7 @@ const RECOMMENDATION_ITEM_SCHEMA = {
     },
     alternatives: { type: "array", items: { type: "string" } },
   },
-  required: ["parsedIntent", "title", "year", "format", "runtime", "vibe", "contentCategory", "emotionalEffect", "confidence", "oneLine", "whyItFits", "whereToWatch", "hiddenLayer", "hiddenTitles", "alternatives"],
+  required: ["parsedIntent", "title", "year", "format", "runtime", "vibe", "contentCategory", "emotionalEffect", "confidence", "oneLine", "whyItFits", "hiddenLayer", "hiddenTitles", "alternatives"],
   additionalProperties: false,
 };
 
@@ -410,7 +426,6 @@ const CORE_RECOMMENDATION_KEYS = [
   "confidence",
   "oneLine",
   "whyItFits",
-  "whereToWatch",
 ] as const;
 
 const CORE_RECOMMENDATION_ITEM_SCHEMA = {
@@ -420,6 +435,35 @@ const CORE_RECOMMENDATION_ITEM_SCHEMA = {
   ),
   required: [...CORE_RECOMMENDATION_KEYS],
 };
+
+const SEMANTIC_REVIEW_ITEM_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    hardViolations: { type: "array", items: { type: "string" } },
+    emotionalFit: { type: "number" },
+    confidence: { type: "number" },
+    reason: { type: "string" },
+  },
+  required: ["title", "hardViolations", "emotionalFit", "confidence", "reason"],
+  additionalProperties: false,
+};
+
+function semanticReviewSchema(count: number) {
+  return {
+    type: "object",
+    properties: {
+      reviews: {
+        type: "array",
+        minItems: count,
+        maxItems: count,
+        items: SEMANTIC_REVIEW_ITEM_SCHEMA,
+      },
+    },
+    required: ["reviews"],
+    additionalProperties: false,
+  };
+}
 
 function recommendationBatchSchema(count: number, includeDiscovery = true) {
   return {
@@ -565,15 +609,23 @@ export async function interpretIntentWithOpenAI(
             "Content-Type": "application/json",
             "Authorization": `Bearer ${apiKey}`,
           },
-          body: JSON.stringify({
-            model,
-            input: prompt,
-            prompt_cache_key: promptCacheKey,
-            temperature: 0.1,
-            max_output_tokens: INTENT_MAX_OUTPUT_TOKENS,
-          }),
-          signal,
+        body: JSON.stringify({
+          model,
+          input: prompt,
+          prompt_cache_key: promptCacheKey,
+          temperature: 0.1,
+          max_output_tokens: INTENT_MAX_OUTPUT_TOKENS,
+          text: {
+            format: {
+              type: "json_schema",
+              name: "fun_intent_contract",
+              schema: INTENT_CONTRACT_SCHEMA,
+              strict: true,
+            },
+          },
         }),
+        signal,
+      }),
         remainingMs,
         `OpenAI intent ${model}`,
       );
@@ -629,4 +681,95 @@ export async function interpretIntentWithOpenAI(
   }
 
   throw lastError ?? new Error("OpenAI intent interpretation failed.");
+}
+
+export async function reviewCandidatesWithOpenAI(
+  prompt: string,
+  count: number,
+  telemetry?: LlmTelemetryOptions,
+): Promise<SemanticCandidateReview[]> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
+
+  const model = process.env.OPENAI_JUDGE_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const timeoutMs = 6000;
+  const maxOutputTokens = Math.min(900, 180 + count * 220);
+  const promptCacheKey = "fun-semantic-review-v1";
+  const started = Date.now();
+
+  try {
+    const response = await withTimeout(
+      (signal) => fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          input: prompt,
+          prompt_cache_key: promptCacheKey,
+          temperature: 0,
+          max_output_tokens: maxOutputTokens,
+          text: {
+            format: {
+              type: "json_schema",
+              name: "fun_semantic_candidate_reviews",
+              schema: semanticReviewSchema(count),
+              strict: true,
+            },
+          },
+        }),
+        signal,
+      }),
+      timeoutMs,
+      `OpenAI semantic review ${model}`,
+    );
+
+    if (!response.ok) throw await openAIHttpError(response, `semantic review ${model}`);
+    const data = (await response.json()) as OpenAIResponse;
+    const responseError = openAIResponseError(data, response.headers.get("x-request-id"));
+    if (responseError) throw responseError;
+    const text = openAIText(data);
+    const parsed = JSON.parse(extractJson(text)) as { reviews?: SemanticCandidateReview[] };
+    const reviews = parsed.reviews ?? [];
+    if (reviews.length !== count) throw new Error(`Semantic review returned ${reviews.length} of ${count} reviews`);
+
+    emitOpenAITelemetry(telemetry, {
+      purpose: "semantic-review",
+      model,
+      ok: true,
+      durationMs: Date.now() - started,
+      requestId: response.headers.get("x-request-id") ?? undefined,
+      responseId: data.id,
+      status: data.status,
+      inputTokens: data.usage?.input_tokens,
+      cachedInputTokens: data.usage?.input_tokens_details?.cached_tokens,
+      outputTokens: data.usage?.output_tokens,
+      totalTokens: data.usage?.total_tokens,
+      temperature: 0,
+      maxOutputTokens,
+      promptCacheKey,
+      requestedCount: count,
+      promptChars: prompt.length,
+      prompt: telemetry?.captureContent ? prompt : undefined,
+      responseText: telemetry?.captureContent ? text : undefined,
+    });
+    return reviews;
+  } catch (error) {
+    emitOpenAITelemetry(telemetry, {
+      purpose: "semantic-review",
+      model,
+      ok: false,
+      durationMs: Date.now() - started,
+      temperature: 0,
+      maxOutputTokens,
+      promptCacheKey,
+      requestedCount: count,
+      promptChars: prompt.length,
+      prompt: telemetry?.captureContent ? prompt : undefined,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 }

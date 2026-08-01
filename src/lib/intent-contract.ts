@@ -56,6 +56,14 @@ function numberConfidence(value: unknown): number {
   return Math.max(0, Math.min(1, number > 1 ? number / 100 : number));
 }
 
+function normalizedPrimaryCandidates(primaryRaw: string, secondary: string[], fallback: string): string[] {
+  const primaryParts = primaryRaw
+    .split("|")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return [...primaryParts, ...secondary, fallback];
+}
+
 function localDiscoveryPreference(text: string): IntentContract["discoveryPreference"] {
   return /\b(hidden\s+gem|underrated|overlooked|buried|less\s+obvious|non[- ]?mainstream|not (?:the )?(?:mainstream|obvious|usual|famous) ones?)\b/i.test(text)
     ? "non-mainstream"
@@ -189,7 +197,8 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
   if (!raw || typeof raw !== "object") return local;
   const value = raw as Record<string, unknown>;
   const primaryRaw = typeof value.primary === "string" ? value.primary : "";
-  const inferredPrimary = firstKnownPrimary([primaryRaw, ...stringArray(value.secondary), local.primary]);
+  const llmSecondaryRaw = stringArray(value.secondary);
+  const inferredPrimary = firstKnownPrimary(normalizedPrimaryCandidates(primaryRaw, llmSecondaryRaw, local.primary));
   // A model sometimes promotes a structured avoidance to the primary intent
   // ("romantic + comforting", avoids=["gore"] → primary "gore"). Explicit
   // controls are authoritative: an avoided concept cannot become the desired
@@ -200,7 +209,7 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
     : inferredPrimary;
   const formatRaw = typeof value.format === "string" ? value.format.toLowerCase().trim() : "";
   const intensityRaw = typeof value.intensity === "string" ? value.intensity.toLowerCase().trim() : "";
-  const llmSecondary = stringArray(value.secondary).filter((item) => {
+  const llmSecondary = llmSecondaryRaw.filter((item) => {
     const normalized = item.toLowerCase();
     return !local.hardAvoids.includes(normalized) || [local.primary, ...local.secondary].includes(normalized);
   });
@@ -226,7 +235,7 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
     // Merge local emotional-register signals (bleak, cathartic, weird) — the LLM often omits them
     secondary: [...new Set([...llmSecondary, ...local.secondary])].slice(0, 8),
     hardAvoids: [...new Set([...local.hardAvoids, ...reconciledLlmHardAvoids])],
-    softAvoids: [...new Set([...local.softAvoids, ...stringArray(value.softAvoids).map((item) => item.toLowerCase())])],
+    softAvoids: [...local.softAvoids],
     format: FORMAT_VALUES.has(formatRaw as IntentContract["format"]) ? formatRaw as IntentContract["format"] : local.format,
     // Explicit language in free text or controls is factual and outranks an intent model that
     // answers with the generic "any" lane.
@@ -280,24 +289,12 @@ User text and controls:
 - Language preference: ${input.languagePreferences?.join(", ") || "any"}
 - Taste risk: ${local.intensity}
 
-Return one compact JSON object only:
-{
-  "primary": "scare|cry|comedy|thriller|romance|weird|comfort|gore|drama|discovery|unknown",
-  "secondary": ["short labels"],
-  "hardAvoids": ["horror", "gore", "violence", "sex", "graphic violence"],
-  "softAvoids": ["slow pacing", "heavy drama", "sad ending"],
-  "format": "film|series|episode|any",
-  "language": "requested language/culture lane or any",
-  "situation": ["partner|friends|family|bedtime|transit|work|waiting when typed"],
-  "intensity": "safe|curious|bold|unhinged",
-  "emotionalGoal": "one short sentence describing the desired emotional outcome",
-  "negativeReferences": ["exact titles explicitly rejected or given as examples of what not to recommend"],
-  "discoveryPreference": "standard|non-mainstream",
-  "confidence": 0.85,
-  "ambiguity": "short note if request has conflicting signals, else empty"
-}
-
-Confidence is a number from 0 to 1 describing how certain you are about the interpretation. Use a realistic value such as 0.85 for a clear request; do not copy the example mechanically. Selected avoids are authoritative boundaries, not evidence that the user wants those concepts.
+Return one compact JSON object only, matching the provided schema exactly.
+Important:
+- Arrays must be empty when the request does not support them. Never copy example values or possible options into hardAvoids, softAvoids, or situation.
+- Selected avoids are authoritative boundaries, not evidence that the user wants those concepts.
+- Confidence is a number from 0 to 1.
+- If the user did not ask for a soft avoidance such as romance, slow pacing, heavy drama, or sad ending, leave softAvoids empty.
 When the viewer says "not X", "anything except X", or "not mainstream ones like X, Y", put the exact title names in negativeReferences. Do not put merely mentioned positive reference titles there.
 `;
 }
