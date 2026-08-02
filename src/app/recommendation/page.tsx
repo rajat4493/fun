@@ -435,9 +435,7 @@ export default function RecommendationPage() {
       body: JSON.stringify(firstPickRequest),
     });
     if (response.status === 429) {
-      const retryAfter = Number(response.headers.get("Retry-After") ?? 60);
-      const minutes = Math.max(1, Math.round(retryAfter / 60));
-      throw new Error(`You've hit the free limit for now. Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`);
+      throw new Error("You've reached today's free limit. Please try again tomorrow.");
     }
     if (!response.ok) throw new Error("failed");
     const data = await response.json() as Recommendation & {
@@ -520,7 +518,7 @@ export default function RecommendationPage() {
         });
       }
     } catch (error) {
-      setFetchError(error instanceof Error && error.message.startsWith("You've hit the free limit")
+      setFetchError(error instanceof Error && error.message.startsWith("You've reached today's free limit")
         ? error.message
         : "Could not find another pick. Please try a new mood.");
     } finally {
@@ -602,7 +600,7 @@ export default function RecommendationPage() {
         feedbackContext: loadRecommendationFeedbackContext(),
       });
     } catch (error) {
-      setFetchError(error instanceof Error && error.message.startsWith("You've hit the free limit")
+      setFetchError(error instanceof Error && error.message.startsWith("You've reached today's free limit")
         ? error.message
         : "Could not search beyond your subscriptions. Try again.");
     } finally {

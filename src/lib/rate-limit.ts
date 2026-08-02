@@ -4,14 +4,16 @@
 // resets when localStorage is cleared) so a later paid tier can simply grant a higher/removed
 // ceiling for a known identifier instead of a different mechanism.
 //
+// A single daily cap, deliberately no burst/sub-window layer: a real session can cost 2+ backend
+// calls per visible "ask" (the main pick plus the automatic background fill call) with variable
+// LLM latency, so a short burst window kept falsely blocking completely normal usage in testing.
+//
 // Reuses the same Upstash REST pipeline pattern as src/lib/anonymous-profile-store.ts (raw
 // fetch(), no @upstash/ratelimit SDK) and fails open on Redis/network trouble — a rate limiter
 // that itself takes the app down when Redis hiccups is worse than the risk it guards against.
 
-const BURST_LIMIT = 5;
-const BURST_WINDOW_SECONDS = 60;
-const SUSTAINED_LIMIT = 20;
-const SUSTAINED_WINDOW_SECONDS = 3600;
+const DAILY_LIMIT = 50;
+const DAILY_WINDOW_SECONDS = 86400;
 
 export type RateLimitResult = { limited: false } | { limited: true; retryAfterSeconds: number };
 
@@ -28,7 +30,7 @@ export function callerIp(req: Request): string {
   return first || req.headers.get("x-real-ip")?.trim() || "unknown";
 }
 
-async function incrementAndCheck(key: string, windowSeconds: number, limit: number): Promise<{ count: number } | null> {
+async function incrementAndCheck(key: string, windowSeconds: number): Promise<{ count: number } | null> {
   const { url, token } = credentials();
   if (!url || !token) return null;
 
@@ -48,20 +50,15 @@ async function incrementAndCheck(key: string, windowSeconds: number, limit: numb
 }
 
 export async function checkRateLimit(ip: string): Promise<RateLimitResult> {
-  // Dev/local and production share the same Upstash instance (see anonymous-profile-store.ts) —
-  // without this, running the QA gate/regression suites against a local dev server would burn
-  // through the same budget real production traffic uses, and could self-lock the dev server for
-  // up to an hour once the sustained window's EXPIRE NX is set.
+  // Dev/local and production use separate Upstash instances, but this bypass stays regardless —
+  // it protects local/dev iteration and the QA gate/regression suites from ever depending on
+  // whatever credentials happen to be configured.
   if (process.env.NODE_ENV !== "production") return { limited: false };
   if (!ip || ip === "unknown") return { limited: false };
 
   try {
-    const burst = await incrementAndCheck(`fun:ratelimit:burst:${ip}`, BURST_WINDOW_SECONDS, BURST_LIMIT);
-    if (burst && burst.count > BURST_LIMIT) return { limited: true, retryAfterSeconds: BURST_WINDOW_SECONDS };
-
-    const sustained = await incrementAndCheck(`fun:ratelimit:sustained:${ip}`, SUSTAINED_WINDOW_SECONDS, SUSTAINED_LIMIT);
-    if (sustained && sustained.count > SUSTAINED_LIMIT) return { limited: true, retryAfterSeconds: SUSTAINED_WINDOW_SECONDS };
-
+    const daily = await incrementAndCheck(`fun:ratelimit:daily:${ip}`, DAILY_WINDOW_SECONDS);
+    if (daily && daily.count > DAILY_LIMIT) return { limited: true, retryAfterSeconds: DAILY_WINDOW_SECONDS };
     return { limited: false };
   } catch {
     // Fail open: a Redis outage should never take down recommendations for real users.

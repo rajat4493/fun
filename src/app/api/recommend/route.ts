@@ -880,7 +880,7 @@ export async function POST(req: Request) {
     const rateLimit = await checkRateLimit(callerIp(req));
     if (rateLimit.limited) {
       return NextResponse.json(
-        { error: "You've hit the free limit for now. Please try again shortly." },
+        { error: "You've reached today's free limit. Please try again tomorrow." },
         { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } },
       );
     }
