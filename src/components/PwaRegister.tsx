@@ -18,23 +18,46 @@ export default function PwaRegister() {
   const [showInstall, setShowInstall] = useState(false);
   const [showIosHelp, setShowIosHelp] = useState(false);
   const [isIos, setIsIos] = useState(false);
+  const [showUpdateToast, setShowUpdateToast] = useState(false);
 
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
+    // Registering in dev caused exactly the "code changes don't show up" symptom this was built
+    // to fix: a service worker persists across next-dev restarts, serving assets cached from a
+    // previous session regardless of what the dev server is currently running.
+    if (process.env.NODE_ENV !== "production") return;
+
+    // sw.js already calls self.skipWaiting()/clients.claim() unconditionally, so a new worker
+    // takes control of open tabs on its own — this only needs to notice that happened and offer
+    // a refresh. Only a controllerchange that follows an ALREADY-controlled tab is a real update;
+    // the first-ever activation on a fresh visit also fires this event and must not show a toast.
+    const hadControllerAlready = Boolean(navigator.serviceWorker.controller);
+    const onControllerChange = () => {
+      if (hadControllerAlready) setShowUpdateToast(true);
+    };
+    navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
 
     const register = () => {
-      navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {
+      navigator.serviceWorker.register("/sw.js", { scope: "/" }).then((registration) => {
+        const checkForUpdate = () => {
+          if (document.visibilityState === "visible") registration.update().catch(() => {});
+        };
+        document.addEventListener("visibilitychange", checkForUpdate);
+      }).catch(() => {
         // PWA support is progressive; the web app remains fully usable if registration fails.
       });
     };
 
     if (document.readyState === "complete") {
       register();
-      return;
+    } else {
+      window.addEventListener("load", register, { once: true });
     }
 
-    window.addEventListener("load", register, { once: true });
-    return () => window.removeEventListener("load", register);
+    return () => {
+      navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+      window.removeEventListener("load", register);
+    };
   }, []);
 
   useEffect(() => {
@@ -80,10 +103,24 @@ export default function PwaRegister() {
     setInstallPrompt(null);
   }
 
-  if (!showInstall) return null;
+  if (!showInstall && !showUpdateToast) return null;
 
   return (
     <>
+      {showUpdateToast && (
+        <div className="fixed inset-x-4 bottom-4 z-[80] mx-auto flex max-w-sm items-center justify-between gap-4 rounded-2xl border border-white/14 bg-[#0d0d0d] px-5 py-4 shadow-[0_20px_60px_rgba(0,0,0,0.5)] sm:inset-x-auto sm:right-8">
+          <p className="text-sm text-white/76">A new version of F.U.N is available.</p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="shrink-0 rounded-full bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-white/90"
+          >
+            Refresh
+          </button>
+        </div>
+      )}
+
+      {showInstall && (
       <button
         type="button"
         onClick={install}
@@ -93,6 +130,7 @@ export default function PwaRegister() {
         <Download size={15} />
         Install F.U.N
       </button>
+      )}
 
       {showIosHelp && (
         <div

@@ -84,19 +84,18 @@ export const LANGUAGE_OPTIONS: Record<string, string[]> = {
   default: ["Local language", "English", "No preference"],
 };
 
+// Preview is scoped to UK + Ireland (launch-scope.ts) — only detect those two, and default to the
+// larger market. The previous version detected/defaulted to Poland, a leftover from before that
+// scoping decision that no longer appears anywhere in the picker itself.
 function detectCountry(): { name: string; code: string } {
   try {
-    const locale = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (locale.includes("Warsaw") || locale.includes("Europe/Warsaw")) return { name: "Poland", code: "PL" };
-    if (locale.includes("London")) return { name: "United Kingdom", code: "GB" };
-    if (locale.includes("Vienna")) return { name: "Austria", code: "AT" };
-    if (locale.includes("Berlin")) return { name: "Germany", code: "DE" };
-    if (locale.includes("Paris") || locale.includes("Brussels")) return { name: "France", code: "FR" };
-    if (locale.includes("New_York") || locale.includes("Chicago") || locale.includes("Los_Angeles")) return { name: "United States", code: "US" };
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (timeZone.includes("Dublin")) return { name: "Ireland", code: "IE" };
+    if (timeZone.includes("London")) return { name: "United Kingdom", code: "GB" };
   } catch {
     // ignore
   }
-  return { name: "Poland", code: "PL" };
+  return { name: "United Kingdom", code: "GB" };
 }
 
 export function platformOptionsForCountry(countryCode: string) {

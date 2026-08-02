@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import type { LucideIcon } from "lucide-react";
 import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left.js";
 import Ban from "lucide-react/dist/esm/icons/ban.js";
 import CheckCircle2 from "lucide-react/dist/esm/icons/circle-check.js";
@@ -47,6 +48,8 @@ const keys = [
   sessionIdKey,
 ];
 
+const HISTORY_PREVIEW_COUNT = 5;
+
 function Logo() {
   return (
     <span className="text-3xl font-medium tracking-[0.34em] text-white">
@@ -83,11 +86,27 @@ function readMemory(): MemoryState {
   };
 }
 
+function StatTile({ icon: Icon, label, value, onClear }: { icon: LucideIcon; label: string; value: string; onClear?: () => void }) {
+  return (
+    <div className="relative rounded-xl border border-white/10 bg-black/26 p-4">
+      <Icon size={18} className="text-amber-200" />
+      <p className="mt-3 text-sm text-white/54">{label}</p>
+      <p className="mt-1 text-lg text-white">{value}</p>
+      {onClear && (
+        <button type="button" onClick={onClear} aria-label={`Clear ${label}`} className="absolute right-3 top-3 text-white/34 transition hover:text-red-200">
+          <Trash2 size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function MemoryPage() {
   const [memory, setMemory] = useState<MemoryState | null>(null);
   const [premiumEmail, setPremiumEmail] = useState("");
   const [premiumSubmitting, setPremiumSubmitting] = useState(false);
   const [premiumDone, setPremiumDone] = useState(false);
+  const [showAllHistory, setShowAllHistory] = useState(false);
 
   useEffect(() => {
     setMemory(readMemory());
@@ -168,22 +187,17 @@ export default function MemoryPage() {
     );
   }
 
+  const visibleHistory = showAllHistory ? memory.history : memory.history.slice(0, HISTORY_PREVIEW_COUNT);
+
   return (
     <main className="min-h-screen bg-[#030303] text-white">
       <div className="fixed inset-0 bg-[radial-gradient(circle_at_18%_70%,rgba(185,28,28,0.16),transparent_30%),radial-gradient(circle_at_82%_18%,rgba(251,191,36,0.09),transparent_28%),#030303]" />
       <section className="relative mx-auto max-w-[1320px] px-5 py-5 sm:px-8 lg:px-12">
-        <header className="flex h-14 items-center justify-between border-b border-white/[0.08] pb-4">
+        <header className="flex h-14 items-center border-b border-white/[0.08] pb-4">
           <Link href="/" className="inline-flex items-center gap-5">
             <ArrowLeft size={22} className="text-white/70" />
             <Logo />
           </Link>
-          <button
-            type="button"
-            onClick={clearAll}
-            className="inline-flex h-10 items-center gap-2 rounded-full border border-red-300/25 bg-red-500/[0.08] px-4 text-sm text-red-100 transition hover:bg-red-500/[0.14]"
-          >
-            <Trash2 size={15} /> Clear all local memory
-          </button>
         </header>
 
         <section className="py-12">
@@ -193,103 +207,117 @@ export default function MemoryPage() {
           </p>
         </section>
 
-        <section className="grid gap-5 lg:grid-cols-3">
-          <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
-            <h2 className="flex items-center gap-3 text-2xl"><Shield size={23} className="text-amber-200" /> Preferences</h2>
-            <p className="mt-3 text-white/54">Country, language, and selected subscriptions.</p>
-            <div className="mt-6 flex items-center justify-between rounded-xl border border-white/10 bg-black/26 p-4">
-              <span>{memory.onboarding ? "Saved locally" : "Not saved yet"}</span>
-              {memory.onboarding && (
-                <button type="button" onClick={() => clearKey(ONBOARDING_KEY)} className="text-sm text-red-200 hover:text-white">Clear</button>
-              )}
-            </div>
-          </article>
+        {/* Primary task: this is the actual reason someone returns to this page, so it leads. */}
+        <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+          <h2 className="flex items-center gap-3 text-2xl"><Heart size={23} className="text-amber-200" /> Rate watched picks</h2>
+          <p className="mt-3 max-w-3xl text-white/54">
+            Use this after watching. F.U.N only asks once on the homepage, but your history stays here for later.
+          </p>
+          <div className="mt-6 divide-y divide-white/10 rounded-xl border border-white/10 bg-black/26">
+            {memory.history.length === 0 && (
+              <div className="p-4 text-white/46">No recommendation history yet.</div>
+            )}
+            {visibleHistory.map((item) => {
+              const rated = hasPostWatchFeedback(item.title, item.year);
+              return (
+                <div key={`${item.title}-${item.year}`} className="grid gap-4 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
+                  <div className="min-w-0">
+                    <p className="truncate text-lg text-white">{item.title} <span className="text-white/38">({item.year})</span></p>
+                    <p className="mt-1 line-clamp-1 text-sm text-white/46">{item.oneLine}</p>
+                  </div>
+                  {rated ? (
+                    <span className="inline-flex h-10 items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-400/[0.07] px-4 text-sm text-emerald-100">
+                      <CheckCircle2 size={15} /> Rated
+                    </span>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => rateHistoryPick("perfect", item)} className="inline-flex h-10 items-center gap-2 rounded-lg border border-emerald-300/28 px-3 text-sm text-emerald-100"><Heart size={15} /> Loved</button>
+                      <button type="button" onClick={() => rateHistoryPick("good-not-perfect", item)} className="inline-flex h-10 items-center gap-2 rounded-lg border border-amber-300/24 px-3 text-sm text-amber-100"><CheckCircle2 size={15} /> Good</button>
+                      <button type="button" onClick={() => rateHistoryPick("not-for-me", item)} className="inline-flex h-10 items-center gap-2 rounded-lg border border-white/12 px-3 text-sm text-white/64"><Ban size={15} /> Not for me</button>
+                      <button type="button" onClick={() => rateHistoryPick("quit-halfway", item)} className="inline-flex h-10 items-center gap-2 rounded-lg border border-white/12 px-3 text-sm text-white/64"><RefreshCw size={15} /> Quit</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {memory.history.length > HISTORY_PREVIEW_COUNT && (
+            <button type="button" onClick={() => setShowAllHistory((value) => !value)} className="mt-4 text-sm text-white/54 hover:text-white">
+              {showAllHistory ? "Show less" : `Show all ${memory.history.length}`}
+            </button>
+          )}
+        </article>
 
-          <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
-            <h2 className="flex items-center gap-3 text-2xl"><Database size={23} className="text-amber-200" /> Recent picks</h2>
-            <p className="mt-3 text-white/54">Used to avoid stale repeated recommendations.</p>
-            <div className="mt-6 rounded-xl border border-white/10 bg-black/26 p-4">
-              <p>{memory.recentTitles.length} titles remembered</p>
-              <div className="mt-3 flex flex-wrap gap-2">
+        {/* Consolidated memory summary — replaces four separate cards (one of which, Preferences,
+            had almost no content and left dead space next to its denser neighbors). */}
+        <article className="mt-5 rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+          <h2 className="text-2xl">Your memory</h2>
+          <p className="mt-3 text-white/54">What F.U.N has stored on this device, and why.</p>
+          <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatTile
+              icon={Shield}
+              label="Preferences"
+              value={memory.onboarding ? "Saved" : "Not saved"}
+              onClear={memory.onboarding ? () => clearKey(ONBOARDING_KEY) : undefined}
+            />
+            <StatTile
+              icon={Database}
+              label="Recent picks"
+              value={`${memory.recentTitles.length} titles`}
+              onClear={memory.recentTitles.length > 0 ? () => clearKey(recentRecommendationTitlesKey) : undefined}
+            />
+            <StatTile
+              icon={RefreshCw}
+              label="Already seen"
+              value={`${memory.seenTitles.length} titles`}
+              onClear={memory.seenTitles.length > 0 ? () => clearKey(seenTitlesKey) : undefined}
+            />
+            <StatTile
+              icon={Heart}
+              label="Feedback"
+              value={`${memory.feedbackCount} signals`}
+              onClear={memory.feedbackCount > 0 ? () => clearKey(feedbackStorageKey) : undefined}
+            />
+          </div>
+          {memory.recentTitles.length > 0 && (
+            <div className="mt-5">
+              <p className="text-xs uppercase tracking-wide text-white/34">Recent picks</p>
+              <div className="mt-2 flex flex-wrap gap-2">
                 {memory.recentTitles.slice(0, 8).map((title) => (
                   <span key={title} className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-sm text-white/58">{title}</span>
                 ))}
               </div>
-              {memory.recentTitles.length > 0 && (
-                <button type="button" onClick={() => clearKey(recentRecommendationTitlesKey)} className="mt-5 text-sm text-red-200 hover:text-white">Clear recent picks</button>
-              )}
             </div>
-          </article>
-
-          <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
-            <h2 className="flex items-center gap-3 text-2xl"><RefreshCw size={23} className="text-amber-200" /> Already seen</h2>
-            <p className="mt-3 text-white/54">Used to skip titles you marked as watched.</p>
-            <div className="mt-6 rounded-xl border border-white/10 bg-black/26 p-4">
-              <p>{memory.seenTitles.length} titles marked seen</p>
-              <div className="mt-3 flex flex-wrap gap-2">
+          )}
+          {memory.seenTitles.length > 0 && (
+            <div className="mt-4">
+              <p className="text-xs uppercase tracking-wide text-white/34">Already seen</p>
+              <div className="mt-2 flex flex-wrap gap-2">
                 {memory.seenTitles.slice(0, 8).map((title) => (
                   <span key={title} className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-sm text-white/58">{title}</span>
                 ))}
               </div>
-              {memory.seenTitles.length > 0 && (
-                <button type="button" onClick={() => clearKey(seenTitlesKey)} className="mt-5 text-sm text-red-200 hover:text-white">Clear seen titles</button>
-              )}
             </div>
-          </article>
+          )}
+        </article>
 
-          <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 lg:col-span-2">
-            <h2 className="flex items-center gap-3 text-2xl"><Heart size={23} className="text-amber-200" /> Feedback</h2>
-            <p className="mt-3 text-white/54">Used to learn whether F.U.N is solving the actual mood or missing the point.</p>
-            <div className="mt-6 flex items-center justify-between rounded-xl border border-white/10 bg-black/26 p-4">
-              <span>{memory.feedbackCount} feedback signals saved locally</span>
-              {memory.feedbackCount > 0 && (
-                <button type="button" onClick={() => clearKey(feedbackStorageKey)} className="text-sm text-red-200 hover:text-white">Clear feedback</button>
-              )}
-            </div>
-          </article>
-
-          <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 lg:col-span-3">
-            <h2 className="flex items-center gap-3 text-2xl"><Heart size={23} className="text-amber-200" /> Rate watched picks</h2>
-            <p className="mt-3 max-w-3xl text-white/54">
-              Use this after watching. F.U.N only asks once on the homepage, but your history stays here for later.
-            </p>
-            <div className="mt-6 grid gap-3">
-              {memory.history.length === 0 && (
-                <div className="rounded-xl border border-white/10 bg-black/26 p-4 text-white/46">No recommendation history yet.</div>
-              )}
-              {memory.history.slice(0, 12).map((item) => {
-                const rated = hasPostWatchFeedback(item.title, item.year);
-                return (
-                  <div key={`${item.title}-${item.year}`} className="grid gap-4 rounded-xl border border-white/10 bg-black/26 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
-                    <div className="min-w-0">
-                      <p className="truncate text-lg text-white">{item.title} <span className="text-white/38">({item.year})</span></p>
-                      <p className="mt-1 line-clamp-1 text-sm text-white/46">{item.oneLine}</p>
-                    </div>
-                    {rated ? (
-                      <span className="inline-flex h-10 items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-400/[0.07] px-4 text-sm text-emerald-100">
-                        <CheckCircle2 size={15} /> Rated
-                      </span>
-                    ) : (
-                      <div className="flex flex-wrap gap-2">
-                        <button type="button" onClick={() => rateHistoryPick("perfect", item)} className="inline-flex h-10 items-center gap-2 rounded-lg border border-emerald-300/28 px-3 text-sm text-emerald-100"><Heart size={15} /> Loved</button>
-                        <button type="button" onClick={() => rateHistoryPick("good-not-perfect", item)} className="inline-flex h-10 items-center gap-2 rounded-lg border border-amber-300/24 px-3 text-sm text-amber-100"><CheckCircle2 size={15} /> Good</button>
-                        <button type="button" onClick={() => rateHistoryPick("not-for-me", item)} className="inline-flex h-10 items-center gap-2 rounded-lg border border-white/12 px-3 text-sm text-white/64"><Ban size={15} /> Not for me</button>
-                        <button type="button" onClick={() => rateHistoryPick("quit-halfway", item)} className="inline-flex h-10 items-center gap-2 rounded-lg border border-white/12 px-3 text-sm text-white/64"><RefreshCw size={15} /> Quit</button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </article>
-
-          <article className="rounded-2xl border border-amber-300/20 bg-amber-400/[0.055] p-6">
+        <section className="mt-5 grid gap-5 lg:grid-cols-3">
+          <article className="rounded-2xl border border-amber-300/20 bg-amber-400/[0.055] p-6 lg:col-span-2">
             <h2 className="flex items-center gap-3 text-2xl text-amber-100"><Lock size={23} /> Control</h2>
             <div className="mt-5 space-y-3 text-white/62">
               <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> No streaming passwords are needed.</p>
               <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> Private-preview analytics stores recommendation activity under an anonymous device ID. Prompt text is stored only when collection is explicitly enabled.</p>
               <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> Clear all removes device memory and its anonymous profile memory.</p>
               <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> Posters, ratings, and where-to-watch data are provided by <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer" className="underline hover:text-amber-100">TMDB</a>. F.U.N uses the TMDB API but is not endorsed or certified by TMDB.</p>
+            </div>
+            <div className="mt-6 border-t border-amber-300/15 pt-5">
+              <button
+                type="button"
+                onClick={clearAll}
+                className="inline-flex h-10 items-center gap-2 rounded-full border border-red-300/25 bg-red-500/[0.08] px-4 text-sm text-red-100 transition hover:bg-red-500/[0.14]"
+              >
+                <Trash2 size={15} /> Clear all local memory
+              </button>
             </div>
           </article>
 
