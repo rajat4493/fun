@@ -24,6 +24,16 @@ import { IntentContract, RawRecommendation, RecommendRequest, Recommendation, Re
 const anthropicEnabled = process.env.FUN_ENABLE_ANTHROPIC === "1";
 const MAX_RECOMMEND_REQUEST_BYTES = 131_072;
 
+// Off by default: measured live against real free-text prompts, the local-vs-LLM disagreement
+// rate was ~80% — far higher than the structured "choose" mode this pattern was ported from. On
+// disagreement, the request pays for the wasted speculative call *plus* a full sequential retry,
+// making the common case slower than the original sequential path (e.g. 17-24s vs a ~6.5s median),
+// not neutral as intended. Left available behind this flag (FUN_ENABLE_SELF_PARALLEL_INTENT=1)
+// rather than deleted, since the mechanism is sound for structured input — it's specifically free
+// text's weaker local contract driving the high disagreement rate, not a flaw in the approach
+// itself. Re-enable only after that root cause has an actual fix, not just re-measurement.
+const selfModeParallelIntentEnabled = process.env.FUN_ENABLE_SELF_PARALLEL_INTENT === "1";
+
 class RequestTooLargeError extends Error {}
 
 async function readJsonBodyWithLimit(req: Request): Promise<unknown> {
@@ -1019,10 +1029,10 @@ export async function POST(req: Request) {
       displayState = chain.displayState;
       trustRejections = chain.rejections;
       fallbackUsed = chain.fallbackUsed;
-    } else if (input.mode === "self" || input.precomputedIntentContract) {
-      // Free-text Describe requests need the semantic intent contract to shape the actual pick,
-      // not merely validate a speculative pick afterward. Background fills already carry that
-      // resolved contract, so this path still costs only one recommendation call for them.
+    } else if (input.precomputedIntentContract) {
+      // Background fills already carry phase 1's resolved contract — resolveIntentContract
+      // short-circuits to a zero-cost reuse, so there's no real intent call to parallelize
+      // against here; stays sequential because sequential is already instant for this case.
       const intentStarted = Date.now();
       intentContract = await resolveIntentContract(input, providerTrace);
       input = applyIntentExclusions(input, intentContract);
@@ -1031,6 +1041,73 @@ export async function POST(req: Request) {
       const recommendationStarted = Date.now();
       const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, null, count, deadlineAt);
       timings.recommendationMs += Date.now() - recommendationStarted;
+      trustRejections = trustedRaw.rejections;
+      fallbackUsed = trustedRaw.fallbackUsed;
+      enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings);
+      displayState = "unverified";
+    } else if (input.mode === "self" && !selfModeParallelIntentEnabled) {
+      // Default path: original sequential behavior. See selfModeParallelIntentEnabled above for why.
+      const intentStarted = Date.now();
+      intentContract = await resolveIntentContract(input, providerTrace);
+      input = applyIntentExclusions(input, intentContract);
+      timings.intentMs += Date.now() - intentStarted;
+      prompt = buildRecommendationPrompt(input, { intentContract, count });
+      const recommendationStarted = Date.now();
+      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, null, count, deadlineAt);
+      timings.recommendationMs += Date.now() - recommendationStarted;
+      trustRejections = trustedRaw.rejections;
+      fallbackUsed = trustedRaw.fallbackUsed;
+      enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings);
+      displayState = "unverified";
+    } else if (input.mode === "self") {
+      // Free-text Describe requests: 95% of first-pick production traffic, and previously fully
+      // sequential (intentMs + recommendationMs back to back) while structured Choose requests
+      // below already ran both concurrently. Mirrors that proven pattern, but free text's local
+      // (regex) contract is coarser than structured picker taps, so the bar for reusing the
+      // speculative batch is stricter here: format and hard-avoids must also match, not just
+      // primary/secondary — a silent mismatch on those would be a real quality regression that
+      // primary-only agreement could miss.
+      const localContract = localIntentContract(input);
+      const localPrompt = buildRecommendationPrompt(input, { intentContract: localContract, count });
+      const parallelTrace: ProviderTrace[] = [];
+
+      const [resolvedContract, precomputedBatch] = await Promise.all([
+        resolveIntentContract(input, providerTrace),
+        getRecommendations(input, localPrompt, parallelTrace, localContract, deadlineAt).catch(() => null as RawRecommendation[] | null),
+      ]);
+      timings.intentMs += providerTrace
+        .filter((item) => item.provider.startsWith("Intent "))
+        .reduce((total, item) => total + item.durationMs, 0);
+      timings.recommendationMs += parallelTrace.reduce((total, item) => total + item.durationMs, 0);
+      providerTrace.push(...parallelTrace);
+      intentContract = resolvedContract;
+      input = applyIntentExclusions(input, intentContract);
+
+      const primaryAgrees =
+        intentContract.source !== "llm" ||
+        intentContract.primary === "unknown" ||
+        localContract.primary === intentContract.primary ||
+        localContract.secondary.includes(intentContract.primary) ||
+        intentContract.secondary.includes(localContract.primary);
+      const constraintsAgree =
+        localContract.format === intentContract.format &&
+        localContract.hardAvoids.length === intentContract.hardAvoids.length &&
+        localContract.hardAvoids.every((avoid) => intentContract.hardAvoids.includes(avoid));
+      const intentsAgree = primaryAgrees && constraintsAgree;
+      const usableBatch = intentsAgree ? precomputedBatch : null;
+      if (!intentsAgree) {
+        providerTrace.push({
+          provider: "parallel-batch discarded (intent disagreement)",
+          durationMs: 0,
+          ok: true,
+          promptChars: 0,
+        });
+      }
+
+      prompt = buildRecommendationPrompt(input, { intentContract, count });
+      const retryStarted = Date.now();
+      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, usableBatch, count, deadlineAt);
+      timings.recommendationMs += Date.now() - retryStarted;
       trustRejections = trustedRaw.rejections;
       fallbackUsed = trustedRaw.fallbackUsed;
       enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings);
