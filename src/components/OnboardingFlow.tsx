@@ -6,6 +6,7 @@ import Check from "lucide-react/dist/esm/icons/check.js";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.js";
 import MapPin from "lucide-react/dist/esm/icons/map-pin.js";
 import Tv from "lucide-react/dist/esm/icons/tv.js";
+import { isPreviewCountry } from "@/lib/launch-scope";
 
 export const ONBOARDING_KEY = "fun:onboarding";
 
@@ -33,6 +34,11 @@ export const COUNTRIES = [
   { name: "Austria", code: "AT" },
   { name: "Ireland", code: "IE" },
 ];
+
+// Public preview is scoped to launch-scope.ts's PREVIEW_COUNTRY_CODES (currently UK + Ireland).
+// The full COUNTRIES list stays in code so widening the preview later is a one-line change there,
+// not a rebuild of this picker.
+export const PREVIEW_COUNTRIES = COUNTRIES.filter((c) => isPreviewCountry(c.code));
 
 export const PLATFORM_OPTIONS: Record<string, string[]> = {
   IN: [
@@ -193,7 +199,7 @@ export default function OnboardingFlow({ onComplete }: { onComplete: (data: Onbo
 
               {dropdownOpen && (
                 <div className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-white/14 bg-[#1a1c1e] shadow-2xl">
-                  {COUNTRIES.map((c) => (
+                  {PREVIEW_COUNTRIES.map((c) => (
                     <button
                       type="button"
                       key={c.code}

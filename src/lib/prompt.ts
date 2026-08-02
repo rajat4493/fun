@@ -278,7 +278,7 @@ const INTENT_COMMITMENT: Record<string, string> = {
   cry: "Do NOT redirect to bittersweet warmth, feel-good resolution, or uplifting endings. The emotional job is catharsis through grief, loss, or devastation. The pick must actually make the viewer cry — not just 'moving' or 'touching'.",
   thriller: "Do NOT substitute procedural mystery, light crime, or action-lite suspense. The pick must generate genuine tension, paranoia, or sustained dread that grips the viewer throughout.",
   weird: "Do NOT substitute quirky-mainstream, gently offbeat, or 'charming oddity'. The pick must be formally strange, surreal, conceptually unprecedented, or genuinely disorienting — something the viewer could not have predicted.",
-  comfort: "The pick must be warm, emotionally safe, and easy to enter — low dread, low ambiguity, a clear satisfying shape. Do NOT substitute quiet, precise, contemplative arthouse cinema (slow-cinema character studies, withheld-emotion festival dramas) just because it is well-made — that is homework, not comfort, even when it is critically acclaimed. Do not pick something cold, clinical, or emotionally distant unless the user explicitly asked for that register. The viewer should feel held, not impressed.",
+  comfort: "The pick must be warm, emotionally safe, and easy to enter — low dread, low ambiguity, a clear satisfying shape. Do NOT substitute quiet, precise, contemplative arthouse cinema (slow-cinema character studies, withheld-emotion festival dramas) just because it is well-made — that is homework, not comfort, even when it is critically acclaimed. Do not pick something cold, clinical, or emotionally distant unless the user explicitly asked for that register. Being funny is not the same guarantee as being easy: dark comedy whose engine is depression, addiction, or self-destructive spiraling (the BoJack Horseman/Fleabag register) is not comfort just because it is also witty — the viewer should feel held, not quietly devastated between laughs. The viewer should feel held, not impressed.",
 };
 
 function intentContractClause(intentContract?: IntentContract): string {
@@ -455,11 +455,15 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
   if (avoidanceTiers.hard.length) {
     hardConstraintLines.push(`❌ Hard content gates — NEVER recommend content with or containing: ${avoidanceTiers.hard.join(", ")}. Taste Risk, craziness level, mood signals, novelty, and cinematic quality do NOT override these.`);
   }
-  if (input.seenTitles?.length) {
-    hardConstraintLines.push(`❌ Already seen — exclude entirely: ${input.seenTitles.slice(0, 12).join(", ")}`);
-  }
-  if (input.recentTitles?.length) {
-    hardConstraintLines.push(`❌ Recently recommended — do not repeat: ${input.recentTitles.slice(0, 8).join(", ")}`);
+  // Draw from the full real exclusion history (excludedTitles, up to 200 client-side) rather than
+  // just the short seenTitles/recentTitles recency slices — those alone only ever told the model
+  // about the last ~8-12 titles, so a returning user's much longer real history was never actually
+  // surfaced as a generation-time constraint, only checked post-hoc after the model already picked.
+  const longTermExclusions = input.excludedTitles?.length
+    ? input.excludedTitles
+    : [...(input.seenTitles ?? []), ...(input.recentTitles ?? [])];
+  if (longTermExclusions.length) {
+    hardConstraintLines.push(`❌ Already seen or recently recommended — exclude entirely, do not repeat: ${[...new Set(longTermExclusions)].slice(0, 30).join(", ")}`);
   }
   for (const constraint of practicalConstraints) {
     hardConstraintLines.push(`❌ ${constraint}`);
@@ -565,8 +569,10 @@ User contract:
 - Runtime limit: ${intent.runtimeLimitMinutes ? `${intent.runtimeLimitMinutes} minutes` : "none"}
 - Hidden-gem intent: ${intent.hiddenGem ? "yes" : "no"}
 - Explicitly rejected title examples: ${intentContract?.negativeReferences?.length ? intentContract.negativeReferences.join(", ") : "none"}
-- Recent titles to avoid: ${input.recentTitles?.slice(0, 10).join(", ") || "none"}
-- Already seen to avoid: ${input.seenTitles?.slice(0, 10).join(", ") || "none"}
+- Already seen or recently recommended — exclude entirely, do not repeat: ${(() => {
+    const exclusions = input.excludedTitles?.length ? input.excludedTitles : [...(input.seenTitles ?? []), ...(input.recentTitles ?? [])];
+    return exclusions.length ? [...new Set(exclusions)].slice(0, 30).join(", ") : "none";
+  })()}
 
 Rejected candidates:
 ${rejectionsText}

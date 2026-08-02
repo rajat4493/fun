@@ -85,10 +85,28 @@ function readMemory(): MemoryState {
 
 export default function MemoryPage() {
   const [memory, setMemory] = useState<MemoryState | null>(null);
+  const [premiumEmail, setPremiumEmail] = useState("");
+  const [premiumSubmitting, setPremiumSubmitting] = useState(false);
+  const [premiumDone, setPremiumDone] = useState(false);
 
   useEffect(() => {
     setMemory(readMemory());
   }, []);
+
+  async function handlePremiumInterest() {
+    if (!premiumEmail.trim()) return;
+    setPremiumSubmitting(true);
+    try {
+      const res = await fetch("/api/subscribe-interest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: premiumEmail.trim() }),
+      });
+      if (res.ok) setPremiumDone(true);
+    } finally {
+      setPremiumSubmitting(false);
+    }
+  }
 
   function clearKey(key: string) {
     localStorage.removeItem(key);
@@ -273,6 +291,32 @@ export default function MemoryPage() {
               <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> Clear all removes device memory and its anonymous profile memory.</p>
               <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> Posters, ratings, and where-to-watch data are provided by <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer" className="underline hover:text-amber-100">TMDB</a>. F.U.N uses the TMDB API but is not endorsed or certified by TMDB.</p>
             </div>
+          </article>
+
+          <article className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+            <h2 className="text-lg text-white/72">Get more with F.U.N Premium</h2>
+            <p className="mt-2 text-sm text-white/48">Coming soon. Leave your email and we&apos;ll let you know first.</p>
+            {premiumDone ? (
+              <p className="mt-3 text-sm text-emerald-200">Thanks — we&apos;ll be in touch.</p>
+            ) : (
+              <div className="mt-3 flex gap-2">
+                <input
+                  type="email"
+                  value={premiumEmail}
+                  onChange={(event) => setPremiumEmail(event.target.value)}
+                  placeholder="you@example.com"
+                  className="h-11 flex-1 rounded-lg border border-white/12 bg-black/28 px-3 text-sm text-white outline-none placeholder:text-white/28 focus:border-red-300/45"
+                />
+                <button
+                  type="button"
+                  onClick={handlePremiumInterest}
+                  disabled={premiumSubmitting || !premiumEmail.trim()}
+                  className="h-11 shrink-0 rounded-lg border border-white/14 px-4 text-sm text-white/80 hover:text-white disabled:opacity-50"
+                >
+                  {premiumSubmitting ? "..." : "Notify me"}
+                </button>
+              </div>
+            )}
           </article>
         </section>
       </section>

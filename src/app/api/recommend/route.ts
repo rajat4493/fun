@@ -14,7 +14,8 @@ import { buildCompactRetryPrompt, buildRecommendationPrompt } from "@/lib/prompt
 import { activeHardAvoidanceKeys, applyTrustFilter, relatedTitleUnsafe, safeFallback, TrustRejection } from "@/lib/recommendation-trust";
 import { buildIntentContractPrompt, localIntentContract, normalizeIntentContract } from "@/lib/intent-contract";
 import { matchesLanguageRequest, wantsSpecificLanguage } from "@/lib/language-lane";
-import { isPlotIdentificationRequest, normalizeRecommendRequest, requestText } from "@/lib/recommendation-utils";
+import { countryCodeMap, isPlotIdentificationRequest, normalizeRecommendRequest, requestText } from "@/lib/recommendation-utils";
+import { isPreviewCountry } from "@/lib/launch-scope";
 import { callerIp, checkRateLimit } from "@/lib/rate-limit";
 import { IntentContract, RawRecommendation, RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
 
@@ -207,6 +208,13 @@ function diversifyFallbackBatch(input: RecommendRequest, batch: RawRecommendatio
     ...(input.seenTitles ?? []),
   ].map(normalizeTitle));
   const available = batch.filter((item) => !excluded.has(normalizeTitle(item.title)));
+  if (available.length === 0 && batch.length > 0) {
+    // Escape hatch firing: every candidate in this curated bucket has already been shown to this
+    // user, so we're about to re-surface one anyway. Logged (not suppressed — there's a hard floor
+    // on how many curated titles exist per category) so same-user repetition from this path is
+    // measurable instead of silent.
+    console.log(`[FUN fallback] diversifyFallbackBatch exhausted, re-surfacing an already-excluded title from ${batch.length} candidates`);
+  }
   const source = available.length > 0 ? available : batch;
   const requestSeed = [
     input.selfText,
@@ -554,7 +562,7 @@ function acceptedBatchScore(rec: RawRecommendation, intentContract?: IntentContr
     const isReliefState = intentContract.situation.some((value) => value.includes("breakup-recovery") || value.includes("grief-relief") || value.includes("panic"));
     if (intentContract.primary === "comfort" || isReliefState) {
       if (["comedy", "funny", "laughter", "light", "warm", "warmth", "gentle", "reassurance", "reassuring", "easy", "feel-good"].some((label) => labels.has(label))) score += 8;
-      if (["heartbreak", "heartbreaking", "grief", "loss", "bleak", "harrowing", "melancholy", "devastating"].some((label) => labels.has(label))) score -= 10;
+      if (["heartbreak", "heartbreaking", "grief", "loss", "bleak", "harrowing", "melancholy", "devastating", "existential", "self-destructive", "self-destruction", "depression", "depressive", "addiction", "dark-comedy", "bittersweet", "nihilistic", "despair", "self-loathing", "midlife-crisis"].some((label) => labels.has(label))) score -= 10;
       if (labels.has("drama") && !labels.has("comedy")) score -= 6;
     }
 
@@ -899,6 +907,21 @@ export async function POST(req: Request) {
     }
     let input = normalizeRecommendRequest(rawInput as RecommendRequest);
     const country = input.country || "Poland";
+
+    // Public preview is scoped to launch-scope.ts's PREVIEW_COUNTRY_CODES. The onboarding picker
+    // already only offers preview countries, but this is server-authoritative defense-in-depth
+    // against a direct API call bypassing the UI. Production-only, same as the rate limiter: local
+    // dev and the QA gate/regression suites deliberately exercise many countries to validate
+    // language-lane and subscription logic unrelated to public-preview access control.
+    if (process.env.NODE_ENV === "production") {
+      const countryCode = countryCodeMap[country.trim().toLowerCase()];
+      if (!countryCode || !isPreviewCountry(countryCode)) {
+        return NextResponse.json(
+          { error: "F.U.N is in a limited preview for the UK and Ireland right now — more regions coming soon." },
+          { status: 403 },
+        );
+      }
+    }
 
     // Bail out before any LLM call — this request type is out of scope for mood matching,
     // and attempting it anyway is exactly what produced a fabricated, nonexistent title.

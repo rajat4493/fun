@@ -27,6 +27,7 @@ import User from "lucide-react/dist/esm/icons/user.js";
 import Zap from "lucide-react/dist/esm/icons/zap.js";
 import OnboardingFlow, {
   COUNTRIES,
+  PREVIEW_COUNTRIES,
   defaultPlatformsForCountry,
   LANGUAGE_OPTIONS,
   loadOnboarding,
@@ -207,7 +208,7 @@ function RegionLanguagePanel({
         </button>
       </div>
       <div className="mt-4 grid max-h-40 grid-cols-2 gap-2 overflow-y-auto pr-1">
-        {COUNTRIES.map((country) => (
+        {PREVIEW_COUNTRIES.map((country) => (
           <button
             key={country.code}
             type="button"

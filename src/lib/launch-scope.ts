@@ -1,13 +1,5 @@
 export const PREVIEW_COUNTRY_CODES = [
-  "PL",
   "GB",
-  "DE",
-  "FR",
-  "NL",
-  "SE",
-  "DK",
-  "BE",
-  "AT",
   "IE",
 ] as const;
 

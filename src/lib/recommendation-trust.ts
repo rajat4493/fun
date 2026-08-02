@@ -508,23 +508,48 @@ function explicitFormatViolation(input: RecommendRequest, rec: RawRecommendation
   return null;
 }
 
+// Broadened with plausible LLM-label synonyms (not exhaustive, additive-only) after diagnosing
+// that a good, correctly-fitting pick could get rejected purely because the model's own labels
+// used a synonym outside this list — the same class of false-rejection as the GATE-CRY test bug
+// earlier, but here it's a real production rejection, not just a test artifact.
 const structuredAllowedTerms: Record<string, string[]> = {
-  scare: ["scare", "horror", "fear", "dread", "terror", "frightening", "haunted", "supernatural", "thriller", "tension", "nightmare"],
-  cry: ["cry", "tearjerker", "catharsis", "cathartic", "emotional", "devastating", "heartbreak", "heartbreaking", "moving", "grief", "poignant", "drama"],
-  comedy: ["comedy", "funny", "humor", "humour", "laughter", "laugh", "witty", "slapstick", "satire", "playful"],
-  thriller: ["thriller", "suspense", "mystery", "crime", "noir", "detective", "investigation", "paranoid", "tension", "tense", "conspiracy"],
-  romance: ["romance", "romantic", "love", "relationship", "chemistry", "tender", "warm"],
-  weird: ["weird", "strange", "offbeat", "surreal", "absurd", "bizarre", "experimental", "quirky", "odd"],
-  comfort: ["comfort", "warm", "warmth", "reassurance", "reassuring", "gentle", "cozy", "soothing", "uplifting", "feel-good", "light", "laughter", "easy"],
-  gore: ["gore", "gory", "body-horror", "splatter", "brutal", "visceral", "graphic-violence"],
-  drama: ["drama", "dramatic", "character-study", "serious", "emotional", "prestige", "melodrama"],
+  scare: ["scare", "horror", "fear", "dread", "terror", "frightening", "haunted", "supernatural", "thriller", "tension", "nightmare", "creepy", "unsettling", "eerie", "chilling", "sinister", "macabre", "unnerving"],
+  cry: ["cry", "tearjerker", "catharsis", "cathartic", "emotional", "devastating", "heartbreak", "heartbreaking", "moving", "grief", "poignant", "drama", "sorrow", "sorrowful", "wistful", "bittersweet", "longing"],
+  comedy: ["comedy", "funny", "humor", "humour", "laughter", "laugh", "witty", "slapstick", "satire", "playful", "hilarious", "comic", "amusing", "silly"],
+  thriller: ["thriller", "suspense", "mystery", "crime", "noir", "detective", "investigation", "paranoid", "tension", "tense", "conspiracy", "gripping", "edge-of-seat", "psychological"],
+  romance: ["romance", "romantic", "love", "relationship", "chemistry", "tender", "warm", "intimate", "passionate", "heartfelt"],
+  weird: ["weird", "strange", "offbeat", "surreal", "absurd", "bizarre", "experimental", "quirky", "odd", "unconventional", "eccentric", "unusual", "avant-garde"],
+  comfort: ["comfort", "warm", "warmth", "reassurance", "reassuring", "gentle", "cozy", "soothing", "uplifting", "feel-good", "light", "laughter", "easy", "heartwarming", "wholesome", "hopeful"],
+  gore: ["gore", "gory", "body-horror", "splatter", "brutal", "visceral", "graphic-violence", "grisly", "gruesome"],
+  drama: ["drama", "dramatic", "character-study", "serious", "emotional", "prestige", "melodrama", "poignant", "intense", "compelling"],
   // Signals for "bleak/morally-complex" requests — comfort/warm titles must not pass this check
   bleak: ["bleak", "dark", "grim", "nihilistic", "disturbing", "provocative", "unflinching", "brutal", "challenging", "heavy", "harrowing", "confrontational", "moral-complexity", "morally-complex", "morally-complicated"],
   cathartic: ["cathartic", "catharsis", "devastating", "heartbreaking", "cry", "emotional", "moving", "grief", "poignant", "drama"],
 };
 
+// Unlike structuredAllowedTerms (reward-only — passes as long as ANY positive term is present),
+// these are a hard reject regardless of co-occurring positive labels. Added after a live test
+// found "comforting, funny, easy" requests returning BoJack Horseman: comedy/animation labels
+// satisfied structuredAllowedTerms.comfort while the show's actual emotionalEffect labels
+// (existential, self-destructive, bittersweet) went unchecked — "funny" was never actually the
+// same guarantee as "easy."
+const structuredUnsafeTerms: Record<string, string[]> = {
+  comfort: ["existential", "self-destructive", "self-destruction", "depression", "depressive", "addiction", "dark-comedy", "bittersweet", "nihilistic", "despair", "self-loathing", "midlife-crisis"],
+};
+
+function structuredUnsafeViolation(primary: string, rec: RawRecommendation | Recommendation): string | null {
+  if (!hasStructuredSignals(rec)) return null;
+  const unsafe = structuredUnsafeTerms[primary];
+  if (!unsafe) return null;
+  const terms = structuredTerms(rec);
+  const hit = unsafe.find((term) => terms.has(term));
+  return hit ? `intent: requested ${primary}, but structured labels reveal ${hit} undertones` : null;
+}
+
 function structuredIntentViolation(primary: string, rec: RawRecommendation | Recommendation): string | null {
   if (!hasStructuredSignals(rec)) return null;
+  const unsafeViolation = structuredUnsafeViolation(primary, rec);
+  if (unsafeViolation) return unsafeViolation;
   const allowed = structuredAllowedTerms[primary];
   if (!allowed) return null;
   const terms = structuredTerms(rec);

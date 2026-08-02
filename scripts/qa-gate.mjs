@@ -24,6 +24,9 @@ const emotionalAmplification = /\b(grief|grieving|bereavement|mourning|heartbrea
 const gorePositive = /\b(gore|gory|bloody|splatter|body horror|visceral|graphic violence|extreme horror)\b/i;
 const sexuallyExplicit = /\b(porn|pornographic|hardcore|unsimulated sex|explicit sex)\b/i;
 const messyFamilyEngine = /\b(family|dysfunctional|chaos|chaotic|survival|class|working.class|morally compromised|adult|dark comedy|loyalty|social pressure)\b/i;
+// "Funny" is not the same guarantee as "easy" — dark comedy whose engine is depression, addiction,
+// or self-destructive spiraling (BoJack Horseman/Fleabag register) must not pass as comfort.
+const comfortDarknessSignals = /\b(existential|self.destructive|self.destruction|depression|depressive|addiction|dark comedy|bittersweet|nihilistic|despair|self.loathing|midlife crisis)\b/i;
 
 const overRecommendedHiddenGem = new Set(["andhadhun", "drishyam", "kahaani", "masaan", "tumbbad", "se7en", "seven", "gonegirl", "zodiac", "knivesout", "getout", "thesilenceofthelambs"]);
 const unsafeRelatedTitles = new Set([
@@ -153,8 +156,22 @@ const tests = [
     id: "GATE-COMFORT",
     category: "comfort",
     input: { mode: "self", selfText: "Rough day, want something warm and easy that asks nothing of me.", country: "Australia", languagePreferences: ["Any language"], platforms: [], platformFilter: "any" },
-    check: (rec) => comfort.test(textOf(rec)),
-    why: "Comfort request must return a warm/light pick, not quiet-precise arthouse.",
+    check: (rec) => {
+      const labels = [...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].join(" ");
+      const isDark = comfortDarknessSignals.test(labels || textOf(rec));
+      return comfort.test(textOf(rec)) && !isDark;
+    },
+    why: "Comfort request must return a warm/light pick, not quiet-precise arthouse or dark comedy in disguise.",
+  },
+  {
+    id: "GATE-COMFORT-NOT-DARK-COMEDY",
+    category: "comfort",
+    input: { mode: "self", selfText: "Comforting, funny, easy — nothing heavy, please.", country: "Australia", languagePreferences: ["Any language"], platforms: [], platformFilter: "any" },
+    check: (rec) => {
+      const labels = [...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].join(" ");
+      return !comfortDarknessSignals.test(labels || textOf(rec));
+    },
+    why: "\"Comforting, funny, easy\" must never return dark comedy whose engine is depression/self-destruction (e.g. BoJack Horseman) just because it's also witty.",
   },
   {
     id: "GATE-PANIC-SAFETY",

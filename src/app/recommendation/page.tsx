@@ -273,6 +273,9 @@ export default function RecommendationPage() {
   const [noSession, setNoSession] = useState(false);
   const [fetchLoading, setFetchLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [unlockEmail, setUnlockEmail] = useState("");
+  const [unlockSubmitting, setUnlockSubmitting] = useState(false);
+  const [unlockDone, setUnlockDone] = useState(false);
   const [rerolling, setRerolling] = useState(false);
   const [feedbackReason, setFeedbackReason] = useState<FeedbackReason | null>(null);
   const [searchIdx, setSearchIdx] = useState(0);
@@ -523,6 +526,21 @@ export default function RecommendationPage() {
         : "Could not find another pick. Please try a new mood.");
     } finally {
       setRerolling(false);
+    }
+  }
+
+  async function handleUnlockSubmit() {
+    if (!unlockEmail.trim()) return;
+    setUnlockSubmitting(true);
+    try {
+      const res = await fetch("/api/unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: unlockEmail.trim() }),
+      });
+      if (res.ok) setUnlockDone(true);
+    } finally {
+      setUnlockSubmitting(false);
     }
   }
 
@@ -783,6 +801,34 @@ export default function RecommendationPage() {
           <div className="mb-5">{logo()}</div>
           <h1 className="font-serif text-4xl">{fetchError ? "Something went wrong" : "No recommendation yet"}</h1>
           <p className="mt-3 text-white/50">{fetchError ?? "Pick your mood first and F.U.N will find your one match."}</p>
+          {fetchError?.startsWith("You've reached today's free limit") && (
+            <div className="mx-auto mt-5 w-full max-w-sm">
+              {unlockDone ? (
+                <p className="rounded-xl border border-emerald-400/25 bg-emerald-400/[0.06] px-4 py-3 text-sm text-emerald-200">
+                  You&apos;re unlocked for more today — try again.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm text-white/50">Want more today? Leave your email to unlock a higher limit.</p>
+                  <input
+                    type="email"
+                    value={unlockEmail}
+                    onChange={(event) => setUnlockEmail(event.target.value)}
+                    placeholder="you@example.com"
+                    className="h-12 w-full rounded-xl border border-white/12 bg-black/28 px-4 text-white outline-none placeholder:text-white/28 focus:border-red-300/45"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleUnlockSubmit}
+                    disabled={unlockSubmitting || !unlockEmail.trim()}
+                    className="h-12 rounded-xl bg-gradient-to-b from-red-500 to-red-900 font-semibold text-white disabled:opacity-50"
+                  >
+                    {unlockSubmitting ? "Unlocking..." : "Unlock more today"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <Link href="/" className="mt-8 inline-flex h-12 items-center gap-3 rounded-xl bg-gradient-to-b from-red-500 to-red-900 px-6 font-semibold text-white">
             <Star size={18} /> Pick a mood
           </Link>
