@@ -497,6 +497,21 @@ function structuredFallbackLabels(rec: RawRecommendation): { contentCategory: st
   };
 }
 
+// The JSON schema only declares confidence as `{ type: "number" }` — the prompt asks for a 0-100
+// scale, but the model occasionally returns a 0-1 fraction (e.g. 0.95) instead. Previously only
+// confidenceViolation's own local check normalized this (for its <60 rejection threshold), leaving
+// the actual Recommendation object's confidence field untouched — the frontend then rendered the
+// raw fractional value directly ("0.95%" instead of "95%"). Normalized once here, at the single
+// choke point every batch passes through regardless of provider or fallback source, so every
+// downstream consumer (trust filter, ranking, the UI) sees a consistent 0-100 scale.
+function normalizeConfidenceScale(batch: RawRecommendation[]): RawRecommendation[] {
+  return batch.map((rec) =>
+    typeof rec.confidence === "number" && rec.confidence > 0 && rec.confidence <= 1
+      ? { ...rec, confidence: Math.round(rec.confidence * 100) }
+      : rec,
+  );
+}
+
 function withStructuredFallbackLabels(rec: RawRecommendation): RawRecommendation {
   const labels = structuredFallbackLabels(rec);
   return {
@@ -663,7 +678,7 @@ async function trustedRawBatch(
       const prompt = attempt === 0 ? basePrompt : buildCompactRetryPrompt(input, allRejections, intentContract, count);
       rawBatch = await getRecommendations(input, prompt, trace, intentContract, deadlineAt);
     }
-    const normalizedBatch = filterFalsePositiveRecommendations(input, rawBatch).slice(0, count);
+    const normalizedBatch = normalizeConfidenceScale(filterFalsePositiveRecommendations(input, rawBatch)).slice(0, count);
 
     const trusted = applyTrustFilter(input, normalizedBatch, intentContract);
     allRejections.push(...trusted.rejected);
