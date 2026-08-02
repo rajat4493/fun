@@ -521,6 +521,36 @@ function withStructuredFallbackLabels(rec: RawRecommendation): RawRecommendation
   };
 }
 
+// Preview-stage mitigation for cross-lane repetition: the same "safe" title winning across many
+// different comfort-adjacent asks (breakup comfort, stressed from work, family visiting) even
+// though per-category rotation already exists, because these specific titles are members of
+// several curated categories at once (see fallbacks.ts/recommendation-trust.ts). A soft, moderate
+// penalty — not a reject, they're still genuinely good picks — applied only in lanes where a
+// repeated familiar winner actually hurts trust, and skipped for language- or subscription-
+// constrained requests where the candidate pool is already thin. Static and hand-curated from
+// titles this session's testing directly observed repeating; revisit as new repeat offenders turn
+// up, rather than building live serve-frequency tracking before this preview needs it.
+const wellKnownSafeTitles = new Set(
+  ["The Intouchables", "The Grand Budapest Hotel", "The Fundamentals of Caring", "Hundreds of Beavers", "The Fall"].map(normalizeTitle),
+);
+
+function isRepetitionSensitiveLane(intentContract?: IntentContract): boolean {
+  if (!intentContract) return false;
+  const isReliefState = intentContract.situation.some((value) => value.includes("breakup-recovery") || value.includes("grief-relief") || value.includes("panic"));
+  return intentContract.primary === "comfort" ||
+    intentContract.primary === "weird" ||
+    intentContract.primary === "discovery" ||
+    intentContract.discoveryPreference === "non-mainstream" ||
+    isReliefState ||
+    intentContract.situation.includes("family");
+}
+
+function isConstrainedLane(intentContract?: IntentContract, input?: RecommendRequest): boolean {
+  const languageConstrained = Boolean(intentContract && intentContract.language !== "any");
+  const subscriptionConstrained = input?.platformFilter === "mine";
+  return languageConstrained || subscriptionConstrained;
+}
+
 // Scoring order: primary intent match (20) > secondary matches (4 each) > format match (3).
 // Language match isn't scored here — localFallback already routes to a language-specific curated
 // bucket (see language-lane.ts), so every candidate in a given batch already shares the same
@@ -559,6 +589,10 @@ function fallbackIntentScore(rec: RawRecommendation, intentContract?: IntentCont
       ...(input.seenTitles ?? []),
     ].map(normalizeTitle));
     if (seen.has(key)) score -= 50;
+  }
+
+  if (isRepetitionSensitiveLane(intentContract) && !isConstrainedLane(intentContract, input) && wellKnownSafeTitles.has(normalizeTitle(rec.title))) {
+    score -= 7;
   }
 
   return score;
