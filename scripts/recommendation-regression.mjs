@@ -219,6 +219,19 @@ const tests = [
     },
     why: "Breakup recovery must not be answered with another romance or heartbreak story.",
   },
+  {
+    id: "NEGATED-LANGUAGE-NOT-SPANISH",
+    input: {
+      mode: "self",
+      selfText: "Something like Money Heist but not in Spanish, same heist energy and ensemble chaos.",
+      country: "UK",
+      languagePreferences: ["English"],
+      platforms: [],
+      platformFilter: "any",
+    },
+    check: (rec) => !/\b(la casa de papel|money heist|el nido|los favoritos de midas|el desconocido)\b/i.test(rec.title),
+    why: "A negated language request must not be answered with a title in the avoided language — prompt guidance alone was confirmed insufficient live, this must hold via the downstream language-lane hard reject.",
+  },
 ];
 
 async function runCase(test) {

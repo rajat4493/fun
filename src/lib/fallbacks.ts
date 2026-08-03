@@ -1,5 +1,6 @@
 import { hasNegatedConcept, requestText } from "@/lib/recommendation-utils";
 import { extractIntent } from "@/lib/intent";
+import { detectAvoidedLanguageKey } from "@/lib/language-lane";
 import { IntentContract, RawRecommendation, RecommendRequest } from "@/lib/types";
 
 function normalizeForMatch(value: string): string {
@@ -133,6 +134,78 @@ export function localFallback(input: RecommendRequest, intentContract?: IntentCo
   const wantsScare = (contractHas("scare") || intent.primaryIntents.includes("scare") || /\b(shit scared|scare|scared|scary|terrify|terrified|terrifying|frighten|frightened|frightening|creep out|creepy|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i.test(text)) &&
     !hasNegatedConcept(text, /\b(scary|scare|scared|terrify|terrified|frighten|frightened|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i);
   const wantsCry = contractHas("cry") || intent.primaryIntents.includes("cry");
+  const avoidsSpanish = detectAvoidedLanguageKey(input) === "spanish";
+  const wantsHeist = /\b(heist|robbery|score|con artist|caper)\b/i.test(text) || /\bensemble\b/i.test(text);
+
+  // "Like Money Heist but not in Spanish" class of request — the hard language-avoid gate
+  // (matchesAvoidedLanguageRequest in route.ts) will reject any Spanish-language pick here.
+  // Curated so a same-lane LLM batch that comes back entirely Spanish-language doesn't leave
+  // the user with nothing once the avoid-gate empties it.
+  if (avoidsSpanish && wantsHeist) {
+    const baseRec = {
+      format: "Film" as const,
+      whereToWatch: {
+        status: "unverified" as const,
+        primary: "Availability not verified",
+        note: "F.U.N will verify this in real time. Check your apps before watching.",
+      },
+      hiddenLayer: {
+        headline: "Heist chaos, different language lane",
+        insight: "Ensemble heist energy travels well past any one show's language.",
+        classyJab: "Your taste deserves a better map.",
+      },
+    };
+    return [
+      {
+        title: "Ocean's Eleven",
+        year: "2001",
+        runtime: "116 min",
+        vibe: "slick heist, ensemble chaos",
+        confidence: 85,
+        oneLine: "Watch Ocean's Eleven for the same ensemble heist chaos, played with total style.",
+        whyItFits: [
+          "A crew with distinct roles pulling off one impossible job, same ensemble-heist backbone.",
+          "Constant reversals and a plan that's always one step ahead of the audience.",
+          "Charismatic chemistry across the whole cast, not just one lead.",
+        ],
+        hiddenTitles: [{ title: "Now You See Me", year: "2013" }, { title: "The Italian Job", year: "2003" }, { title: "Inside Man", year: "2006" }],
+        alternatives: ["Now You See Me (2013)", "The Italian Job (2003)", "Inside Man (2006)"],
+        ...baseRec,
+      },
+      {
+        title: "Now You See Me",
+        year: "2013",
+        runtime: "116 min",
+        vibe: "heist, spectacle, twisty",
+        confidence: 82,
+        oneLine: "Watch Now You See Me for heist-team spectacle with a constant string of reveals.",
+        whyItFits: [
+          "An ensemble crew executing an elaborate plan under pressure, same core structure.",
+          "Built around the same audience-outwitting reversals that make heist stories fun.",
+          "Fast pace with a genuine plan-within-a-plan payoff.",
+        ],
+        hiddenTitles: [{ title: "Ocean's Eleven", year: "2001" }, { title: "Baby Driver", year: "2017" }, { title: "Inside Man", year: "2006" }],
+        alternatives: ["Ocean's Eleven (2001)", "Baby Driver (2017)", "Inside Man (2006)"],
+        ...baseRec,
+      },
+      {
+        title: "Inside Man",
+        year: "2006",
+        runtime: "129 min",
+        vibe: "heist-thriller, tense, clever",
+        confidence: 80,
+        oneLine: "Watch Inside Man for a meticulously planned heist standoff with real tension.",
+        whyItFits: [
+          "A crew executing a precise plan against mounting pressure, same heist backbone.",
+          "Constant misdirection keeps the outcome uncertain until the very end.",
+          "Ensemble cast with every character mattering to the plan.",
+        ],
+        hiddenTitles: [{ title: "Ocean's Eleven", year: "2001" }, { title: "The Italian Job", year: "2003" }, { title: "Now You See Me", year: "2013" }],
+        alternatives: ["Ocean's Eleven (2001)", "The Italian Job (2003)", "Now You See Me (2013)"],
+        ...baseRec,
+      },
+    ];
+  }
 
   if (wantsFriends && wantsHindi) {
     const baseRec = {

@@ -13,7 +13,7 @@ import { enrichRecommendation } from "@/lib/metadata";
 import { buildCompactRetryPrompt, buildRecommendationPrompt } from "@/lib/prompt";
 import { activeHardAvoidanceKeys, applyTrustFilter, relatedTitleUnsafe, safeFallback, TrustRejection } from "@/lib/recommendation-trust";
 import { buildIntentContractPrompt, localIntentContract, normalizeIntentContract } from "@/lib/intent-contract";
-import { matchesLanguageRequest, wantsSpecificLanguage } from "@/lib/language-lane";
+import { matchesAvoidedLanguageRequest, matchesLanguageRequest, wantsSpecificLanguage, wantsToAvoidLanguage } from "@/lib/language-lane";
 import { countryCodeMap, isPlotIdentificationRequest, normalizeRecommendRequest, requestText } from "@/lib/recommendation-utils";
 import { isPreviewCountry } from "@/lib/launch-scope";
 import { callerIp, checkRateLimit } from "@/lib/rate-limit";
@@ -1328,6 +1328,24 @@ export async function POST(req: Request) {
         trustRejections.push(...trustedFallback.rejected);
         const fallback = (await enrichBatch(trustedFallback.accepted, country, platforms, timings)).slice(0, count);
         const filteredFallback = fallback.filter((recommendation) => matchesLanguageRequest(input, recommendation));
+        enrichedBatch = filteredFallback.length > 0 ? filteredFallback : fallback;
+      }
+    }
+
+    // Negated language requests ("not in Spanish") — prompt guidance alone was confirmed
+    // insufficient (route.ts's intent-contract prompt still let the LLM default to the reference's
+    // own language). Enforced here as a hard reject, mirroring the positive-language block above.
+    if (displayState !== "no-subscription-match" && wantsToAvoidLanguage(input)) {
+      const avoidedLanguageMatchedBatch = enrichedBatch.filter((recommendation) => matchesAvoidedLanguageRequest(input, recommendation));
+      if (avoidedLanguageMatchedBatch.length > 0) {
+        enrichedBatch = avoidedLanguageMatchedBatch;
+      } else {
+        // Every LLM pick was confirmed to be the avoided language — fall back to curated local
+        // picks, same "confirmed mismatch dropped is the guarantee" posture as the positive lane.
+        const trustedFallback = applyTrustFilter(input, filteredLocalFallback(input, intentContract), intentContract);
+        trustRejections.push(...trustedFallback.rejected);
+        const fallback = (await enrichBatch(trustedFallback.accepted, country, platforms, timings)).slice(0, count);
+        const filteredFallback = fallback.filter((recommendation) => matchesAvoidedLanguageRequest(input, recommendation));
         enrichedBatch = filteredFallback.length > 0 ? filteredFallback : fallback;
       }
     }
