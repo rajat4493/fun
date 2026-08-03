@@ -13,7 +13,10 @@ const DELAY_BETWEEN_MS = Number(process.env.FUN_QA_DELAY_MS || 0);
 
 const scary = /\b(scary|scare|terrify|terrified|terrifying|horror|dread|nightmare|haunted|ghost|possession|demonic|slasher|jumpscare|jump scare|creepy|fear)\b/i;
 const comedy = /\b(comedy|funny|hilarious|witty|humor|humour|laugh|comic)\b/i;
-const romance = /\b(romance|romantic|love story|chemistry|relationship|date)\b/i;
+// Deliberately narrow — "relationship" and bare "date" were removed after they caused
+// GATE-BREAKUP-RELIEF to false-fail on ensemble/family shows whose labels mention family or
+// sibling "relationships," unrelated to actual romantic content.
+const romance = /\b(romance|romantic|love story|chemistry)\b/i;
 const cry = /\b(cry|tearjerker|tear jerker|sob|weep|devastating|heartbreaking|cathartic|moving|grief|loss|poignant)\b/i;
 const drama = /\b(drama|dramatic|character study|serious|emotional|prestige|social realist|melodrama)\b/i;
 const distressing = /\b(horror|gore|suicide|self.harm|massacre|brutal|terror|nightmare|graphic|disturbing|traumatic|harrowing|medical emergency|panic|dread)\b/i;
