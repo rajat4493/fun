@@ -17,6 +17,7 @@ import { matchesLanguageRequest, wantsSpecificLanguage } from "@/lib/language-la
 import { countryCodeMap, isPlotIdentificationRequest, normalizeRecommendRequest, requestText } from "@/lib/recommendation-utils";
 import { isPreviewCountry } from "@/lib/launch-scope";
 import { callerIp, checkRateLimit } from "@/lib/rate-limit";
+import { getProfileRecentTitles } from "@/lib/anonymous-profile-store";
 import { IntentContract, RawRecommendation, RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
 
 // Disabled by default while production credentials and fallback behavior are reviewed.
@@ -280,6 +281,21 @@ type RecommendationTimings = {
 
 const CORE_REQUEST_BUDGET_MS = 24000;
 const FULL_REQUEST_BUDGET_MS = 32000;
+
+async function applyServerProfileExclusions(input: RecommendRequest): Promise<RecommendRequest> {
+  if (!input.sessionId) return input;
+  const profileTitles = await getProfileRecentTitles(input.sessionId);
+  if (!profileTitles.length) return input;
+  const combined = [...(input.excludedTitles ?? []), ...profileTitles];
+  const seen = new Set<string>();
+  const excludedTitles = combined.filter((title) => {
+    const key = normalizeTitle(title);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 200);
+  return { ...input, excludedTitles };
+}
 
 function applyIntentExclusions(input: RecommendRequest, contract: IntentContract): RecommendRequest {
   const combined = [
@@ -985,6 +1001,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid recommendation request." }, { status: 400 });
     }
     let input = normalizeRecommendRequest(rawInput as RecommendRequest);
+    input = await applyServerProfileExclusions(input);
     const country = input.country || "Poland";
 
     // Public preview is scoped to launch-scope.ts's PREVIEW_COUNTRY_CODES. The onboarding picker

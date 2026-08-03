@@ -43,6 +43,31 @@ async function pipeline(commands: Array<Array<string | number>>): Promise<void> 
   if (!response.ok) throw new Error(`Profile memory write failed (${response.status})`);
 }
 
+// The client's own excludedTitles/seenTitles lists (recommendation-session.ts) are capped at
+// 80-200 entries and live only in localStorage, so a long-lived anonymous session eventually
+// evicts old exclusions and can re-serve a title it already showed weeks earlier. This reads back
+// the server-side title set (already written on every pick via appendProfileRecommendation, capped
+// at 500 recommendations/1yr TTL) so the recommend route can merge it in as a durable backstop.
+// Fails open (returns []) on any Redis trouble — same posture as every other function here.
+export async function getProfileRecentTitles(sessionId: string): Promise<string[]> {
+  const titlesKey = profileKey(sessionId, "titles");
+  const { url, token } = credentials();
+  if (!titlesKey || !url || !token) return [];
+  try {
+    const response = await fetch(`${url}/smembers/${encodeURIComponent(titlesKey)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!response.ok) return [];
+    const data = await response.json() as { result?: string[] };
+    // Stored as "title::year" (see appendProfileRecommendation) — strip the year suffix so callers
+    // get plain titles matching the shape of client-sent excludedTitles.
+    return (data.result ?? []).map((entry) => entry.split("::")[0]).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 export async function appendProfileRecommendation(
   sessionId: string,
   recommendation: ProfileRecommendation,

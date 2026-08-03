@@ -31,10 +31,12 @@ async function writeToKv(event: FeedbackEvent): Promise<void> {
     console.log("[FUN feedback]", JSON.stringify(event));
     return;
   }
-  await fetch(`${url}/lpush/fun:feedback`, {
+  // Pipeline endpoint with explicit command arrays — see recommendation-runs/route.ts for why the
+  // path-style `/lpush/key` endpoint with an array body double-encoded every record here.
+  await fetch(`${url}/pipeline`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify([JSON.stringify(event)]),
+    body: JSON.stringify([["LPUSH", "fun:feedback", JSON.stringify(event)]]),
     signal: AbortSignal.timeout(3000),
   });
 }

@@ -131,10 +131,14 @@ async function writeToKv(event: RecommendationRunEvent): Promise<void> {
     return;
   }
 
-  await fetch(`${url}/lpush/fun:recommendation-runs`, {
+  // Pipeline endpoint with explicit command arrays — the path-style `/lpush/key` endpoint with an
+  // array body double-encodes the value (Upstash stores the whole array literal as one element),
+  // which silently corrupted every record here until this fix. Matches the working pattern already
+  // used by anonymous-profile-store.ts and rate-limit.ts.
+  await fetch(`${url}/pipeline`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify([JSON.stringify(event)]),
+    body: JSON.stringify([["LPUSH", "fun:recommendation-runs", JSON.stringify(event)]]),
     signal: AbortSignal.timeout(2000),
   });
 }
