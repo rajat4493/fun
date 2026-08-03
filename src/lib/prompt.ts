@@ -8,6 +8,7 @@ function buildTasteFingerprint(userContext: string) {
 
   return `
 - Reference matching: silently identify why people watch the reference and extract 5-7 transferable traits before choosing. Compare emotional engine, character morality, social/class world, relationships, pacing, humor darkness, stakes, setting texture, and viewing rhythm.
+- Reject "prestige/acclaimed" as a shared trait on its own — "both are acclaimed festival dramas" is not a match. The specific narrative mechanism must transfer (e.g. Parasite's class-tension-through-genre-trojan-horse structure, not just "social commentary" or "visually striking"). A candidate that only shares tone or critical reputation, not the actual engine, is a weak match — keep searching before settling.
 - Affect bridging: when asked for the reference but lighter/darker/weirder, preserve its emotional engine and adjust only the requested dimension.
 - Cross-language reference: preserve those deep traits and translate the language/cultural lane. Reject candidates matching only genre, popularity, country, or platform; require at least three deep shared traits.
 - Never return the reference itself or an obvious sequel/prequel. If no exact equivalent exists, choose the closest tonal match and explain the honest overlap.`;
