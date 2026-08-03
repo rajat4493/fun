@@ -442,7 +442,10 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
     }
   }
   if (contract && contract.primary !== "unknown" && contract.confidence >= 0.6) {
-    hardConstraintLines.push(`❌ Intent contract — the main pick must satisfy the interpreted primary outcome: ${contract.primary}. The recommendation's parsedIntent, contentCategory, and emotionalEffect must support this.`);
+    // Primary outcome itself is already stated once in the AUTHORITATIVE INTENT CONTRACT block
+    // below — this only adds the part that block doesn't cover: the pick's own output labels
+    // must actually support that primary, not just the pick itself.
+    hardConstraintLines.push("❌ The recommendation's own parsedIntent, contentCategory, and emotionalEffect fields must support the primary outcome stated in the intent contract below.");
     if (INTENT_COMMITMENT[contract.primary]) {
       hardConstraintLines.push(`❌ Anti-softening (${contract.primary}): ${INTENT_COMMITMENT[contract.primary]}`);
     }
