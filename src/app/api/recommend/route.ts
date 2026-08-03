@@ -580,6 +580,18 @@ function isConstrainedLane(intentContract?: IntentContract, input?: RecommendReq
   return languageConstrained || subscriptionConstrained;
 }
 
+// Safe-cluster diversity fix: repetition-sensitive lanes (comfort/weird/discovery/relief/family)
+// previously only ever ranked whatever `count` (usually 3) items the LLM itself chose to generate
+// — the wellKnownSafeTitles penalty could reorder those 3, but could never promote a genuinely
+// different answer the model never proposed. Live testing showed 4 differently-phrased generic
+// comfort asks collapsing to the same 3 titles despite that penalty already being applied. Asking
+// for a wider raw pool here gives the ranking step real alternatives to work with, while
+// hard-exclusion (seen/excluded titles, -50) stays separate from this soft "overused but still
+// valid" pressure, matching the existing two-tier design.
+function candidateRequestCount(count: number, intentContract?: IntentContract): number {
+  return isRepetitionSensitiveLane(intentContract) ? Math.min(count + 2, 5) : count;
+}
+
 // Scoring order: primary intent match (20) > secondary matches (4 each) > format match (3).
 // Language match isn't scored here — localFallback already routes to a language-specific curated
 // bucket (see language-lane.ts), so every candidate in a given batch already shares the same
@@ -742,6 +754,7 @@ async function trustedRawBatch(
   precomputedBatch?: RawRecommendation[] | null,
   count = 3,
   deadlineAt?: number,
+  serveCount = count,
 ): Promise<{
   batch: RawRecommendation[];
   rejections: TrustRejection[];
@@ -765,7 +778,7 @@ async function trustedRawBatch(
     if (trusted.accepted.length > 0) {
       const rankedAccepted = rankAcceptedBatch(trusted.accepted, intentContract, input);
       return {
-        batch: rankedAccepted.slice(0, count),
+        batch: rankedAccepted.slice(0, serveCount),
         rejections: allRejections,
         fallbackUsed: trace.slice(traceStart).some((item) => item.provider === "local fallback"),
       };
@@ -775,7 +788,7 @@ async function trustedRawBatch(
   const localTrusted = applyTrustFilter(input, filteredLocalFallback(input, intentContract), intentContract);
   allRejections.push(...localTrusted.rejected);
   if (localTrusted.accepted.length > 0) {
-    return { batch: localTrusted.accepted.slice(0, count), rejections: allRejections, fallbackUsed: true };
+    return { batch: localTrusted.accepted.slice(0, serveCount), rejections: allRejections, fallbackUsed: true };
   }
 
   if (allRejections.length === 0) {
@@ -1074,9 +1087,10 @@ export async function POST(req: Request) {
       intentContract = await resolveIntentContract(input, providerTrace);
       input = applyIntentExclusions(input, intentContract);
       timings.intentMs += Date.now() - intentStarted;
-      prompt = buildRecommendationPrompt(input, { intentContract, count });
+      const requestCount = candidateRequestCount(count, intentContract);
+      prompt = buildRecommendationPrompt(input, { intentContract, count: requestCount });
       const recommendationStarted = Date.now();
-      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, null, count, deadlineAt);
+      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, null, requestCount, deadlineAt, count);
       timings.recommendationMs += Date.now() - recommendationStarted;
       trustRejections = trustedRaw.rejections;
       fallbackUsed = trustedRaw.fallbackUsed;
@@ -1088,9 +1102,10 @@ export async function POST(req: Request) {
       intentContract = await resolveIntentContract(input, providerTrace);
       input = applyIntentExclusions(input, intentContract);
       timings.intentMs += Date.now() - intentStarted;
-      prompt = buildRecommendationPrompt(input, { intentContract, count });
+      const requestCount = candidateRequestCount(count, intentContract);
+      prompt = buildRecommendationPrompt(input, { intentContract, count: requestCount });
       const recommendationStarted = Date.now();
-      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, null, count, deadlineAt);
+      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, null, requestCount, deadlineAt, count);
       timings.recommendationMs += Date.now() - recommendationStarted;
       trustRejections = trustedRaw.rejections;
       fallbackUsed = trustedRaw.fallbackUsed;
@@ -1105,7 +1120,8 @@ export async function POST(req: Request) {
       // primary/secondary — a silent mismatch on those would be a real quality regression that
       // primary-only agreement could miss.
       const localContract = localIntentContract(input);
-      const localPrompt = buildRecommendationPrompt(input, { intentContract: localContract, count });
+      const localRequestCount = candidateRequestCount(count, localContract);
+      const localPrompt = buildRecommendationPrompt(input, { intentContract: localContract, count: localRequestCount });
       const parallelTrace: ProviderTrace[] = [];
 
       const [resolvedContract, precomputedBatch] = await Promise.all([
@@ -1141,9 +1157,10 @@ export async function POST(req: Request) {
         });
       }
 
-      prompt = buildRecommendationPrompt(input, { intentContract, count });
+      const requestCount = candidateRequestCount(count, intentContract);
+      prompt = buildRecommendationPrompt(input, { intentContract, count: requestCount });
       const retryStarted = Date.now();
-      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, usableBatch, count, deadlineAt);
+      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, usableBatch, requestCount, deadlineAt, count);
       timings.recommendationMs += Date.now() - retryStarted;
       trustRejections = trustedRaw.rejections;
       fallbackUsed = trustedRaw.fallbackUsed;
@@ -1154,7 +1171,8 @@ export async function POST(req: Request) {
       // generation in parallel. Their controls already provide an explicit local contract; the
       // resolved LLM contract remains the trust authority before anything is served.
       const localContract = localIntentContract(input);
-      const localPrompt = buildRecommendationPrompt(input, { intentContract: localContract, count });
+      const localRequestCount = candidateRequestCount(count, localContract);
+      const localPrompt = buildRecommendationPrompt(input, { intentContract: localContract, count: localRequestCount });
       const parallelTrace: ProviderTrace[] = [];
 
       const [resolvedContract, precomputedBatch] = await Promise.all([
@@ -1190,9 +1208,10 @@ export async function POST(req: Request) {
       }
 
       // LLM-contract prompt for retry if the precomputed batch fails trust
-      prompt = buildRecommendationPrompt(input, { intentContract, count });
+      const requestCount = candidateRequestCount(count, intentContract);
+      prompt = buildRecommendationPrompt(input, { intentContract, count: requestCount });
       const retryStarted = Date.now();
-      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, usableBatch, count, deadlineAt);
+      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, usableBatch, requestCount, deadlineAt, count);
       timings.recommendationMs += Date.now() - retryStarted;
       const normalizedBatch = trustedRaw.batch;
       trustRejections = trustedRaw.rejections;

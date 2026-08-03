@@ -266,6 +266,11 @@ export function buildIntentContractPrompt(input: RecommendRequest): string {
 You are F.U.N's intent interpreter. Read the viewer request and classify what they actually want.
 Do not recommend a title.
 Do not infer from one keyword alone. Decide whether words like scared, horror, sad, or weird are desired outcomes or avoidances.
+A reference title's own language/culture is NOT the requested language unless the viewer wants that
+same lane. If they name a reference only to reject one of its qualities ("like Money Heist but not
+in Spanish"), that rejected quality must NOT appear as "language" — use "any" (or their stated
+languagePreferences) instead. The same rule applies to any other quality of the reference the
+viewer explicitly negates, not just language.
 
 User text and controls:
 - Text: ${text}
