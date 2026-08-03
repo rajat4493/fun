@@ -15,10 +15,12 @@ async function writeToKv(event: FunEvent): Promise<void> {
     return;
   }
 
-  await fetch(`${url}/lpush/fun:events`, {
+  // Pipeline endpoint with explicit command arrays — path-style `/lpush/key` with an array body
+  // double-encodes the value (see recommendation-runs/route.ts for the full explanation).
+  await fetch(`${url}/pipeline`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify([JSON.stringify(event)]),
+    body: JSON.stringify([["LPUSH", "fun:events", JSON.stringify(event)]]),
     signal: AbortSignal.timeout(2000),
   });
 }
