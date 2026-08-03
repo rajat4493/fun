@@ -541,7 +541,10 @@ function withStructuredFallbackLabels(rec: RawRecommendation): RawRecommendation
 // titles this session's testing directly observed repeating; revisit as new repeat offenders turn
 // up, rather than building live serve-frequency tracking before this preview needs it.
 const wellKnownSafeTitles = new Set(
-  ["The Intouchables", "The Grand Budapest Hotel", "The Fundamentals of Caring", "Hundreds of Beavers", "The Fall"].map(normalizeTitle),
+  [
+    "The Intouchables", "The Grand Budapest Hotel", "The Fundamentals of Caring", "Hundreds of Beavers", "The Fall",
+    "Paddington 2", "The Good Place", "School of Rock", "Schitt's Creek",
+  ].map(normalizeTitle),
 );
 
 function isRepetitionSensitiveLane(intentContract?: IntentContract): boolean {
@@ -623,6 +626,23 @@ function acceptedBatchScore(rec: RawRecommendation, intentContract?: IntentContr
       if (["comedy", "funny", "laughter", "light", "warm", "warmth", "gentle", "reassurance", "reassuring", "easy", "feel-good"].some((label) => labels.has(label))) score += 8;
       if (["heartbreak", "heartbreaking", "grief", "loss", "bleak", "harrowing", "melancholy", "devastating", "existential", "self-destructive", "self-destruction", "depression", "depressive", "addiction", "dark-comedy", "bittersweet", "nihilistic", "despair", "self-loathing", "midlife-crisis"].some((label) => labels.has(label))) score -= 10;
       if (labels.has("drama") && !labels.has("comedy")) score -= 6;
+
+      // Lane-specific differentiation: breakup/grief/family were all scored identically to
+      // generic comfort above, which let the same handful of generically-warm titles win
+      // regardless of which specific situation was actually in play. These add situation-
+      // appropriate signal on top, not a replacement for the generic comfort bar.
+      const situation = intentContract.situation;
+      if (situation.some((value) => value.includes("breakup"))) {
+        if (["friendship", "self-discovery", "ensemble", "found-family", "independence", "empowerment"].some((label) => labels.has(label))) score += 5;
+        if (["romance", "romantic", "love-story", "chemistry"].some((label) => labels.has(label))) score -= 12;
+      }
+      if (situation.some((value) => value.includes("grief"))) {
+        if (["healing", "restorative", "hope", "hopeful", "acceptance", "connection"].some((label) => labels.has(label))) score += 5;
+      }
+      if (situation.includes("family")) {
+        if (["family", "wholesome", "all-ages", "ensemble"].some((label) => labels.has(label))) score += 5;
+        if (["raunchy", "crude", "adult-humor", "edgy"].some((label) => labels.has(label))) score -= 8;
+      }
     }
 
     if (intentContract.primary === "thriller") {

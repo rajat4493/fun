@@ -644,8 +644,14 @@ function sensitivityViolation(
     situation.some((signal) => signal.includes("grief-relief") || signal.includes("breakup-recovery"));
   if (wantsRelief) {
     const reliefUnsafeLabels = ["grief", "loss", "heartbreak", "heartbreaking", "melancholy", "bleak", "harrowing", "devastating", "catharsis"];
+    // A pick can legitimately carry "loss" as a theme while its actual effect is gentle/healing
+    // (e.g. "explores loss with warmth and hope") — blanket-rejecting on the theme label alone,
+    // with no regard for co-occurring restorative signals, was found live rejecting every
+    // candidate (The Secret Life of Walter Mitty, After Life, The Intouchables) for a grief-relief
+    // request, forcing a full fallback. Only reject when there's no restorative counter-signal.
+    const reliefRestorativeCounter = ["healing", "gentle", "hopeful", "hope", "uplifting", "comfort", "warm", "warmth", "reassuring", "reassurance", "soothing"];
     const romanceAvoided = contract?.softAvoids.includes("romance") || contract?.hardAvoids.includes("romance");
-    if (reliefUnsafeLabels.some((label) => terms.has(label))) {
+    if (reliefUnsafeLabels.some((label) => terms.has(label)) && !reliefRestorativeCounter.some((label) => terms.has(label))) {
       return "sensitivity: emotional-relief request — pick is emotionally amplifying rather than containing";
     }
     if (romanceAvoided && terms.has("romance")) {
