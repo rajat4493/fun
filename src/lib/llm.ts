@@ -16,6 +16,11 @@ const INTENT_MAX_OUTPUT_TOKENS = 700;
 // Scaled by count, capped at the original constant so the already-proven 3-pick path (count=3)
 // gets exactly LLM_MAX_OUTPUT_TOKENS, unchanged from before this existed.
 const LLM_TOKENS_PER_PICK = 1000;
+// Tested lowering this (800 -> 400) on the theory that providers scale generation latency with
+// max_tokens. Measured result directly disproved it: 6-prompt A/B showed the smaller budget was
+// *slower* on average (recMs 6174ms vs 4459ms baseline), not faster. Left at the original value —
+// real measurement over an unverified theory, same principle already applied to the self-mode
+// parallel-intent experiment this session.
 const LLM_CORE_TOKENS_PER_PICK = 800;
 const LLM_TOKENS_BASE_OVERHEAD = 200;
 function outputTokenBudget(count: number, includeDiscovery = true): number {
