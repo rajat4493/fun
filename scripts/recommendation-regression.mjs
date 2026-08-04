@@ -32,6 +32,21 @@ function textOf(rec) {
   ].filter(Boolean).join(" ");
 }
 
+// Checking full prose text for "romance" (not just structured labels) risks a false positive: a
+// model explaining WHY a pick fits often writes things like "offers relief without turning romance
+// ... into the main event" — the model asserting it avoided romance, not a sign it picked one. Only
+// flag a clause-level, non-negated mention.
+function romanceUnnegated(text) {
+  const romanceWord = /\b(romance|romantic|love story)\b/i;
+  const negation = /\b(not|no|without|avoid|isn't|doesn't|don't|never|instead of)\b/i;
+  const clauses = text.split(/[.!?;]|\bbut\b|\bhowever\b/i);
+  return clauses.some((clause) => {
+    const match = romanceWord.exec(clause);
+    if (!match) return false;
+    return !negation.test(clause.slice(0, match.index));
+  });
+}
+
 function emotionallyAmplifying(rec) {
   const labels = [...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].join(" ");
   return labels ? emotionalAmplification.test(labels) : emotionalAmplification.test(textOf(rec));
@@ -215,9 +230,14 @@ const tests = [
     },
     check: (rec) => {
       const labels = [...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].join(" ");
-      return comfort.test(textOf(rec)) && restorative.test(labels || textOf(rec)) && !romance.test(labels) && !emotionallyAmplifying(rec);
+      const fullText = textOf(rec);
+      // Labels alone missed a real gap: a genuinely romantic film with non-obvious labels (e.g. a
+      // musical/drama that's actually a love story) could pass undetected. Also check title/oneLine/
+      // whyItFits, negation-aware (romanceUnnegated) — a model explaining it avoided romance often
+      // writes the word "romance" itself, which a blind text match would wrongly flag.
+      return comfort.test(fullText) && restorative.test(labels || fullText) && !romance.test(labels) && !romanceUnnegated(fullText) && !emotionallyAmplifying(rec);
     },
-    why: "Breakup recovery must not be answered with another romance or heartbreak story.",
+    why: "Breakup recovery must not be answered with another romance or heartbreak story — checks both structured labels and the title/oneLine/whyItFits text, not labels alone.",
   },
   {
     id: "NEGATED-LANGUAGE-NOT-SPANISH",

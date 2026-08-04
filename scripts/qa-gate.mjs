@@ -48,6 +48,21 @@ function textOf(rec) {
   return [rec.title, rec.format, rec.runtime, rec.vibe, rec.oneLine, ...(rec.whyItFits ?? []), rec.hiddenLayer?.headline, rec.hiddenLayer?.insight].filter(Boolean).join(" ");
 }
 
+// Checking full prose text for "romance" (not just structured labels) risks a false positive: a
+// model explaining WHY a pick fits often writes things like "offers relief without turning romance
+// ... into the main event" — asserting it avoided romance, not a sign it picked one. Only flag a
+// clause-level, non-negated mention.
+function romanceUnnegated(text) {
+  const romanceWord = /\b(romance|romantic|love story)\b/i;
+  const negation = /\b(not|no|without|avoid|isn't|doesn't|don't|never|instead of)\b/i;
+  const clauses = text.split(/[.!?;]|\bbut\b|\bhowever\b/i);
+  return clauses.some((clause) => {
+    const match = romanceWord.exec(clause);
+    if (!match) return false;
+    return !negation.test(clause.slice(0, match.index));
+  });
+}
+
 function emotionallyAmplifying(rec) {
   const labels = [...(rec.contentCategory ?? []), ...(rec.emotionalEffect ?? [])].join(" ");
   return labels ? emotionalAmplification.test(labels) : emotionalAmplification.test(textOf(rec));
@@ -201,9 +216,12 @@ const tests = [
       // accept restorative evidence from either labels or prose so a real pick isn't flagged
       // just because its one-liner didn't happen to repeat the same adjective as its labels.
       const restorativeSignal = comfort.test(labels) || comfort.test(text) || restorative.test(labels) || restorative.test(text);
-      return restorativeSignal && !romance.test(labels) && !emotionallyAmplifying(rec);
+      // Labels alone missed a real gap: a genuinely romantic film with non-obvious labels could
+      // pass undetected. Also checks prose, negation-aware (romanceUnnegated) — a model explaining
+      // it avoided romance often writes the word "romance" itself.
+      return restorativeSignal && !romance.test(labels) && !romanceUnnegated(text) && !emotionallyAmplifying(rec);
     },
-    why: "Breakup recovery must offer relief without redirecting the viewer into romance or heartbreak.",
+    why: "Breakup recovery must offer relief without redirecting the viewer into romance or heartbreak — checks both structured labels and the title/oneLine/whyItFits text.",
   },
   {
     id: "GATE-HIDDEN-GEM",
