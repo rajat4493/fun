@@ -1057,6 +1057,25 @@ export async function POST(req: Request) {
     // fetchServerProfileTitles's comment. Started after the geo-scope/plot-decline bail-outs so a
     // rejected request doesn't pay for it at all.
     const serverProfileTitlesPromise = fetchServerProfileTitles(input);
+
+    // Opt-in staged progress (Tier 2 speed work — perceived, not actual, latency). Only the real
+    // frontend sets `stream: true`; test:gate/test:recommendation and any other direct caller keep
+    // getting today's exact single-JSON-blob response, untouched. `controller` stays null unless a
+    // stream is actually constructed below, so every `emitStage` call in the logic that follows is
+    // a harmless no-op on the non-streaming path — the same code runs either way.
+    const wantsStream = input.stream === true;
+    const encoder = new TextEncoder();
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    function emitStage(stage: string) {
+      if (!streamController) return;
+      streamController.enqueue(encoder.encode(`${JSON.stringify({ type: "stage", stage })}\n`));
+    }
+
+    async function buildResult(): Promise<Record<string, unknown>> {
+      // First real checkpoint — "understanding your mood" covers everything up to and including
+      // intent classification, emitted as soon as buildResult actually starts running (i.e. once
+      // streaming, right after the stream opens; on the non-streaming path this is a no-op).
+      emitStage("understanding");
     // Two-phase fetch: client sends 1 for the fast initial pick, 2 for the background fill call
     // that tops the batch up to 3. Omitted (undefined) keeps today's single 3-at-once behavior.
     const count = input.recommendationCount ?? 3;
@@ -1088,7 +1107,11 @@ export async function POST(req: Request) {
       input = mergeServerProfileTitles(input, subProfileTitles);
       input = applyIntentExclusions(input, intentContract);
       timings.intentMs += Date.now() - intentStarted;
+      emitStage("checking-fit");
       const recommendationStarted = Date.now();
+      // subscriptionVerifiedChain does its own TMDB verification internally across multiple
+      // candidate rounds, so "verifying" covers its whole call rather than a point inside it.
+      emitStage("verifying");
       const chain = await subscriptionVerifiedChain(input, country, providerTrace, intentContract, count, deadlineAt, timings);
       timings.recommendationMs += Date.now() - recommendationStarted - timings.verificationMs;
       enrichedBatch = chain.picks;
@@ -1108,6 +1131,7 @@ export async function POST(req: Request) {
       input = mergeServerProfileTitles(input, fillProfileTitles);
       input = applyIntentExclusions(input, intentContract);
       timings.intentMs += Date.now() - intentStarted;
+      emitStage("checking-fit");
       const requestCount = candidateRequestCount(count, intentContract);
       prompt = buildRecommendationPrompt(input, { intentContract, count: requestCount });
       const recommendationStarted = Date.now();
@@ -1115,6 +1139,7 @@ export async function POST(req: Request) {
       timings.recommendationMs += Date.now() - recommendationStarted;
       trustRejections = trustedRaw.rejections;
       fallbackUsed = trustedRaw.fallbackUsed;
+      emitStage("verifying");
       enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings);
       displayState = "unverified";
     } else if (input.mode === "self" && !selfModeParallelIntentEnabled) {
@@ -1128,6 +1153,7 @@ export async function POST(req: Request) {
       input = mergeServerProfileTitles(input, selfProfileTitles);
       input = applyIntentExclusions(input, intentContract);
       timings.intentMs += Date.now() - intentStarted;
+      emitStage("checking-fit");
       const requestCount = candidateRequestCount(count, intentContract);
       prompt = buildRecommendationPrompt(input, { intentContract, count: requestCount });
       const recommendationStarted = Date.now();
@@ -1135,6 +1161,7 @@ export async function POST(req: Request) {
       timings.recommendationMs += Date.now() - recommendationStarted;
       trustRejections = trustedRaw.rejections;
       fallbackUsed = trustedRaw.fallbackUsed;
+      emitStage("verifying");
       enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings);
       displayState = "unverified";
     } else if (input.mode === "self") {
@@ -1188,6 +1215,7 @@ export async function POST(req: Request) {
         });
       }
 
+      emitStage("checking-fit");
       const requestCount = candidateRequestCount(count, intentContract);
       prompt = buildRecommendationPrompt(input, { intentContract, count: requestCount });
       const retryStarted = Date.now();
@@ -1195,6 +1223,7 @@ export async function POST(req: Request) {
       timings.recommendationMs += Date.now() - retryStarted;
       trustRejections = trustedRaw.rejections;
       fallbackUsed = trustedRaw.fallbackUsed;
+      emitStage("verifying");
       enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings);
       displayState = "unverified";
     } else {
@@ -1241,6 +1270,7 @@ export async function POST(req: Request) {
         });
       }
 
+      emitStage("checking-fit");
       // LLM-contract prompt for retry if the precomputed batch fails trust
       const requestCount = candidateRequestCount(count, intentContract);
       prompt = buildRecommendationPrompt(input, { intentContract, count: requestCount });
@@ -1250,6 +1280,7 @@ export async function POST(req: Request) {
       const normalizedBatch = trustedRaw.batch;
       trustRejections = trustedRaw.rejections;
       fallbackUsed = trustedRaw.fallbackUsed;
+      emitStage("verifying");
       enrichedBatch = await enrichBatch(normalizedBatch, country, platforms, timings);
       displayState = "unverified";
     }
@@ -1448,7 +1479,7 @@ export async function POST(req: Request) {
       `source=${source} degraded=${degradeReason ?? "false"} totalMs=${timings.totalMs}`,
     );
 
-    return NextResponse.json({
+    return {
       ...firstPick,
       _batch: enrichedBatch,
       _batchIndex: 0,
@@ -1473,6 +1504,40 @@ export async function POST(req: Request) {
           ).length - 1),
         },
         ...(process.env.NODE_ENV !== "production" || process.env.FUN_DEBUG_TRACES === "1" ? { providerTrace } : {}),
+      },
+    };
+    }
+
+    if (!wantsStream) {
+      const payload = await buildResult();
+      return NextResponse.json(payload);
+    }
+
+    // Streaming path: return the Response immediately (headers committed to 200 here), then
+    // populate the body asynchronously as buildResult() runs. Errors from this point on can no
+    // longer change the HTTP status — they travel in-band as a terminal "error" line instead, which
+    // page.tsx's stream reader treats the same way it treats today's non-streaming error path.
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        streamController = controller;
+        try {
+          const payload = await buildResult();
+          controller.enqueue(encoder.encode(`${JSON.stringify({ type: "result", payload })}\n`));
+        } catch (error) {
+          console.error("Recommendation route failed (streamed):", error);
+          controller.enqueue(encoder.encode(`${JSON.stringify({
+            type: "error",
+            error: "Recommendation failed. Check API keys or model output.",
+          })}\n`));
+        } finally {
+          controller.close();
+        }
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "application/x-ndjson",
+        "Cache-Control": "no-cache, no-transform",
       },
     });
   } catch (error) {

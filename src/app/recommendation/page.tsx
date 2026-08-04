@@ -51,18 +51,16 @@ const LOADING_STARTED_KEY = "fun:loading-started-at";
 const ERROR_KEY = "fun:recommendation-error";
 const LOADING_TIMEOUT_MS = 85000;
 
-const SEARCH_TITLES = [
-  "Parasite for the perfect trap",
-  "The Bear for pressure",
-  "Fleabag for bite",
-  "Past Lives for impossible timing",
-  "The Godfather for family pressure",
-  "Moonlight for quiet ache",
-  "Before Sunrise for one-night magic",
-  "The Handmaiden for elegant danger",
-  "Super Deluxe for beautiful chaos",
-  "A Separation for moral tension",
-];
+const LOADING_STAGE_KEY = "fun:loading-stage";
+
+// Real pipeline checkpoints (see route.ts's emitStage) — not a decorative rotation. Falls back to
+// the first stage if the key isn't set yet (the brief window before the first line arrives).
+const LOADING_STAGE_COPY: Record<string, string> = {
+  understanding: "Understanding your mood",
+  "checking-fit": "Checking fit",
+  verifying: "Verifying watch options",
+};
+const DEFAULT_LOADING_STAGE = "understanding";
 
 const FEEDBACK_OPTIONS: Array<{ reason: FeedbackReason; label: string; icon: LucideIcon; tone: string }> = [
   { reason: "wrong-vibe", label: "Wrong vibe", icon: Star, tone: "red" },
@@ -278,7 +276,7 @@ export default function RecommendationPage() {
   const [unlockDone, setUnlockDone] = useState(false);
   const [rerolling, setRerolling] = useState(false);
   const [feedbackReason, setFeedbackReason] = useState<FeedbackReason | null>(null);
-  const [searchIdx, setSearchIdx] = useState(0);
+  const [loadingStage, setLoadingStage] = useState(DEFAULT_LOADING_STAGE);
   const [shareState, setShareState] = useState<"idle" | "copied">("idle");
   const [watchOptionsOpen, setWatchOptionsOpen] = useState(false);
   const [showMorePicks, setShowMorePicks] = useState(false);
@@ -293,16 +291,14 @@ export default function RecommendationPage() {
   const fillStartedForRunIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    if (!fetchLoading) return;
-    const timer = setInterval(() => setSearchIdx((index) => (index + 1) % SEARCH_TITLES.length), 1500);
-    return () => clearInterval(timer);
-  }, [fetchLoading]);
-
-  useEffect(() => {
     const isLoading = localStorage.getItem(LOADING_KEY) === "true";
     if (isLoading) {
       setFetchLoading(true);
+      setLoadingStage(localStorage.getItem(LOADING_STAGE_KEY) || DEFAULT_LOADING_STAGE);
       const interval = setInterval(() => {
+        // Real pipeline progress, written by page.tsx as it reads the NDJSON stream — not a timer.
+        const stage = localStorage.getItem(LOADING_STAGE_KEY);
+        if (stage) setLoadingStage(stage);
         const startedAt = Number(localStorage.getItem(LOADING_STARTED_KEY) ?? Date.now());
         if (Date.now() - startedAt > LOADING_TIMEOUT_MS) {
           clearInterval(interval);
@@ -792,7 +788,7 @@ export default function RecommendationPage() {
             Finding your perfect pick...
           </div>
           <p className="mt-3 h-5 text-sm text-white/36">
-            Searching <span className="text-white/60">{SEARCH_TITLES[searchIdx]}</span>...
+            <span className="text-white/60">{LOADING_STAGE_COPY[loadingStage] ?? LOADING_STAGE_COPY[DEFAULT_LOADING_STAGE]}</span>...
           </p>
         </div>
       </main>

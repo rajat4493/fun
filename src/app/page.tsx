@@ -301,6 +301,38 @@ async function captureEvent(type: string, payload: Record<string, unknown>) {
   }).catch(() => {});
 }
 
+// Reads the NDJSON stream from a `stream: true` /api/recommend request (see route.ts's
+// buildResult/emitStage). Surfaces each real pipeline stage to the loading screen (via localStorage,
+// same cross-page channel recommendation/page.tsx already polls) as it happens, and resolves with
+// the final payload once the terminal "result" line arrives — or throws on "error"/an empty stream,
+// same failure shape the existing catch block below already handles.
+async function readNdjsonResult(response: Response): Promise<unknown> {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("Could not generate a pick.");
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newlineIndex: number;
+    while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+      if (!line) continue;
+      const parsed = JSON.parse(line) as { type: string; stage?: string; payload?: unknown; error?: string };
+      if (parsed.type === "stage" && parsed.stage) {
+        localStorage.setItem("fun:loading-stage", parsed.stage);
+      } else if (parsed.type === "result") {
+        return parsed.payload;
+      } else if (parsed.type === "error") {
+        throw new Error(parsed.error || "Recommendation failed. Check API keys or model output.");
+      }
+    }
+  }
+  throw new Error("Could not generate a pick.");
+}
+
 function isPlaceholderPick(recommendation?: Recommendation | null) {
   return !recommendation || (
     recommendation.title === defaultPick.title &&
@@ -490,11 +522,17 @@ export default function Home() {
       recommendationCount: 1,
       responseDetail: "core",
       runId,
+      // Opt into staged NDJSON progress — see route.ts's buildResult/emitStage. Only this, the
+      // highest-stakes first ask, gets the staged loading experience for now.
+      stream: true,
     };
 
     localStorage.setItem("fun:loading", "true");
     localStorage.setItem("fun:loading-started-at", String(Date.now()));
     localStorage.removeItem("fun:recommendation-error");
+    // Cleared here so a fresh ask never briefly shows the previous request's last stage before its
+    // own first "understanding" line arrives.
+    localStorage.removeItem("fun:loading-stage");
     captureEvent("ask", {
       country: requestInput.country,
       languagePreferences: requestInput.languagePreferences,
@@ -535,7 +573,7 @@ export default function Home() {
         }
         throw new Error(message);
       }
-      const data = await response.json() as Recommendation & {
+      const data = await readNdjsonResult(response) as Recommendation & {
         _batch?: Recommendation[];
         _trust?: { displayState?: RecommendationDisplayState; batchComplete?: boolean; intentContract?: IntentContract };
       };
@@ -585,6 +623,7 @@ export default function Home() {
       window.clearTimeout(timeout);
       localStorage.removeItem("fun:loading");
       localStorage.removeItem("fun:loading-started-at");
+      localStorage.removeItem("fun:loading-stage");
       setLoading(false);
     }
   }

@@ -96,6 +96,9 @@ export type RecommendRequest = {
   // log line for this call and the client's later /api/recommendation-runs report share one ID —
   // otherwise there is no way to join "what the model returned" to "what got displayed".
   runId?: string;
+  // Opt-in NDJSON staged-progress response (see route.ts's buildResult/emitStage). Omitted or false
+  // keeps today's exact single-JSON-blob response — only the real UI sets this to true.
+  stream?: boolean;
 };
 
 export type WatchProvider = {
