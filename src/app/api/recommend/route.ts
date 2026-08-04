@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { filterFalsePositiveRecommendations, localFallback } from "@/lib/fallbacks";
 import {
   interpretIntentWithAnthropic,
@@ -18,6 +18,7 @@ import { countryCodeMap, isPlotIdentificationRequest, normalizeRecommendRequest,
 import { isPreviewCountry } from "@/lib/launch-scope";
 import { callerIp, checkRateLimit } from "@/lib/rate-limit";
 import { getProfileRecentTitles } from "@/lib/anonymous-profile-store";
+import { writeRecommendationDiagnostics } from "@/lib/recommendation-diagnostics-store";
 import { IntentContract, RawRecommendation, RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
 
 // Disabled by default while production credentials and fallback behavior are reviewed.
@@ -289,6 +290,37 @@ const FULL_REQUEST_BUDGET_MS = 32000;
 function fetchServerProfileTitles(input: RecommendRequest): Promise<string[]> {
   if (!input.sessionId) return Promise.resolve([]);
   return getProfileRecentTitles(input.sessionId);
+}
+
+// Compact, metrics-only diagnostics event — see recommendation-diagnostics-store.ts for why this
+// stays isolated from recommendation logic. `payload` is exactly what's about to be sent to the
+// client, so this never re-derives anything, just reads it back out.
+function buildDiagnosticsEvent(input: RecommendRequest, payload: Record<string, unknown>) {
+  const trust = payload._trust as {
+    rejections: unknown[];
+    displayState: string;
+    fallbackUsed: boolean;
+    diagnostics: { runId: string; source: string; degraded: boolean; degradeReason?: string; timings: Record<string, number>; retryCount: number };
+  };
+  return {
+    schemaVersion: 1 as const,
+    runId: trust.diagnostics.runId,
+    createdAt: new Date().toISOString(),
+    sessionId: input.sessionId,
+    mode: input.mode,
+    country: input.country,
+    title: payload.title as string,
+    year: payload.year as string,
+    confidence: payload.confidence as number | undefined,
+    displayState: trust.displayState,
+    fallbackUsed: trust.fallbackUsed,
+    source: trust.diagnostics.source,
+    degraded: trust.diagnostics.degraded,
+    degradeReason: trust.diagnostics.degradeReason,
+    timings: trust.diagnostics.timings,
+    retryCount: trust.diagnostics.retryCount,
+    rejectionCount: trust.rejections.length,
+  };
 }
 
 function mergeServerProfileTitles(input: RecommendRequest, profileTitles: string[]): RecommendRequest {
@@ -1510,6 +1542,7 @@ export async function POST(req: Request) {
 
     if (!wantsStream) {
       const payload = await buildResult();
+      after(() => writeRecommendationDiagnostics(buildDiagnosticsEvent(input, payload)));
       return NextResponse.json(payload);
     }
 
@@ -1522,6 +1555,7 @@ export async function POST(req: Request) {
         streamController = controller;
         try {
           const payload = await buildResult();
+          void writeRecommendationDiagnostics(buildDiagnosticsEvent(input, payload));
           controller.enqueue(encoder.encode(`${JSON.stringify({ type: "result", payload })}\n`));
         } catch (error) {
           console.error("Recommendation route failed (streamed):", error);
