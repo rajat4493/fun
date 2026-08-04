@@ -331,10 +331,22 @@ export default function RecommendationPage() {
       return () => clearInterval(interval);
     }
     const loaded = loadSession();
-    if (!loaded) setNoSession(true);
-    else {
+    if (loaded) {
       setSession(loaded);
       setBatchIndex(loaded.batchIndex ?? 0);
+    } else {
+      // A refresh, re-navigation, or return visit after a failed request (rate limit, geo-scope,
+      // etc.) landed here with `fun:loading` already cleared — the polling branch above only ever
+      // catches this in the exact split-second window of the original failed request. Check for a
+      // stored error here too, so e.g. the rate-limit unlock form stays reachable on a reload
+      // instead of silently disappearing into a bare "no recommendation yet" screen.
+      const error = localStorage.getItem(ERROR_KEY);
+      if (error) {
+        localStorage.removeItem(ERROR_KEY);
+        setFetchError(error);
+      } else {
+        setNoSession(true);
+      }
     }
     setReady(true);
   }, []);
