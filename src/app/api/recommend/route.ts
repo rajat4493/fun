@@ -282,9 +282,16 @@ type RecommendationTimings = {
 const CORE_REQUEST_BUDGET_MS = 24000;
 const FULL_REQUEST_BUDGET_MS = 32000;
 
-async function applyServerProfileExclusions(input: RecommendRequest): Promise<RecommendRequest> {
-  if (!input.sessionId) return input;
-  const profileTitles = await getProfileRecentTitles(input.sessionId);
+// Split into fetch + merge so the Redis round-trip can run concurrently with intent classification
+// (they're independent — exclusions only affect recommendation-time scoring, never intent
+// classification) instead of paying for it sequentially before intent classification even starts.
+// Measured directly: 126-496ms wasted serial time per request before this split.
+function fetchServerProfileTitles(input: RecommendRequest): Promise<string[]> {
+  if (!input.sessionId) return Promise.resolve([]);
+  return getProfileRecentTitles(input.sessionId);
+}
+
+function mergeServerProfileTitles(input: RecommendRequest, profileTitles: string[]): RecommendRequest {
   if (!profileTitles.length) return input;
   const combined = [...(input.excludedTitles ?? []), ...profileTitles];
   const seen = new Set<string>();
@@ -1014,7 +1021,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid recommendation request." }, { status: 400 });
     }
     let input = normalizeRecommendRequest(rawInput as RecommendRequest);
-    input = await applyServerProfileExclusions(input);
     const country = input.country || "Poland";
 
     // Public preview is scoped to launch-scope.ts's PREVIEW_COUNTRY_CODES. The onboarding picker
@@ -1046,6 +1052,11 @@ export async function POST(req: Request) {
     const avoids = activeHardAvoidanceKeys(input);
     const subscriptionOnly = input.platformFilter === "mine";
     const providerTrace: ProviderTrace[] = [];
+    // Kicked off here (not awaited) so this Redis round-trip runs concurrently with intent
+    // classification below instead of paying for it sequentially first — see
+    // fetchServerProfileTitles's comment. Started after the geo-scope/plot-decline bail-outs so a
+    // rejected request doesn't pay for it at all.
+    const serverProfileTitlesPromise = fetchServerProfileTitles(input);
     // Two-phase fetch: client sends 1 for the fast initial pick, 2 for the background fill call
     // that tops the batch up to 3. Omitted (undefined) keeps today's single 3-at-once behavior.
     const count = input.recommendationCount ?? 3;
@@ -1069,7 +1080,12 @@ export async function POST(req: Request) {
       // Subscription chain has multiple sequential LLM steps — keep intent sequential
       // to avoid extra concurrent Anthropic calls that push total time past limits.
       const intentStarted = Date.now();
-      intentContract = await resolveIntentContract(input, providerTrace);
+      const [subIntentContract, subProfileTitles] = await Promise.all([
+        resolveIntentContract(input, providerTrace),
+        serverProfileTitlesPromise,
+      ]);
+      intentContract = subIntentContract;
+      input = mergeServerProfileTitles(input, subProfileTitles);
       input = applyIntentExclusions(input, intentContract);
       timings.intentMs += Date.now() - intentStarted;
       const recommendationStarted = Date.now();
@@ -1081,10 +1097,15 @@ export async function POST(req: Request) {
       fallbackUsed = chain.fallbackUsed;
     } else if (input.precomputedIntentContract) {
       // Background fills already carry phase 1's resolved contract — resolveIntentContract
-      // short-circuits to a zero-cost reuse, so there's no real intent call to parallelize
-      // against here; stays sequential because sequential is already instant for this case.
+      // short-circuits to a zero-cost reuse. Still worth running the exclusion fetch alongside it
+      // rather than before it — costs nothing extra, same reasoning as the other branches.
       const intentStarted = Date.now();
-      intentContract = await resolveIntentContract(input, providerTrace);
+      const [fillIntentContract, fillProfileTitles] = await Promise.all([
+        resolveIntentContract(input, providerTrace),
+        serverProfileTitlesPromise,
+      ]);
+      intentContract = fillIntentContract;
+      input = mergeServerProfileTitles(input, fillProfileTitles);
       input = applyIntentExclusions(input, intentContract);
       timings.intentMs += Date.now() - intentStarted;
       const requestCount = candidateRequestCount(count, intentContract);
@@ -1099,7 +1120,12 @@ export async function POST(req: Request) {
     } else if (input.mode === "self" && !selfModeParallelIntentEnabled) {
       // Default path: original sequential behavior. See selfModeParallelIntentEnabled above for why.
       const intentStarted = Date.now();
-      intentContract = await resolveIntentContract(input, providerTrace);
+      const [selfIntentContract, selfProfileTitles] = await Promise.all([
+        resolveIntentContract(input, providerTrace),
+        serverProfileTitlesPromise,
+      ]);
+      intentContract = selfIntentContract;
+      input = mergeServerProfileTitles(input, selfProfileTitles);
       input = applyIntentExclusions(input, intentContract);
       timings.intentMs += Date.now() - intentStarted;
       const requestCount = candidateRequestCount(count, intentContract);
@@ -1119,6 +1145,11 @@ export async function POST(req: Request) {
       // speculative batch is stricter here: format and hard-avoids must also match, not just
       // primary/secondary — a silent mismatch on those would be a real quality regression that
       // primary-only agreement could miss.
+      // Merged before localPrompt is built (not run alongside the speculative call below) — the
+      // speculative call's prompt has to already reflect the full exclusion list, since it can be
+      // served directly on agreement. By this point the fetch has already had the geo-scope/
+      // plot-decline checks' time to progress in the background, so this await is usually cheap.
+      input = mergeServerProfileTitles(input, await serverProfileTitlesPromise);
       const localContract = localIntentContract(input);
       const localRequestCount = candidateRequestCount(count, localContract);
       const localPrompt = buildRecommendationPrompt(input, { intentContract: localContract, count: localRequestCount });
@@ -1170,6 +1201,9 @@ export async function POST(req: Request) {
       // Fresh structured Choose requests can safely run intent classification and recommendation
       // generation in parallel. Their controls already provide an explicit local contract; the
       // resolved LLM contract remains the trust authority before anything is served.
+      // Merged before localPrompt is built, not run alongside the speculative call — see the
+      // matching comment in the self-mode parallel branch above for why.
+      input = mergeServerProfileTitles(input, await serverProfileTitlesPromise);
       const localContract = localIntentContract(input);
       const localRequestCount = candidateRequestCount(count, localContract);
       const localPrompt = buildRecommendationPrompt(input, { intentContract: localContract, count: localRequestCount });
