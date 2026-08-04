@@ -437,10 +437,18 @@ export default function RecommendationPage() {
       cache: "no-store",
       body: JSON.stringify(firstPickRequest),
     });
-    if (response.status === 429) {
-      throw new Error("You've reached today's free limit. Please try again tomorrow.");
+    if (!response.ok) {
+      // Surface the server's actual error message (rate limit, geo-scope preview block, etc.)
+      // instead of a generic string — see page.tsx's initial-fetch handler for the same fix.
+      let message = "Could not find another pick. Please try a new mood.";
+      try {
+        const errorBody = await response.json() as { error?: string };
+        if (errorBody?.error) message = errorBody.error;
+      } catch {
+        // response wasn't JSON — keep the generic message
+      }
+      throw new Error(message);
     }
-    if (!response.ok) throw new Error("failed");
     const data = await response.json() as Recommendation & {
       _batch?: Recommendation[];
       _trust?: { displayState?: RecommendationDisplayState; batchComplete?: boolean; intentContract?: IntentContract };
@@ -521,9 +529,9 @@ export default function RecommendationPage() {
         });
       }
     } catch (error) {
-      setFetchError(error instanceof Error && error.message.startsWith("You've reached today's free limit")
-        ? error.message
-        : "Could not find another pick. Please try a new mood.");
+      // The fetch above always throws either the server's real error message or an already-tailored
+      // fallback, so just surface it directly rather than special-casing one prefix.
+      setFetchError(error instanceof Error ? error.message : "Could not find another pick. Please try a new mood.");
     } finally {
       setRerolling(false);
     }
@@ -618,9 +626,8 @@ export default function RecommendationPage() {
         feedbackContext: loadRecommendationFeedbackContext(),
       });
     } catch (error) {
-      setFetchError(error instanceof Error && error.message.startsWith("You've reached today's free limit")
-        ? error.message
-        : "Could not search beyond your subscriptions. Try again.");
+      // See handleReroll's catch above — the fetch always throws a real, already-useful message.
+      setFetchError(error instanceof Error ? error.message : "Could not search beyond your subscriptions. Try again.");
     } finally {
       setRerolling(false);
     }

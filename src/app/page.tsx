@@ -522,10 +522,19 @@ export default function Home() {
         body: JSON.stringify(requestInput),
         signal: controller.signal,
       });
-      if (response.status === 429) {
-        throw new Error("You've reached today's free limit. Please try again tomorrow.");
+      if (!response.ok) {
+        // Surface the server's actual error message (rate limit, geo-scope preview block, etc.)
+        // instead of a generic string — a real, expected block (like the UK/Ireland preview
+        // guard) looked identical to a crash without this.
+        let message = "Could not generate a pick.";
+        try {
+          const errorBody = await response.json() as { error?: string };
+          if (errorBody?.error) message = errorBody.error;
+        } catch {
+          // response wasn't JSON — keep the generic message
+        }
+        throw new Error(message);
       }
-      if (!response.ok) throw new Error("Could not generate a pick.");
       const data = await response.json() as Recommendation & {
         _batch?: Recommendation[];
         _trust?: { displayState?: RecommendationDisplayState; batchComplete?: boolean; intentContract?: IntentContract };
