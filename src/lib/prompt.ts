@@ -243,8 +243,17 @@ function buildSensitivityClause(contract?: IntentContract, userContext?: string)
     ? contract!.situation.filter((s) => SENSITIVE_SITUATION_KEYS.some((key) => s.toLowerCase().includes(key))).join(", ")
     : "detected from request";
 
+  // Grief-relief gets its own wording, split from breakup-recovery: telling the model to avoid
+  // bereavement entirely was pushing grief requests toward zero-acknowledgment comedy (e.g. Ted
+  // Lasso) instead of content that actually holds the loss gently — the opposite of what "without
+  // pretending loss isn't real" asks for. Breakup-recovery's wording is unchanged (tested, working).
+  const griefReliefRequested = contract?.situation.some((signal) => signal.includes("grief-relief"));
+  if (griefReliefRequested) {
+    return `\n- ⚠️ GRIEF, WANTS RELIEF NOT CATHARSIS (${stateLabel}): The loss is real and can be gently acknowledged — do not default to pure distraction or blanket positivity with zero connection to loss, memory, or absence, that reads as pretending it isn't there. But do not dwell in devastation either: look for warmth, acceptance, gentle humor, or connection alongside the loss (moving forward, remembering with love, finding lightness again), not a heavy grief-spiral, harrowing, or emotionally punishing arc. The viewer should finish steadier than they started, having felt gently held, not distracted from what's real.`;
+  }
+
   const reliefRequested = contract?.secondary.some((signal) => signal === "emotional-relief" || signal === "gentle-comfort") ||
-    contract?.situation.some((signal) => signal.includes("grief-relief") || signal.includes("breakup-recovery"));
+    contract?.situation.some((signal) => signal.includes("breakup-recovery"));
   if (reliefRequested) {
     return `\n- ⚠️ EMOTIONAL RELIEF REQUESTED (${stateLabel}): The viewer wants containment and a change of emotional weather, not catharsis. Choose something warm, easy to enter, reassuring, and gently absorbing. Do NOT center bereavement, heartbreak, romantic longing, terminal illness, or an emotionally punishing recovery arc. Do not confuse "thoughtful" or "bittersweet" with comfort. The viewer should finish steadier than they started.`;
   }

@@ -690,21 +690,37 @@ function acceptedBatchScore(rec: RawRecommendation, intentContract?: IntentContr
   if (intentContract) {
     const isReliefState = intentContract.situation.some((value) => value.includes("breakup-recovery") || value.includes("grief-relief") || value.includes("panic"));
     if (intentContract.primary === "comfort" || isReliefState) {
+      const situation = intentContract.situation;
+      const isGriefSituation = situation.some((value) => value.includes("grief"));
       if (["comedy", "funny", "laughter", "light", "warm", "warmth", "gentle", "reassurance", "reassuring", "easy", "feel-good"].some((label) => labels.has(label))) score += 8;
-      if (["heartbreak", "heartbreaking", "grief", "loss", "bleak", "harrowing", "melancholy", "devastating", "existential", "self-destructive", "self-destruction", "depression", "depressive", "addiction", "dark-comedy", "bittersweet", "nihilistic", "despair", "self-loathing", "midlife-crisis"].some((label) => labels.has(label))) score -= 10;
+      // "grief"/"loss" themselves are neutral theme words, not inherently heavy — a gentle, warm
+      // film can legitimately carry them (A Man Called Ove, Coco, Departures). Penalizing them the
+      // same as genuinely heavy terms was pushing grief-relief requests toward zero-acknowledgment
+      // comedy instead of content that actually holds the loss gently. Kept for breakup/panic/
+      // generic comfort, where avoiding them is still correct.
+      const heavyTerms = isGriefSituation
+        ? ["bleak", "harrowing", "devastating", "existential", "self-destructive", "self-destruction", "depression", "depressive", "addiction", "dark-comedy", "nihilistic", "despair", "self-loathing", "midlife-crisis"]
+        : ["heartbreak", "heartbreaking", "grief", "loss", "bleak", "harrowing", "melancholy", "devastating", "existential", "self-destructive", "self-destruction", "depression", "depressive", "addiction", "dark-comedy", "bittersweet", "nihilistic", "despair", "self-loathing", "midlife-crisis"];
+      if (heavyTerms.some((label) => labels.has(label))) score -= 10;
       if (labels.has("drama") && !labels.has("comedy")) score -= 6;
 
       // Lane-specific differentiation: breakup/grief/family were all scored identically to
       // generic comfort above, which let the same handful of generically-warm titles win
       // regardless of which specific situation was actually in play. These add situation-
       // appropriate signal on top, not a replacement for the generic comfort bar.
-      const situation = intentContract.situation;
       if (situation.some((value) => value.includes("breakup"))) {
         if (["friendship", "self-discovery", "ensemble", "found-family", "independence", "empowerment"].some((label) => labels.has(label))) score += 5;
         if (["romance", "romantic", "love-story", "chemistry"].some((label) => labels.has(label))) score -= 12;
       }
-      if (situation.some((value) => value.includes("grief"))) {
-        if (["healing", "restorative", "hope", "hopeful", "acceptance", "connection"].some((label) => labels.has(label))) score += 5;
+      if (isGriefSituation) {
+        // Includes nostalgic/reflective/bittersweet — real grief-acknowledging films are often
+        // labeled this way by the model instead of literally saying "grief"/"loss".
+        const lossAcknowledged = ["grief", "loss", "memory", "absence", "bereavement", "mourning", "nostalgic", "nostalgia", "reflective", "bittersweet"].some((label) => labels.has(label));
+        const restorative = ["healing", "restorative", "hope", "hopeful", "acceptance", "connection", "warmth", "gentle"].some((label) => labels.has(label));
+        if (restorative) score += 5;
+        // Reward acknowledging the loss AND staying warm together more than either alone — this is
+        // the actual ideal for a grief-relief request, not pure avoidance of the theme.
+        if (lossAcknowledged && restorative) score += 6;
       }
       if (situation.includes("family")) {
         if (["family", "wholesome", "all-ages", "ensemble"].some((label) => labels.has(label))) score += 5;
