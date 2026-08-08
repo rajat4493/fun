@@ -1,6 +1,7 @@
 export const PREVIEW_COUNTRY_CODES = [
   "GB",
   "IE",
+  "IN",
 ] as const;
 
 export function isPreviewCountry(code: string): boolean {

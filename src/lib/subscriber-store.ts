@@ -30,6 +30,27 @@ function normalizeEmail(email: string): string | null {
   return clean;
 }
 
+// Middle ground between "no verification at all" and a real magic-link flow (which needs an email
+// provider this project doesn't have configured yet): reject placeholder and disposable domains
+// specifically, since those are what someone types when they aren't going to check the inbox
+// anyway. Doesn't prove the address is real — no confirmation loop exists yet — but does stop the
+// zero-effort case (example@example.com) named directly as the concern this was built for.
+const BLOCKED_EMAIL_DOMAINS = new Set([
+  "example.com", "example.org", "example.net", "example.edu",
+  "test.com", "test.org", "test.net", "testing.com",
+  "domain.com", "email.com", "yourdomain.com", "sample.com",
+  "mailinator.com", "guerrillamail.com", "guerrillamail.info", "tempmail.com", "temp-mail.org",
+  "10minutemail.com", "10minutemail.net", "yopmail.com", "throwawaymail.com", "fakeinbox.com",
+  "trashmail.com", "getnada.com", "dispostable.com", "sharklasers.com", "maildrop.cc",
+]);
+
+export function isPlaceholderEmailDomain(email: string): boolean {
+  const clean = normalizeEmail(email);
+  if (!clean) return false;
+  const domain = clean.split("@")[1] ?? "";
+  return BLOCKED_EMAIL_DOMAINS.has(domain);
+}
+
 function subscriberKey(email: string): string | null {
   const clean = normalizeEmail(email);
   return clean ? `fun:subscriber:${clean}` : null;

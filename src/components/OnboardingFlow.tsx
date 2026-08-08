@@ -79,19 +79,25 @@ export const PLATFORM_OPTIONS: Record<string, string[]> = {
 };
 
 export const LANGUAGE_OPTIONS: Record<string, string[]> = {
-  IN: ["Hindi", "Malayalam", "Tamil", "Telugu", "Bengali", "Marathi", "Kannada", "English"],
+  // Scoped to Hindi + English only, not the full regional list (Malayalam/Tamil/Telugu/Bengali/
+  // Marathi/Kannada) — only Hindi has real backend enforcement (language-lane.ts's
+  // LANGUAGE_METADATA + a curated fallback bucket). Offering a language with no actual gate behind
+  // it would be a quality regression, same class of gap already found and fixed for Spanish this
+  // session ("don't add a language without both a regression case and a curated fallback").
+  IN: ["Hindi", "English"],
   PL: ["Polish", "English", "European cinema"],
   default: ["Local language", "English", "No preference"],
 };
 
-// Preview is scoped to UK + Ireland (launch-scope.ts) — only detect those two, and default to the
-// larger market. The previous version detected/defaulted to Poland, a leftover from before that
-// scoping decision that no longer appears anywhere in the picker itself.
+// Preview is scoped to UK + Ireland + India (launch-scope.ts) — only detect those three, and
+// default to the largest market. The previous version detected/defaulted to Poland, a leftover
+// from before that scoping decision that no longer appears anywhere in the picker itself.
 function detectCountry(): { name: string; code: string } {
   try {
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     if (timeZone.includes("Dublin")) return { name: "Ireland", code: "IE" };
     if (timeZone.includes("London")) return { name: "United Kingdom", code: "GB" };
+    if (timeZone.includes("Kolkata") || timeZone.includes("Calcutta")) return { name: "India", code: "IN" };
   } catch {
     // ignore
   }

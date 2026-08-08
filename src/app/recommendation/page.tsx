@@ -274,6 +274,7 @@ export default function RecommendationPage() {
   const [unlockEmail, setUnlockEmail] = useState("");
   const [unlockSubmitting, setUnlockSubmitting] = useState(false);
   const [unlockDone, setUnlockDone] = useState(false);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
   const [rerolling, setRerolling] = useState(false);
   const [feedbackReason, setFeedbackReason] = useState<FeedbackReason | null>(null);
   const [loadingStage, setLoadingStage] = useState(DEFAULT_LOADING_STAGE);
@@ -560,13 +561,21 @@ export default function RecommendationPage() {
   async function handleUnlockSubmit() {
     if (!unlockEmail.trim()) return;
     setUnlockSubmitting(true);
+    setUnlockError(null);
     try {
       const res = await fetch("/api/unlock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: unlockEmail.trim() }),
       });
-      if (res.ok) setUnlockDone(true);
+      if (res.ok) {
+        setUnlockDone(true);
+      } else {
+        const body = await res.json().catch(() => null) as { error?: string } | null;
+        setUnlockError(body?.error ?? "Could not unlock right now. Please try again.");
+      }
+    } catch {
+      setUnlockError("Could not unlock right now. Please try again.");
     } finally {
       setUnlockSubmitting(false);
     }
@@ -852,6 +861,9 @@ export default function RecommendationPage() {
                   >
                     {unlockSubmitting ? "Unlocking..." : "Unlock more today"}
                   </button>
+                  {unlockError && (
+                    <p className="text-sm text-red-300">{unlockError}</p>
+                  )}
                 </div>
               )}
             </div>
