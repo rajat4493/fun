@@ -1077,7 +1077,8 @@ export default function RecommendationPage() {
                         key={option.reason}
                         type="button"
                         onClick={() => handleFeedback(option.reason)}
-                        className={`inline-flex h-11 items-center gap-2 rounded-xl border px-4 text-sm transition ${
+                        disabled={rerolling}
+                        className={`inline-flex h-11 items-center gap-2 rounded-xl border px-4 text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${
                           active ? "border-amber-300/50 bg-amber-400/14 text-amber-100" : "border-white/12 bg-white/[0.045] text-white/68 hover:border-white/24 hover:text-white"
                         }`}
                       >
@@ -1086,7 +1087,18 @@ export default function RecommendationPage() {
                     );
                   })}
                 </div>
-                <p className="mt-4 text-sm text-white/38">{feedbackReason ? "Saved. This improves your next pick." : "No account needed. Actual watch feedback can be added later in Memory."}</p>
+                <p className="mt-4 flex items-center gap-2 text-sm text-white/38">
+                  {rerolling ? (
+                    <>
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300" />
+                      Finding your next pick…
+                    </>
+                  ) : feedbackReason ? (
+                    "Saved. This improves your next pick."
+                  ) : (
+                    "No account needed. Actual watch feedback can be added later in Memory."
+                  )}
+                </p>
               </article>
 
               <article className="rounded-xl border border-amber-300/18 bg-amber-400/[0.055] p-5">
