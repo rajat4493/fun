@@ -371,6 +371,12 @@ export default function RecommendationPage() {
           recommendationCount: 2,
           responseDetail: "core",
           precomputedIntentContract: current.intentContract,
+          // Explicit, not just omitted — current.request is the original ask's request object
+          // (stream: true), and this handler's plain response.json() below can't parse an NDJSON
+          // stream. Same bug/fix as replaceWithBatch above; this flow was deliberately kept
+          // non-streaming (see Tier 2's scope). Was previously silently swallowed by the catch
+          // below (batch just never filled) rather than visibly crashing like the reroll path did.
+          stream: false,
           recentTitles: [current.recommendation.title, ...(current.request.recentTitles ?? [])].slice(0, 8),
           excludedTitles: [
             current.recommendation.title,
@@ -432,11 +438,17 @@ export default function RecommendationPage() {
     // renders fast, then let the same background-fill effect (below) top the batch up to 3 while
     // the user is already looking at something. Explicitly set to 1 (not just spread from the
     // caller) since a stale recommendationCount: 2 could otherwise leak in from a fill request.
+    // stream: false is explicit, not just omitted — `request` is often the original ask's request
+    // object (which has stream: true, see page.tsx), and spreading it forward without overriding
+    // would make the server respond with an NDJSON stream that this function's plain
+    // `response.json()` below can't parse, crashing with a raw JSON.parse error. This flow was
+    // deliberately kept on the non-streaming path (see Tier 2's scope), so state that explicitly.
     const firstPickRequest: RecommendationSession["request"] = {
       ...request,
       recommendationCount: 1,
       responseDetail: "core",
       precomputedIntentContract: undefined,
+      stream: false,
       runId,
     };
     const response = await fetch("/api/recommend", {
