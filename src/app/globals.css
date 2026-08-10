@@ -36,3 +36,27 @@ button, input, textarea, select { font: inherit; }
 }
 
 .floaty { animation: float 6s ease-in-out infinite; }
+
+@keyframes lightSweep {
+  0% { transform: translateX(-120%) skewX(-12deg); opacity: 0; }
+  35% { opacity: 0.5; }
+  100% { transform: translateX(120%) skewX(-12deg); opacity: 0; }
+}
+
+.light-sweep {
+  background: linear-gradient(100deg, transparent 32%, rgba(248, 113, 113, 0.16) 48%, transparent 66%);
+}
+
+@keyframes bloomPulse {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.04); }
+}
+
+.bloom-pulse { animation: bloomPulse 14s ease-in-out infinite; }
+
+@keyframes grainDrift {
+  0% { background-position: 0 0; }
+  100% { background-position: 180px 180px; }
+}
+
+.grain-drift { animation: grainDrift 12s steps(6) infinite; }
