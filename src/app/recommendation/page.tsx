@@ -44,6 +44,7 @@ import {
 } from "@/lib/recommendation-session";
 import { captureRecommendationRun } from "@/lib/recommendation-analytics";
 import { applyAffiliateTag } from "@/lib/affiliate-links";
+import { loadOnboarding } from "@/components/OnboardingFlow";
 import { IntentContract, Recommendation, RecommendationDisplayState, WatchProvider } from "@/lib/types";
 
 const LOADING_KEY = "fun:loading";
@@ -61,6 +62,26 @@ const LOADING_STAGE_COPY: Record<string, string> = {
   verifying: "Verifying watch options",
 };
 const DEFAULT_LOADING_STAGE = "understanding";
+const LOADING_STAGE_ORDER = ["understanding", "checking-fit", "verifying"] as const;
+
+// Purely decorative "Searching <title> for <mood>" carousel — rotates independently of real stage
+// progress below, and is styled distinctly from it (via the "Searching" prefix) so it's never
+// mistaken for actual pipeline state. Brings back the pre-c16cf65 search-titles feel the fake
+// SEARCH_TITLES carousel had, at the same fast cadence, without claiming it's real progress.
+const LOADING_FLAVOR_LINES = [
+  "Parasite for the perfect trap",
+  "The Bear for pressure",
+  "Fleabag for bite",
+  "Past Lives for impossible timing",
+  "The Godfather for family pressure",
+  "Moonlight for quiet ache",
+  "Before Sunrise for one-night magic",
+  "The Handmaiden for elegant danger",
+  "Super Deluxe for beautiful chaos",
+  "A Separation for moral tension",
+];
+const LOADING_FLAVOR_INTERVAL_MS = 1500;
+const LOADING_REASSURANCE_AFTER_MS = 13000;
 
 const FEEDBACK_OPTIONS: Array<{ reason: FeedbackReason; label: string; icon: LucideIcon; tone: string }> = [
   { reason: "wrong-vibe", label: "Wrong vibe", icon: Star, tone: "red" },
@@ -278,6 +299,8 @@ export default function RecommendationPage() {
   const [rerolling, setRerolling] = useState(false);
   const [feedbackReason, setFeedbackReason] = useState<FeedbackReason | null>(null);
   const [loadingStage, setLoadingStage] = useState(DEFAULT_LOADING_STAGE);
+  const [loadingFlavorIndex, setLoadingFlavorIndex] = useState(0);
+  const [loadingShowReassurance, setLoadingShowReassurance] = useState(false);
   const [shareState, setShareState] = useState<"idle" | "copied">("idle");
   const [watchOptionsOpen, setWatchOptionsOpen] = useState(false);
   const [showMorePicks, setShowMorePicks] = useState(false);
@@ -351,6 +374,30 @@ export default function RecommendationPage() {
     }
     setReady(true);
   }, []);
+
+  // Decorative only — independent of the real stage-polling effect above. Rotates flavor text on a
+  // fixed cadence and flips on a calm reassurance line once elapsed time passes the median real
+  // wait, so the loading screen never sits static and stale-looking for the slower end of requests.
+  useEffect(() => {
+    if (!fetchLoading) {
+      setLoadingFlavorIndex(0);
+      setLoadingShowReassurance(false);
+      return;
+    }
+    const startedAt = Number(localStorage.getItem(LOADING_STARTED_KEY) ?? Date.now());
+    const flavorInterval = setInterval(() => {
+      setLoadingFlavorIndex((i) => (i + 1) % LOADING_FLAVOR_LINES.length);
+    }, LOADING_FLAVOR_INTERVAL_MS);
+    const reassuranceInterval = setInterval(() => {
+      if (Date.now() - startedAt > LOADING_REASSURANCE_AFTER_MS) {
+        setLoadingShowReassurance(true);
+      }
+    }, 1000);
+    return () => {
+      clearInterval(flavorInterval);
+      clearInterval(reassuranceInterval);
+    };
+  }, [fetchLoading]);
 
   // Two-phase fetch: pick 1 already rendered — either from page.tsx's initial recommendationCount: 1
   // request, or from replaceWithBatch below (reroll / "Already seen" exhaustion / search beyond
@@ -810,18 +857,62 @@ export default function RecommendationPage() {
   const whyItFitsLabel = "Why it fits";
 
   if (fetchLoading) {
+    const currentStageIndex = Math.max(0, LOADING_STAGE_ORDER.indexOf(loadingStage as (typeof LOADING_STAGE_ORDER)[number]));
+    const platforms = loadOnboarding()?.platforms ?? [];
     return (
       <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-[#030303] text-white">
         <div className="absolute inset-0 bg-cover bg-center opacity-18" style={{ backgroundImage: "url('/fun/hero-cinematic.png')" }} />
         <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-[#030303]" />
-        <div className="relative z-10 text-center">
+        <div className="relative z-10 w-full max-w-sm px-6 text-center">
           <div className="mb-10">{logo()}</div>
           <div className="flex items-center justify-center gap-3 text-lg text-white/80">
             <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-400 shadow-[0_0_16px_rgba(248,113,113,0.85)]" />
             Finding your perfect pick...
           </div>
-          <p className="mt-3 h-5 text-sm text-white/36">
-            <span className="text-white/60">{LOADING_STAGE_COPY[loadingStage] ?? LOADING_STAGE_COPY[DEFAULT_LOADING_STAGE]}</span>...
+
+          <div className="mt-7 flex items-center justify-center">
+            {LOADING_STAGE_ORDER.map((stage, index) => (
+              <div key={stage} className="flex flex-1 items-center last:flex-none">
+                <div className="flex flex-col items-center gap-2">
+                  <span
+                    className={
+                      index <= currentStageIndex
+                        ? "h-2 w-2 rounded-full bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.75)]" +
+                          (index === currentStageIndex ? " animate-pulse" : "")
+                        : "h-2 w-2 rounded-full border border-white/25 bg-transparent"
+                    }
+                  />
+                  <span className={"text-[10px] uppercase tracking-wide " + (index <= currentStageIndex ? "text-white/60" : "text-white/25")}>
+                    {LOADING_STAGE_COPY[stage]}
+                  </span>
+                </div>
+                {index < LOADING_STAGE_ORDER.length - 1 && (
+                  <span className={"mx-2 mb-4 h-px flex-1 " + (index < currentStageIndex ? "bg-red-400/40" : "bg-white/10")} />
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-6 flex items-center justify-center gap-1.5">
+            {Array.from({ length: 9 }).map((_, i) => (
+              <span
+                key={i}
+                className="h-3 w-1 rounded-full bg-white/15 animate-pulse"
+                style={{ animationDelay: `${i * 0.12}s`, animationDuration: "1.4s" }}
+              />
+            ))}
+          </div>
+
+          {loadingStage === "verifying" && platforms.length > 0 && (
+            <p className="mt-5 text-xs text-white/40">Checking {platforms.join(", ")} for your picks...</p>
+          )}
+
+          <p className="mt-5 h-5 text-sm text-white/36">
+            {loadingShowReassurance ? (
+              "Great picks are worth the extra moment."
+            ) : (
+              <>Searching <span className="text-white/60">{LOADING_FLAVOR_LINES[loadingFlavorIndex]}</span>...</>
+            )}
           </p>
         </div>
       </main>
