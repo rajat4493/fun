@@ -203,7 +203,7 @@ export default function MemoryPage() {
         <section className="py-12">
           <h1 className="font-serif text-[clamp(3.8rem,7vw,7rem)] leading-[0.94]">What F.U.N remembers</h1>
           <p className="mt-5 max-w-3xl text-xl leading-8 text-white/62">
-            F.U.N remembers choices on this device and keeps an anonymous private-preview record so recommendations can improve. No account is required.
+            F.U.N remembers choices on this device and keeps an anonymous record so recommendations can improve. No account is required.
           </p>
         </section>
 
@@ -306,7 +306,7 @@ export default function MemoryPage() {
             <h2 className="flex items-center gap-3 text-2xl text-amber-100"><Lock size={23} /> Control</h2>
             <div className="mt-5 space-y-3 text-white/62">
               <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> No streaming passwords are needed.</p>
-              <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> Private-preview analytics stores recommendation activity under an anonymous device ID. Prompt text is stored only when collection is explicitly enabled.</p>
+              <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> Analytics stores recommendation activity under an anonymous device ID. Prompt text is stored only when collection is explicitly enabled.</p>
               <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> Clear all removes device memory and its anonymous profile memory.</p>
               <p className="flex gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-amber-200" /> Posters, ratings, and where-to-watch data are provided by <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer" className="underline hover:text-amber-100">TMDB</a>. F.U.N uses the TMDB API but is not endorsed or certified by TMDB.</p>
             </div>

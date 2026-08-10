@@ -19,7 +19,7 @@ const sections = [
   },
   {
     title: "Feedback",
-    body: "Feedback controls are stored locally in the browser for the MVP. They help evaluate whether F.U.N is fulfilling its one-pick promise without requiring user accounts.",
+    body: "Feedback controls are stored locally in the browser. They help evaluate whether F.U.N is fulfilling its one-pick promise without requiring user accounts.",
   },
 ];
 

@@ -1071,16 +1071,17 @@ export async function POST(req: Request) {
     let input = normalizeRecommendRequest(rawInput as RecommendRequest);
     const country = input.country || "Poland";
 
-    // Public preview is scoped to launch-scope.ts's PREVIEW_COUNTRY_CODES. The onboarding picker
-    // already only offers preview countries, but this is server-authoritative defense-in-depth
-    // against a direct API call bypassing the UI. Production-only, same as the rate limiter: local
-    // dev and the QA gate/regression suites deliberately exercise many countries to validate
-    // language-lane and subscription logic unrelated to public-preview access control.
+    // Launch is scoped to launch-scope.ts's PREVIEW_COUNTRY_CODES — the only countries with
+    // verified language/platform support. The onboarding picker already only offers these
+    // countries, but this is server-authoritative defense-in-depth against a direct API call
+    // bypassing the UI. Production-only, same as the rate limiter: local dev and the QA gate/
+    // regression suites deliberately exercise many countries to validate language-lane and
+    // subscription logic unrelated to this access control.
     if (process.env.NODE_ENV === "production") {
       const countryCode = countryCodeMap[country.trim().toLowerCase()];
       if (!countryCode || !isPreviewCountry(countryCode)) {
         return NextResponse.json(
-          { error: "F.U.N is in a limited preview for the UK and Ireland right now — more regions coming soon." },
+          { error: "F.U.N is currently available in the UK, Ireland, and India — more regions coming soon." },
           { status: 403 },
         );
       }

@@ -35,9 +35,9 @@ export const COUNTRIES = [
   { name: "Ireland", code: "IE" },
 ];
 
-// Public preview is scoped to launch-scope.ts's PREVIEW_COUNTRY_CODES (currently UK + Ireland).
-// The full COUNTRIES list stays in code so widening the preview later is a one-line change there,
-// not a rebuild of this picker.
+// Launch is scoped to launch-scope.ts's PREVIEW_COUNTRY_CODES (currently UK, Ireland, India — the
+// only countries with verified language/platform support). The full COUNTRIES list stays in code
+// so widening this later is a one-line change there, not a rebuild of this picker.
 export const PREVIEW_COUNTRIES = COUNTRIES.filter((c) => isPreviewCountry(c.code));
 
 export const PLATFORM_OPTIONS: Record<string, string[]> = {
