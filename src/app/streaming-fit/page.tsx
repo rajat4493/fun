@@ -55,6 +55,14 @@ function Logo() {
   );
 }
 
+function PreviewBadge() {
+  return (
+    <span className="rounded-full border border-amber-300/25 bg-amber-400/[0.06] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-amber-200/80">
+      Early Preview
+    </span>
+  );
+}
+
 function normalize(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -283,7 +291,10 @@ export default function StreamingFitPage() {
       <div className="fixed inset-0 bg-[radial-gradient(circle_at_18%_72%,rgba(185,28,28,0.16),transparent_28%),radial-gradient(circle_at_82%_20%,rgba(251,191,36,0.1),transparent_26%),#030303]" />
       <section className="relative mx-auto max-w-[1720px] px-5 py-5 sm:px-8 lg:px-12">
         <header className="flex h-14 items-center justify-between border-b border-white/[0.08] pb-4">
-          <Link href="/" aria-label="Home"><Logo /></Link>
+          <div className="flex items-center gap-3">
+            <Link href="/" aria-label="Home"><Logo /></Link>
+            <PreviewBadge />
+          </div>
           <nav className="hidden items-center gap-10 text-sm text-white/64 lg:flex">
             <Link href="/">Home</Link>
             <Link href="/memory" className="hover:text-white">Memory</Link>

@@ -58,6 +58,14 @@ function Logo() {
   );
 }
 
+function PreviewBadge() {
+  return (
+    <span className="rounded-full border border-amber-300/25 bg-amber-400/[0.06] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-amber-200/80">
+      Early Preview
+    </span>
+  );
+}
+
 function readArray(key: string): string[] {
   try {
     const raw = localStorage.getItem(key);
@@ -193,11 +201,12 @@ export default function MemoryPage() {
     <main className="min-h-screen bg-[#030303] text-white">
       <div className="fixed inset-0 bg-[radial-gradient(circle_at_18%_70%,rgba(185,28,28,0.16),transparent_30%),radial-gradient(circle_at_82%_18%,rgba(251,191,36,0.09),transparent_28%),#030303]" />
       <section className="relative mx-auto max-w-[1320px] px-5 py-5 sm:px-8 lg:px-12">
-        <header className="flex h-14 items-center border-b border-white/[0.08] pb-4">
+        <header className="flex h-14 items-center gap-5 border-b border-white/[0.08] pb-4">
           <Link href="/" className="inline-flex items-center gap-5">
             <ArrowLeft size={22} className="text-white/70" />
             <Logo />
           </Link>
+          <PreviewBadge />
         </header>
 
         <section className="py-12">

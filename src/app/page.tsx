@@ -143,6 +143,14 @@ function Logo() {
   );
 }
 
+function PreviewBadge() {
+  return (
+    <span className="rounded-full border border-amber-300/25 bg-amber-400/[0.06] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-amber-200/80">
+      Early Preview
+    </span>
+  );
+}
+
 function RegionLanguageButton({ onboarding, onClick }: { onboarding: OnboardingData; onClick: () => void }) {
   const language = onboarding.languagePreferences?.length ? onboarding.languagePreferences.slice(0, 2).join(", ") : "Any language";
   return (
@@ -645,7 +653,10 @@ export default function Home() {
       <div className="fixed inset-0 bg-[radial-gradient(circle_at_78%_20%,rgba(65,92,111,0.22),transparent_30%),radial-gradient(circle_at_18%_62%,rgba(185,28,28,0.16),transparent_32%),#030303]" />
       <section className="relative mx-auto w-full max-w-[1540px] px-5 py-5 sm:px-8 lg:px-10 xl:px-12">
         <header className="relative flex h-12 items-center justify-between">
-          <Logo />
+          <div className="flex items-center gap-3">
+            <Logo />
+            <PreviewBadge />
+          </div>
           <nav className="hidden items-center gap-10 text-sm text-white/68 lg:flex">
             <a href="#how" className="hover:text-white">How it works</a>
             <Link href="/memory" className="hover:text-white">Memory</Link>

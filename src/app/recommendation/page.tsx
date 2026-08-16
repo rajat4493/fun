@@ -109,6 +109,14 @@ function logo() {
   );
 }
 
+function previewBadge() {
+  return (
+    <span className="rounded-full border border-amber-300/25 bg-amber-400/[0.06] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-amber-200/80">
+      Early Preview
+    </span>
+  );
+}
+
 function justWatchUrl(title: string, country?: string) {
   const locale = justWatchLocale[country ?? ""] ?? "us";
   return `https://www.justwatch.com/${locale}/search?q=${encodeURIComponent(title)}`;
@@ -677,14 +685,34 @@ export default function RecommendationPage() {
   const noSubscriptionMatch = displayState === "no-subscription-match";
   const avoidanceFallback = displayState === "avoidance-fallback";
   const exhaustedSubscriptionBatch = subscriptionOnly && !noSubscriptionMatch && batch.length > 0 && batchIndex >= batch.length - 1;
+  // A genuine first-ask "nothing verified" is a data gap; a large exclusion list means F.U.N has
+  // already shown this person its best matches here and is now scraping the bottom of a small
+  // curated/verified pool. Those are different situations and should read differently — the second
+  // one is the exact gap F.U.N exists to point at, not an apology.
+  const exclusionCount = typeof window !== "undefined" ? loadExactRecommendationExclusions().length : 0;
+  const platformList = session?.request.platforms ?? [];
+  const platformLabel = platformList.length === 0
+    ? "your subscriptions"
+    : platformList.length <= 2
+    ? platformList.join(" and ")
+    : `${platformList[0]} and the rest of your subscriptions`;
+  const laneExhausted = subscriptionOnly && exclusionCount >= 15;
   const stateCopy = noSubscriptionMatch
-    ? {
-        eyebrow: "My subscriptions · No verified match",
-        line: "No confident subscription match",
-        detail: "Search all cinema for the best mood match, or refine your selection.",
-        icon: Shield,
-        tone: "text-white/36",
-      }
+    ? laneExhausted
+      ? {
+          eyebrow: `${platformLabel} · Out of matches for this mood`,
+          line: "You've cleared this lane out",
+          detail: `F.U.N has already shown you its best picks on ${platformLabel} for moods like this. That's not a bug — it's the actual gap F.U.N exists for. Search all cinema to go beyond ${platformLabel}, or refine your mood for something new.`,
+          icon: Shield,
+          tone: "text-amber-200",
+        }
+      : {
+          eyebrow: "My subscriptions · No verified match",
+          line: "No confident subscription match",
+          detail: "Search all cinema for the best mood match, or refine your selection.",
+          icon: Shield,
+          tone: "text-white/36",
+        }
     : avoidanceFallback
     ? {
         eyebrow: "Safer close match",
@@ -866,10 +894,13 @@ export default function RecommendationPage() {
 
       <section className="relative mx-auto w-full max-w-[1720px] px-5 pb-8 pt-5 sm:px-8 lg:px-12">
         <header className="flex h-14 items-center justify-between border-b border-white/[0.08] pb-4">
-          <Link href="/" className="inline-flex items-center gap-5 text-white">
-            <ArrowLeft size={23} className="text-white/76" />
-            {logo()}
-          </Link>
+          <div className="flex items-center gap-5">
+            <Link href="/" className="inline-flex items-center gap-5 text-white">
+              <ArrowLeft size={23} className="text-white/76" />
+              {logo()}
+            </Link>
+            {previewBadge()}
+          </div>
           <div className="flex items-center gap-3">
             <span className="hidden h-10 items-center gap-2 rounded-full border border-white/10 bg-white/[0.045] px-4 text-sm text-white/64 sm:inline-flex">
               <Globe2 size={15} /> {region} · {language}
@@ -894,12 +925,22 @@ export default function RecommendationPage() {
               {stateCopy.eyebrow}
             </div>
             <h1 className="font-serif text-4xl font-normal leading-tight text-white/90 sm:text-5xl">
-              No confident match<br />on your subscriptions.
+              {laneExhausted ? (
+                <>You{"'"}ve cleared out<br />{platformLabel}.</>
+              ) : (
+                <>No confident match<br />on your subscriptions.</>
+              )}
             </h1>
             <p className="mt-5 max-w-xl text-lg leading-7 text-white/52">
-              F.U.N checked your subscriptions and couldn{"'"}t verify{" "}
-              <span className="italic text-white/72">{pick.title}</span>{" "}
-              or similar picks. Search all cinema for the best mood match, or refine your selection.
+              {laneExhausted ? (
+                stateCopy.detail
+              ) : (
+                <>
+                  F.U.N checked your subscriptions and couldn{"'"}t verify{" "}
+                  <span className="italic text-white/72">{pick.title}</span>{" "}
+                  or similar picks. Search all cinema for the best mood match, or refine your selection.
+                </>
+              )}
             </p>
             <div className="mt-8 flex flex-wrap gap-4">
               <button

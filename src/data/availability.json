@@ -2,7 +2,12 @@
   {
     "title": "Delhi Crime",
     "year": "2019",
-    "countries": ["PL", "IN", "US", "GB"],
+    "countries": [
+      "PL",
+      "IN",
+      "US",
+      "GB"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -16,7 +21,12 @@
   {
     "title": "Soni",
     "year": "2018",
-    "countries": ["PL", "IN", "US", "GB"],
+    "countries": [
+      "PL",
+      "IN",
+      "US",
+      "GB"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -30,7 +40,12 @@
   {
     "title": "Sacred Games",
     "year": "2018",
-    "countries": ["PL", "IN", "US", "GB"],
+    "countries": [
+      "PL",
+      "IN",
+      "US",
+      "GB"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -44,7 +59,12 @@
   {
     "title": "Kohrra",
     "year": "2023",
-    "countries": ["PL", "IN", "US", "GB"],
+    "countries": [
+      "PL",
+      "IN",
+      "US",
+      "GB"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -58,7 +78,12 @@
   {
     "title": "Qala",
     "year": "2022",
-    "countries": ["PL", "IN", "US", "GB"],
+    "countries": [
+      "PL",
+      "IN",
+      "US",
+      "GB"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -72,7 +97,12 @@
   {
     "title": "Monica, O My Darling",
     "year": "2022",
-    "countries": ["PL", "IN", "US", "GB"],
+    "countries": [
+      "PL",
+      "IN",
+      "US",
+      "GB"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -86,7 +116,12 @@
   {
     "title": "Trial by Fire",
     "year": "2023",
-    "countries": ["PL", "IN", "US", "GB"],
+    "countries": [
+      "PL",
+      "IN",
+      "US",
+      "GB"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -100,7 +135,12 @@
   {
     "title": "Ginny & Georgia",
     "year": "2021",
-    "countries": ["PL", "IN", "US", "GB"],
+    "countries": [
+      "PL",
+      "IN",
+      "US",
+      "GB"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -114,7 +154,12 @@
   {
     "title": "Orange Is the New Black",
     "year": "2013",
-    "countries": ["PL", "IN", "US", "GB"],
+    "countries": [
+      "PL",
+      "IN",
+      "US",
+      "GB"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -128,7 +173,12 @@
   {
     "title": "Good Girls",
     "year": "2018",
-    "countries": ["PL", "IN", "US", "GB"],
+    "countries": [
+      "PL",
+      "IN",
+      "US",
+      "GB"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -142,7 +192,12 @@
   {
     "title": "Maid",
     "year": "2021",
-    "countries": ["PL", "IN", "US", "GB"],
+    "countries": [
+      "PL",
+      "IN",
+      "US",
+      "GB"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -156,7 +211,9 @@
   {
     "title": "Evil Dead Rise",
     "year": "2023",
-    "countries": ["PL"],
+    "countries": [
+      "PL"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -171,7 +228,9 @@
   {
     "title": "Apostle",
     "year": "2018",
-    "countries": ["PL"],
+    "countries": [
+      "PL"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -186,7 +245,9 @@
   {
     "title": "Fear Street Part 2: 1978",
     "year": "2021",
-    "countries": ["PL"],
+    "countries": [
+      "PL"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -201,7 +262,9 @@
   {
     "title": "Nobody Sleeps in the Woods Tonight",
     "year": "2020",
-    "countries": ["PL"],
+    "countries": [
+      "PL"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -216,7 +279,9 @@
   {
     "title": "Demons",
     "year": "1985",
-    "countries": ["PL"],
+    "countries": [
+      "PL"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -231,7 +296,9 @@
   {
     "title": "The Sadness",
     "year": "2021",
-    "countries": ["PL"],
+    "countries": [
+      "PL"
+    ],
     "providers": [
       {
         "name": "CDA Premium",
@@ -246,14 +313,18 @@
   {
     "title": "The End of the F***ing World",
     "year": "2017",
-    "years": ["2019"],
+    "years": [
+      "2019"
+    ],
     "aliases": [
       "The End of the F...ing World",
       "The End of the Fucking World",
       "End of the F***ing World",
       "TEOTFW"
     ],
-    "countries": ["PL"],
+    "countries": [
+      "PL"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -268,7 +339,9 @@
   {
     "title": "Daadi Ki Shaadi",
     "year": "2026",
-    "countries": ["PL"],
+    "countries": [
+      "PL"
+    ],
     "providers": [
       {
         "name": "Netflix",
@@ -279,5 +352,2393 @@
     "source": "Netflix title page",
     "sourceUrl": "https://www.netflix.com/pl-en/title/82741941",
     "verifiedAt": "2026-07-03"
+  },
+  {
+    "title": "College Romance",
+    "year": "2018",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "SonyLIV",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "VI movies and tv",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Hostel Daze",
+    "year": "2019",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Permanent Roommates",
+    "year": "2014",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "VI movies and tv",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Flames",
+    "year": "2018",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Tribhuvan Mishra CA Topper",
+    "year": "2024",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Choona",
+    "year": "2023",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Yeh Kaali Kaali Ankhein",
+    "year": "2022",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Rana Naidu",
+    "year": "2023",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Hera Pheri",
+    "year": "2000",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Andaz Apna Apna",
+    "year": "1994",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "MX Player",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "Amazon MX Player",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Lootcase",
+    "year": "2020",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Fukrey",
+    "year": "2013",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Discovery+",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "Discovery+ Amazon Channel",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Udaan",
+    "year": "2010",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Kapoor & Sons",
+    "year": "2016",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Queen",
+    "year": "2013",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Lionsgate+ Amazon Channels",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Margarita with a Straw",
+    "year": "2014",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "13B",
+    "year": "2009",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Bhoot",
+    "year": "2003",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "Brew",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "ShemarooMe",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "MX Player",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "VI movies and tv",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "Amazon MX Player",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Ek Thi Daayan",
+    "year": "2013",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Hungama Play",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "MX Player",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "Amazon MX Player",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Pizza",
+    "year": "2012",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Sun Nxt",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "Hungama Play",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "VI movies and tv",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Aamir",
+    "year": "2008",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Kaun",
+    "year": "1999",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "SonyLIV",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "VI movies and tv",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Ek Hasina Thi",
+    "year": "2004",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "MX Player",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "Amazon MX Player",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Stree",
+    "year": "2018",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Phir Hera Pheri",
+    "year": "2006",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "ShemarooMe",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "VI movies and tv",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "MX Player",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "Amazon MX Player",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Jaane Bhi Do Yaaron",
+    "year": "1983",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "VI movies and tv",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Kaalakaandi",
+    "year": "2018",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB watch/providers (live, IN region), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "C.I.D.",
+    "year": "1998",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "SonyLIV",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "The Kapil Sharma Show",
+    "year": "2016",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "SonyLIV",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Mahabharat",
+    "year": "2013",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Iss Pyaar Ko Kya Naam Doon?",
+    "year": "2011",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Anupamaa",
+    "year": "2020",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Shaka Laka Boom Boom",
+    "year": "2002",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Jodha & Akbar",
+    "year": "2013",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Zee5",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Mirzapur",
+    "year": "2018",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Khichdi",
+    "year": "2002",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Dilwale Dulhania Le Jayenge",
+    "year": "1995",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Reacher",
+    "year": "2022",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "House of the Dragon",
+    "year": "2022",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "The Mentalist",
+    "year": "2008",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Lioness",
+    "year": "2023",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Law & Order: Special Victims Unit",
+    "year": "1999",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Grey's Anatomy",
+    "year": "2005",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "The Great Indian Kapil Show",
+    "year": "2024",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Cocktail 2",
+    "year": "2026",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Bhooth Bangla",
+    "year": "2026",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Gullak",
+    "year": "2019",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "SonyLIV",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Maamla Legal Hai",
+    "year": "2024",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Panchayat",
+    "year": "2020",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "The Royals",
+    "year": "2025",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "The Ba***ds of Bollywood",
+    "year": "2025",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Wagle Ki Duniya",
+    "year": "2021",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "SonyLIV",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Dangal",
+    "year": "2016",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "The Rookie",
+    "year": "2018",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Family Guy",
+    "year": "1999",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Rick and Morty",
+    "year": "2013",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Shameless",
+    "year": "2011",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Friends",
+    "year": "1994",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "The Office",
+    "year": "2005",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Main Vaapas Aaunga",
+    "year": "2026",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Saiyaara",
+    "year": "2025",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Tu Yaa Main",
+    "year": "2026",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "My Name Is Khan",
+    "year": "2010",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Girls Will Be Girls",
+    "year": "2024",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Chennai Express",
+    "year": "2013",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "The Lunchbox",
+    "year": "2013",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Kuch Kuch Hota Hai",
+    "year": "1998",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Lust Stories 2",
+    "year": "2023",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Mohabbatein",
+    "year": "2000",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Wicked: For Good",
+    "year": "2025",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Zee5",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "After We Fell",
+    "year": "2021",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Voicemails for Isabelle",
+    "year": "2026",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Wicked",
+    "year": "2024",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "Zee5",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Fifty Shades of Grey",
+    "year": "2015",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Zee5",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Top Gun",
+    "year": "1986",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Zee5",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Farzi",
+    "year": "2023",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Dhurandhar",
+    "year": "2025",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Dhurandhar: The Revenge",
+    "year": "2026",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Paatal Lok",
+    "year": "2020",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Taskaree: The Smuggler's Web",
+    "year": "2026",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Mardaani 3",
+    "year": "2026",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Khakee: The Bengal Chapter",
+    "year": "2025",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Ikka",
+    "year": "2026",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "The Last House",
+    "year": "2026",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "NCIS",
+    "year": "2003",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Law & Order",
+    "year": "1990",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Supernatural",
+    "year": "2005",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "FROM",
+    "year": "2022",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "The Devil's Mouth",
+    "year": "2026",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Kurukshetra: The Great War of Mahabharata",
+    "year": "2025",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Bandish Bandits",
+    "year": "2020",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Mighty Little Bheem",
+    "year": "2019",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Malgudi Days",
+    "year": "1987",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Rocky Aur Rani Kii Prem Kahaani",
+    "year": "2023",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "English Vinglish",
+    "year": "2012",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Zee5",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Hum Saath Saath Hain",
+    "year": "1999",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Zee5",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Hum Aapke Hain Koun..!",
+    "year": "1994",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Zee5",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Avatar Aang: The Last Airbender",
+    "year": "2026",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Futurama",
+    "year": "1999",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Teen Titans Go!",
+    "year": "2013",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Young Sheldon",
+    "year": "2017",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "X-Men '97",
+    "year": "2024",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "PAW Patrol",
+    "year": "2013",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "The Family Man",
+    "year": "2019",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Pyar Ka Pehla Naam: Radha Mohan",
+    "year": "2022",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Zee5",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Rabb Se Hai Dua",
+    "year": "2022",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Zee5",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Mahabharat",
+    "year": "1988",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Zee5",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Heeramandi",
+    "year": "2024",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "The Railway Men - The Untold Story of Bhopal 1984",
+    "year": "2023",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Made in Heaven",
+    "year": "2019",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Four More Shots Please!",
+    "year": "2019",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Gram Chikitsalay",
+    "year": "2025",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Game of Thrones",
+    "year": "2011",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "The Walking Dead",
+    "year": "2010",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "House",
+    "year": "2004",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Breaking Bad",
+    "year": "2008",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Dexter",
+    "year": "2006",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      },
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Vikings",
+    "year": "2013",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Shark Tank India",
+    "year": "2021",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "SonyLIV",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Border 2",
+    "year": "2026",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Kartavya",
+    "year": "2026",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Jawan",
+    "year": "2023",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Black Warrant",
+    "year": "2025",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Sapne vs Everyone",
+    "year": "2023",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Kota Factory",
+    "year": "2019",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Netflix",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Kill",
+    "year": "2024",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Aspirants",
+    "year": "2021",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Prime Video",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Descendants: Wicked Wonderland",
+    "year": "2026",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "JioHotstar",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "LEGO DREAMZzz",
+    "year": "2023",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Zee5",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Doc",
+    "year": "2025",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "SonyLIV",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Celebrity Family Feud",
+    "year": "2015",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "Zee5",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Twisted Metal",
+    "year": "2023",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "SonyLIV",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
+  },
+  {
+    "title": "Alert: Missing Persons Unit",
+    "year": "2023",
+    "countries": [
+      "IN"
+    ],
+    "providers": [
+      {
+        "name": "SonyLIV",
+        "access": "subscription",
+        "note": "Included with subscription"
+      }
+    ],
+    "source": "TMDB discover (watch_region=IN, flatrate), verified 2026-08-16",
+    "verifiedAt": "2026-08-16"
   }
 ]
