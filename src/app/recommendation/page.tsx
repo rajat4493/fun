@@ -43,16 +43,20 @@ import {
   toTitleCase,
 } from "@/lib/recommendation-session";
 import { captureRecommendationRun } from "@/lib/recommendation-analytics";
+import {
+  LOADING_KEY,
+  LOADING_STAGE_KEY,
+  LOADING_STARTED_KEY,
+  RECOMMENDATION_ERROR_KEY,
+  resumeOrphanedRecommendation,
+} from "@/lib/initial-recommendation";
 import { applyAffiliateTag } from "@/lib/affiliate-links";
 import RecommendationLoadingScreen, { LoadingStage } from "@/components/RecommendationLoadingScreen";
 import { IntentContract, Recommendation, RecommendationDisplayState, WatchProvider } from "@/lib/types";
 
-const LOADING_KEY = "fun:loading";
-const LOADING_STARTED_KEY = "fun:loading-started-at";
-const ERROR_KEY = "fun:recommendation-error";
+const ERROR_KEY = RECOMMENDATION_ERROR_KEY;
 const LOADING_TIMEOUT_MS = 85000;
 
-const LOADING_STAGE_KEY = "fun:loading-stage";
 const DEFAULT_LOADING_STAGE = "understanding";
 
 const FEEDBACK_OPTIONS: Array<{ reason: FeedbackReason; label: string; icon: LucideIcon; tone: string }> = [
@@ -298,6 +302,9 @@ export default function RecommendationPage() {
       setFetchLoading(true);
       setLoadingStage(localStorage.getItem(LOADING_STAGE_KEY) || DEFAULT_LOADING_STAGE);
       const interval = setInterval(() => {
+        // The request may have lost its owner (reload on this screen, tab killed mid-request).
+        // Take it over rather than waiting out the watchdog below; a no-op while it is alive.
+        resumeOrphanedRecommendation();
         // Real pipeline progress, written by page.tsx as it reads the NDJSON stream — not a timer.
         const stage = localStorage.getItem(LOADING_STAGE_KEY);
         if (stage) setLoadingStage(stage);

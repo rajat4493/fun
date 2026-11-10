@@ -862,30 +862,67 @@ async function trustedRawBatch(
   return { batch: [safeFallback(input)], rejections: allRejections, fallbackUsed: true };
 }
 
+// Metadata verification (TMDB/OMDb) used to sit outside the request deadline entirely: the LLM
+// chain honored deadlineAt, but every verification pass after it could add another ~10s, and the
+// subscription chain plus the post-chain gates can run several passes. Each pass is now capped,
+// and all passes together must finish within a short grace window after the request deadline.
+// Past that, picks are served unverified instead of making the user keep waiting.
+const VERIFICATION_PASS_BUDGET_MS = 7000;
+const VERIFICATION_GRACE_MS = 6000;
+
+function verificationBudgetMs(deadlineAt?: number): number {
+  if (!deadlineAt) return VERIFICATION_PASS_BUDGET_MS;
+  return Math.max(0, Math.min(VERIFICATION_PASS_BUDGET_MS, deadlineAt + VERIFICATION_GRACE_MS - Date.now()));
+}
+
+function unverifiedPick(pick: RawRecommendation, country: string): Recommendation {
+  return {
+    ...pick,
+    whereToWatch: {
+      status: "unverified" as const,
+      primary: "Availability not verified yet",
+      note: "Check your apps — metadata lookup timed out.",
+      providers: [],
+      country,
+      notOnUserPlatforms: false,
+    },
+  };
+}
+
+async function enrichWithinBudget(
+  pick: RawRecommendation,
+  country: string,
+  platforms: string[],
+  budgetMs: number,
+): Promise<Recommendation> {
+  if (budgetMs <= 0) return unverifiedPick(pick, country);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      enrichRecommendation(pick, country, platforms),
+      new Promise<Recommendation>((resolve) => {
+        timer = setTimeout(() => resolve(unverifiedPick(pick, country)), budgetMs);
+      }),
+    ]);
+  } catch {
+    return unverifiedPick(pick, country);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function enrichBatch(
   batch: RawRecommendation[],
   country: string,
   platforms: string[],
   timings?: RecommendationTimings,
+  deadlineAt?: number,
 ): Promise<Recommendation[]> {
   const started = Date.now();
-  const recommendations = await Promise.all(batch.map(async (pick) => {
-    try {
-      return await enrichRecommendation(pick, country, platforms);
-    } catch {
-      return {
-        ...pick,
-        whereToWatch: {
-          status: "unverified" as const,
-          primary: "Availability not verified yet",
-          note: "Check your apps — metadata lookup timed out.",
-          providers: [],
-          country,
-          notOnUserPlatforms: false,
-        },
-      };
-    }
-  }));
+  const budgetMs = verificationBudgetMs(deadlineAt);
+  const recommendations = await Promise.all(
+    batch.map((pick) => enrichWithinBudget(pick, country, platforms, budgetMs)),
+  );
   if (timings) timings.verificationMs += Date.now() - started;
   return recommendations;
 }
@@ -931,7 +968,7 @@ async function subscriptionVerifiedChain(
     candidateCount,
     deadlineAt,
   );
-  const enriched1 = await enrichBatch(trusted1.batch, country, platforms, timings);
+  const enriched1 = await enrichBatch(trusted1.batch, country, platforms, timings, deadlineAt);
   const verified1 = enriched1.filter(hasSubscriptionProvider).slice(0, count);
   if (verified1.length > 0) {
     return { picks: verified1, displayState: "verified", rejections: trusted1.rejections, fallbackUsed: trusted1.fallbackUsed };
@@ -959,7 +996,7 @@ async function subscriptionVerifiedChain(
       intentContract,
     );
     if (filtered2.accepted.length > 0) {
-      enriched2 = await enrichBatch(filtered2.accepted, country, platforms, timings);
+      enriched2 = await enrichBatch(filtered2.accepted, country, platforms, timings, deadlineAt);
       const verified2 = enriched2.filter(hasSubscriptionProvider).slice(0, count);
       if (verified2.length > 0) {
         return { picks: verified2, displayState: "verified", rejections: trusted1.rejections, fallbackUsed: strictFallbackUsed };
@@ -973,7 +1010,7 @@ async function subscriptionVerifiedChain(
   // Check the full curated pool (not artificially capped at 3).
   const curatedTrusted = applyTrustFilter(input, filteredLocalFallback(input, intentContract), intentContract);
   const curated = curatedTrusted.accepted.length > 0 ? curatedTrusted.accepted : [safeFallback(input)];
-  const enrichedCurated = await enrichBatch(curated, country, platforms, timings);
+  const enrichedCurated = await enrichBatch(curated, country, platforms, timings, deadlineAt);
   const verifiedCurated = enrichedCurated.filter(hasSubscriptionProvider).slice(0, count);
   if (verifiedCurated.length > 0) {
     return { picks: verifiedCurated, displayState: "verified", rejections: trusted1.rejections, fallbackUsed: true };
@@ -982,7 +1019,7 @@ async function subscriptionVerifiedChain(
   // Step 4 — no subscription match.
   // Return a single placeholder pick (not the full teaser batch) so the API response is well-formed.
   // The UI shows a clean no-match state; the pick title is used in the description only.
-  const firstAttempted = enriched1[0] ?? enriched2[0] ?? enrichedCurated[0] ?? await enrichRecommendation(safeFallback(input), country, platforms);
+  const firstAttempted = enriched1[0] ?? enriched2[0] ?? enrichedCurated[0] ?? await enrichWithinBudget(safeFallback(input), country, platforms, verificationBudgetMs(deadlineAt));
   return {
     picks: [{
       ...firstAttempted,
@@ -1195,7 +1232,7 @@ export async function POST(req: Request) {
       trustRejections = trustedRaw.rejections;
       fallbackUsed = trustedRaw.fallbackUsed;
       emitStage("verifying");
-      enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings);
+      enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings, deadlineAt);
       displayState = "unverified";
     } else if (input.mode === "self" && !selfModeParallelIntentEnabled) {
       // Default path: original sequential behavior. See selfModeParallelIntentEnabled above for why.
@@ -1217,7 +1254,7 @@ export async function POST(req: Request) {
       trustRejections = trustedRaw.rejections;
       fallbackUsed = trustedRaw.fallbackUsed;
       emitStage("verifying");
-      enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings);
+      enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings, deadlineAt);
       displayState = "unverified";
     } else if (input.mode === "self") {
       // Free-text Describe requests: 95% of first-pick production traffic, and previously fully
@@ -1279,7 +1316,7 @@ export async function POST(req: Request) {
       trustRejections = trustedRaw.rejections;
       fallbackUsed = trustedRaw.fallbackUsed;
       emitStage("verifying");
-      enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings);
+      enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings, deadlineAt);
       displayState = "unverified";
     } else {
       // Fresh structured Choose requests can safely run intent classification and recommendation
@@ -1336,7 +1373,7 @@ export async function POST(req: Request) {
       trustRejections = trustedRaw.rejections;
       fallbackUsed = trustedRaw.fallbackUsed;
       emitStage("verifying");
-      enrichedBatch = await enrichBatch(normalizedBatch, country, platforms, timings);
+      enrichedBatch = await enrichBatch(normalizedBatch, country, platforms, timings, deadlineAt);
       displayState = "unverified";
     }
 
@@ -1391,7 +1428,7 @@ export async function POST(req: Request) {
         })));
         const trustedFallback = applyTrustFilter(input, filteredLocalFallback(input, intentContract), intentContract);
         trustRejections.push(...trustedFallback.rejected);
-        const fallback = await enrichBatch(trustedFallback.accepted.slice(0, Math.max(count, 3)), country, platforms, timings);
+        const fallback = await enrichBatch(trustedFallback.accepted.slice(0, Math.max(count, 3)), country, platforms, timings, deadlineAt);
         const confirmedFallback = fallback
           .filter(metadataConfirmsHorror)
           .filter((rec) => matchesLanguageRequest(input, rec))
@@ -1428,7 +1465,7 @@ export async function POST(req: Request) {
       } else {
         const fallbackRaw = safeFallback(input);
         const verificationStarted = Date.now();
-        const fallback = await enrichRecommendation(fallbackRaw, country, platforms);
+        const fallback = await enrichWithinBudget(fallbackRaw, country, platforms, verificationBudgetMs(deadlineAt));
         timings.verificationMs += Date.now() - verificationStarted;
         enrichedBatch = [hasSubscriptionProvider(fallback) ? fallback : unavailableSubscriptionFallback(fallback, country)];
         displayState = "avoidance-fallback";
@@ -1446,7 +1483,7 @@ export async function POST(req: Request) {
         // are already dropped, which is the primary language-lane guarantee.
         const trustedFallback = applyTrustFilter(input, filteredLocalFallback(input, intentContract), intentContract);
         trustRejections.push(...trustedFallback.rejected);
-        const fallback = (await enrichBatch(trustedFallback.accepted, country, platforms, timings)).slice(0, count);
+        const fallback = (await enrichBatch(trustedFallback.accepted, country, platforms, timings, deadlineAt)).slice(0, count);
         const filteredFallback = fallback.filter((recommendation) => matchesLanguageRequest(input, recommendation));
         enrichedBatch = filteredFallback.length > 0 ? filteredFallback : fallback;
       }
@@ -1464,7 +1501,7 @@ export async function POST(req: Request) {
         // picks, same "confirmed mismatch dropped is the guarantee" posture as the positive lane.
         const trustedFallback = applyTrustFilter(input, filteredLocalFallback(input, intentContract), intentContract);
         trustRejections.push(...trustedFallback.rejected);
-        const fallback = (await enrichBatch(trustedFallback.accepted, country, platforms, timings)).slice(0, count);
+        const fallback = (await enrichBatch(trustedFallback.accepted, country, platforms, timings, deadlineAt)).slice(0, count);
         const filteredFallback = fallback.filter((recommendation) => matchesAvoidedLanguageRequest(input, recommendation));
         enrichedBatch = filteredFallback.length > 0 ? filteredFallback : fallback;
       }
@@ -1473,7 +1510,7 @@ export async function POST(req: Request) {
     if (enrichedBatch.length === 0) {
       const fallbackRaw = applyTrustFilter(input, [safeFallback(input)], intentContract).accepted[0] ?? safeFallback(input);
       const verificationStarted = Date.now();
-      const fallback = await enrichRecommendation(fallbackRaw, country, platforms);
+      const fallback = await enrichWithinBudget(fallbackRaw, country, platforms, verificationBudgetMs(deadlineAt));
       timings.verificationMs += Date.now() - verificationStarted;
       enrichedBatch = hasSubscriptionProvider(fallback)
         ? [fallback]
