@@ -21,6 +21,12 @@ import { getProfileRecentTitles } from "@/lib/anonymous-profile-store";
 import { writeRecommendationDiagnostics } from "@/lib/recommendation-diagnostics-store";
 import { IntentContract, RawRecommendation, RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
 
+// Explicit ceiling instead of the hosting plan's default. The pipeline's own worst case (intent +
+// provider chain + retries + metadata verification) runs well past the 10-15s some Vercel plans
+// default to, and a function killed mid-stream closes the NDJSON body with no "result" line —
+// which the client can only report as a failed pick. 60s is allowed on every Vercel plan.
+export const maxDuration = 60;
+
 // Disabled by default while production credentials and fallback behavior are reviewed.
 // Re-enable deliberately after validation with FUN_ENABLE_ANTHROPIC=1.
 const anthropicEnabled = process.env.FUN_ENABLE_ANTHROPIC === "1";

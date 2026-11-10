@@ -28,6 +28,21 @@ function outputTokenBudget(count: number, includeDiscovery = true): number {
   return Math.min(LLM_MAX_OUTPUT_TOKENS, LLM_TOKENS_BASE_OVERHEAD + perPick * count);
 }
 
+// Reads the whole body inside the caller's withTimeout window. withTimeout clears its timer as
+// soon as the factory resolves, and a bare fetch() resolves on response *headers* — so a provider
+// that sent headers and then stalled mid-body left the later response.json() waiting with no
+// timeout at all, holding the request open until the platform killed the function.
+async function bufferedFetch(url: string, init: RequestInit): Promise<Response> {
+  const response = await fetch(url, init);
+  const body = await response.arrayBuffer();
+  const bodyless = response.status === 204 || response.status === 205 || response.status === 304;
+  return new Response(bodyless ? null : body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
 type AnthropicTextBlock = {
   type: "text";
   text: string;
@@ -154,7 +169,7 @@ export async function recommendWithGenericLLM(
 
   const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
   const response = await withTimeout(
-    (signal) => fetch(url, {
+    (signal) => bufferedFetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -186,7 +201,7 @@ export async function interpretIntentWithGenericLLM(prompt: string): Promise<Rec
 
   const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
   const response = await withTimeout(
-    (signal) => fetch(url, {
+    (signal) => bufferedFetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -220,7 +235,7 @@ export async function recommendWithAnthropic(
   if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY");
 
   const response = await withTimeout(
-    (signal) => fetch("https://api.anthropic.com/v1/messages", {
+    (signal) => bufferedFetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -250,7 +265,7 @@ export async function interpretIntentWithAnthropic(prompt: string): Promise<Reco
   if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY");
 
   const response = await withTimeout(
-    (signal) => fetch("https://api.anthropic.com/v1/messages", {
+    (signal) => bufferedFetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -418,7 +433,7 @@ export async function recommendWithOpenAI(
     if (remainingMs < 1000) break;
     try {
       const response = await withTimeout(
-        (signal) => fetch("https://api.openai.com/v1/responses", {
+        (signal) => bufferedFetch("https://api.openai.com/v1/responses", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -479,7 +494,7 @@ export async function interpretIntentWithOpenAI(prompt: string): Promise<Record<
     if (remainingMs < 500) break;
     try {
       const response = await withTimeout(
-        (signal) => fetch("https://api.openai.com/v1/responses", {
+        (signal) => bufferedFetch("https://api.openai.com/v1/responses", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
