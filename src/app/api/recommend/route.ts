@@ -7,6 +7,7 @@ import {
   recommendWithAnthropic,
   recommendWithGenericLLM,
   recommendWithOpenAI,
+  DEFAULT_OPENAI_MODEL,
 } from "@/lib/llm";
 import { extractIntent } from "@/lib/intent";
 import { enrichRecommendation, verifyFamilyRating } from "@/lib/metadata";
@@ -421,7 +422,7 @@ async function resolveIntentContract(input: RecommendRequest, trace: ProviderTra
 
   // Try only one configured provider for intent classification to avoid adding another long sequential chain.
   if (process.env.OPENAI_API_KEY) {
-    return await tryIntent(`Intent OpenAI (${process.env.OPENAI_MODEL || "gpt-4o-mini"})`, () => interpretIntentWithOpenAI(prompt)) ?? local;
+    return await tryIntent(`Intent OpenAI (${process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL})`, () => interpretIntentWithOpenAI(prompt)) ?? local;
   }
   if (process.env.LLM_BASE_URL && process.env.LLM_API_KEY && process.env.LLM_MODEL) {
     return await tryIntent(`Intent Generic LLM (${process.env.LLM_MODEL})`, () => interpretIntentWithGenericLLM(prompt)) ?? local;
@@ -502,7 +503,7 @@ async function getRecommendations(
 
   if (process.env.OPENAI_API_KEY && canTryProvider()) {
     const timeoutMs = providerBudget(primaryBudgetMs);
-    const batch = await tryProvider(trace, `OpenAI (${process.env.OPENAI_MODEL || "gpt-4o-mini"})`, prompt, () => recommendWithOpenAI(prompt, temperature, count, includeDiscovery, timeoutMs));
+    const batch = await tryProvider(trace, `OpenAI (${process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL})`, prompt, () => recommendWithOpenAI(prompt, temperature, count, includeDiscovery, timeoutMs));
     if (batch) return batch;
   }
 

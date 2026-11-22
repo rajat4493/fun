@@ -28,6 +28,24 @@ function outputTokenBudget(count: number, includeDiscovery = true): number {
   return Math.min(LLM_MAX_OUTPUT_TOKENS, LLM_TOKENS_BASE_OVERHEAD + perPick * count);
 }
 
+// Reasoning-tier OpenAI models (gpt-6 family, o-series) reject `temperature` with a 400 and think
+// before answering unless told not to. "none" skips the thinking step, which a latency-bound pick
+// needs; OPENAI_REASONING_EFFORT overrides it for measurement. Older models keep temperature.
+function openAISamplingParams(model: string, temperature: number) {
+  if (/^(gpt-6|o\d)/.test(model)) {
+    return { reasoning: { effort: process.env.OPENAI_REASONING_EFFORT || "none" } };
+  }
+  return { temperature };
+}
+
+// Primary/fallback chosen by scripts/model-bakeoff.mjs (2026-11-22, 42 live requests each):
+// gpt-6-luna p50 6.5s vs gpt-4o-mini 8.7s, intent-timeout failover 1/42 vs 17/42.
+// gpt-4o-mini is retired by OpenAI on 2027-01-14, so it is no longer a default anywhere.
+export const DEFAULT_OPENAI_MODEL = "gpt-6-luna";
+function openAIModelChain(): string[] {
+  return uniqueValues([process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL, process.env.OPENAI_FALLBACK_MODEL || "gpt-5.4-nano"]);
+}
+
 // Reads the whole body inside the caller's withTimeout window. withTimeout clears its timer as
 // soon as the factory resolves, and a bare fetch() resolves on response *headers* — so a provider
 // that sent headers and then stalled mid-body left the later response.json() waiting with no
@@ -427,7 +445,7 @@ export async function recommendWithOpenAI(
 
   let lastError: unknown;
   const started = Date.now();
-  const models = uniqueValues([process.env.OPENAI_MODEL, "gpt-4o-mini"]);
+  const models = openAIModelChain();
   for (const model of models) {
     const remainingMs = timeoutMs - (Date.now() - started);
     if (remainingMs < 1000) break;
@@ -445,7 +463,7 @@ export async function recommendWithOpenAI(
             prompt_cache_key: includeDiscovery
               ? "fun-recommend-full-v1"
               : "fun-recommend-core-v1",
-            temperature,
+            ...openAISamplingParams(model, temperature),
             max_output_tokens: outputTokenBudget(count, includeDiscovery),
             text: {
               format: {
@@ -489,7 +507,7 @@ export async function interpretIntentWithOpenAI(prompt: string): Promise<Record<
 
   let lastError: unknown;
   const started = Date.now();
-  for (const model of uniqueValues([process.env.OPENAI_MODEL, "gpt-4o-mini"])) {
+  for (const model of openAIModelChain()) {
     const remainingMs = INTENT_TIMEOUT_MS - (Date.now() - started);
     if (remainingMs < 500) break;
     try {
@@ -504,7 +522,7 @@ export async function interpretIntentWithOpenAI(prompt: string): Promise<Record<
             model,
             input: prompt,
             prompt_cache_key: "fun-intent-v1",
-            temperature: 0.1,
+            ...openAISamplingParams(model, 0.1),
             max_output_tokens: INTENT_MAX_OUTPUT_TOKENS,
           }),
           signal,
