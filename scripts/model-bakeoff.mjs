@@ -3,6 +3,8 @@
 // cost. Uses paid APIs; never writes shared storage (no Redis credentials, in-memory learning sink).
 //
 //   node --env-file=.env.local scripts/model-bakeoff.mjs --live --model gpt-6-luna [--rounds 2]
+//   node --env-file=.env.local scripts/model-bakeoff.mjs --live --model claude-haiku-5-5   (Claude only;
+//     OpenAI is withheld so every call goes through the Anthropic path)
 import fs from "node:fs";
 import { resolve, dirname } from "node:path";
 import vm from "node:vm";
@@ -22,19 +24,26 @@ const PRICES = {
   "gpt-6-luna": [0.1, 0.01, 0.5],
   "gpt-5.4-nano": [0.2, 0.02, 1.25],
   "gpt-5.4-mini": [0.75, 0.075, 4.5],
+  // platform.claude.com/docs/en/about-claude/pricing (2026-11-22), prompts under 100K tokens.
+  "claude-haiku-5-5": [0.1, 0.01, 0.5],
+  "claude-sonnet-5-5": [2, 0.1, 10],
 };
 
 const root = process.cwd();
-const env = { NODE_ENV: "production", OPENAI_MODEL: model, OPENAI_FALLBACK_MODEL: model };
-for (const key of ["OPENAI_API_KEY", "TMDB_API_KEY", "TMDB_READ_ACCESS_TOKEN", "OMDB_API_KEY", "OPENAI_REASONING_EFFORT"]) {
+const isClaude = model.startsWith("claude-");
+const env = isClaude
+  ? { NODE_ENV: "production", FUN_ENABLE_ANTHROPIC: "1", ANTHROPIC_MODEL: model }
+  : { NODE_ENV: "production", OPENAI_MODEL: model, OPENAI_FALLBACK_MODEL: model };
+for (const key of [isClaude ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY", "TMDB_API_KEY", "TMDB_READ_ACCESS_TOKEN", "OMDB_API_KEY", "OPENAI_REASONING_EFFORT"]) {
   if (process.env[key]) env[key] = process.env[key];
 }
+if (isClaude && !env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is not set in .env.local");
 
 const sources = new Map();
 function harness(network) {
   const after = [];
   const context = vm.createContext({
-    process: { env }, console: { log() {}, warn() {}, error() {}, info() {} },
+    process: { env }, console: argv.includes("--debug") ? console : { log() {}, warn() {}, error() {}, info() {} },
     Response, Request, URL, AbortSignal, AbortController, TextEncoder, TextDecoder, ReadableStream,
     setTimeout, clearTimeout, fetch: network,
   });
@@ -104,16 +113,19 @@ for (let round = 1; round <= rounds; round += 1) {
     const usage = { calls: 0, failedCalls: 0, input: 0, cached: 0, output: 0, reasoning: 0, models: new Set() };
     const network = async (url, options = {}) => {
       const host = new URL(url).hostname;
-      if (!["api.openai.com", "api.themoviedb.org", "www.omdbapi.com"].includes(host)) throw new Error("External host not allowed");
-      if (host === "api.openai.com" && ++usage.calls > 8) throw new Error("Provider budget exceeded");
+      const llmHost = host === "api.openai.com" || host === "api.anthropic.com";
+      if (!["api.openai.com", "api.anthropic.com", "api.themoviedb.org", "www.omdbapi.com"].includes(host)) throw new Error("External host not allowed");
+      if (llmHost && ++usage.calls > 8) throw new Error("Provider budget exceeded");
       const response = await fetch(url, options);
-      if (host === "api.openai.com") {
+      if (llmHost) {
         try {
           const body = await response.clone().json();
           if (!response.ok) usage.failedCalls += 1;
           if (body.model) usage.models.add(body.model);
-          usage.input += body.usage?.input_tokens ?? 0;
-          usage.cached += body.usage?.input_tokens_details?.cached_tokens ?? 0;
+          // Anthropic reports cache reads separately from input_tokens; OpenAI counts them inside it.
+          const cacheRead = body.usage?.cache_read_input_tokens ?? 0;
+          usage.input += (body.usage?.input_tokens ?? 0) + cacheRead;
+          usage.cached += body.usage?.input_tokens_details?.cached_tokens ?? cacheRead;
           usage.output += body.usage?.output_tokens ?? 0;
           usage.reasoning += body.usage?.output_tokens_details?.reasoning_tokens ?? 0;
         } catch { usage.failedCalls += 1; }
@@ -150,7 +162,7 @@ const pct = (values, p) => {
 };
 const ok = results.filter((r) => r.status === 200);
 const summary = {
-  model, reasoningEffort: env.OPENAI_REASONING_EFFORT ?? (/^(gpt-6|o\d)/.test(model) ? "none" : "n/a (temperature)"),
+  model, reasoningEffort: isClaude ? "n/a (Claude, temperature)" : env.OPENAI_REASONING_EFFORT ?? (/^(gpt-6|o\d)/.test(model) ? "none" : "n/a (temperature)"),
   runs: results.length,
   matches: ok.length,
   noMatch: results.filter((r) => r.status === 422).length,
