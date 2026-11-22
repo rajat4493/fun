@@ -1,7 +1,10 @@
-const major = Number(process.versions.node.split(".")[0]);
+import fs from "node:fs";
 
-if (major !== 20) {
-  console.error("F.U.N requires Node 20.x. Current Node is " + process.version + ".");
-  console.error('Run: export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; nvm use 20');
+const required = fs.readFileSync(new URL("../.nvmrc", import.meta.url), "utf8").trim().replace(/^v/, "");
+const major = process.versions.node.split(".")[0];
+
+if (major !== required) {
+  console.error(`F.U.N requires Node ${required}.x. Current Node is ${process.version}.`);
+  console.error(`Run: nvm install ${required} && nvm use ${required}`);
   process.exit(1);
 }
