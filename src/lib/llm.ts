@@ -28,6 +28,68 @@ function outputTokenBudget(count: number, includeDiscovery = true): number {
   return Math.min(LLM_MAX_OUTPUT_TOKENS, LLM_TOKENS_BASE_OVERHEAD + perPick * count);
 }
 
+// Reasoning-tier OpenAI models (gpt-6 family, o-series) reject `temperature` with a 400 and think
+// before answering unless told not to. "none" skips the thinking step, which a latency-bound pick
+// needs; OPENAI_REASONING_EFFORT overrides it for measurement. Older models keep temperature.
+function openAISamplingParams(model: string, temperature: number) {
+  if (/^(gpt-6|o\d)/.test(model)) {
+    return { reasoning: { effort: process.env.OPENAI_REASONING_EFFORT || "none" } };
+  }
+  return { temperature };
+}
+
+// Primary/fallback chosen by scripts/model-bakeoff.mjs (2026-11-22, 42 live requests each):
+// gpt-6-luna p50 6.5s vs gpt-4o-mini 8.7s, intent-timeout failover 1/42 vs 17/42.
+// gpt-4o-mini is retired by OpenAI on 2027-01-14, so it is no longer a default anywhere.
+export const DEFAULT_OPENAI_MODEL = "gpt-6-luna";
+// Claude 5-generation models reject `temperature` ("deprecated for this model"); older Claude
+// models still accept it. Same principle as openAISamplingParams.
+function anthropicModel(): string {
+  return process.env.ANTHROPIC_MODEL || "claude-haiku-5-5";
+}
+// Claude Haiku 5.5 thinks before answering by default (adaptive, effort medium). A pick is a
+// latency-bound single call, so thinking is switched off there, matching gpt-6-luna's effort "none".
+function anthropicSamplingParams(model: string, temperature: number) {
+  if (!/^claude-[a-z]+-([5-9]|\d{2})/.test(model)) return { temperature };
+  return /^claude-haiku-5/.test(model) ? { thinking: { type: "disabled" } } : {};
+}
+
+// Anthropic structured outputs reject numeric, string-length and complex array constraints
+// (minItems/maxItems etc.); the recommendation count is still checked after parsing.
+const ANTHROPIC_UNSUPPORTED_SCHEMA_KEYS = new Set(["minItems", "maxItems", "minimum", "maximum", "multipleOf", "minLength", "maxLength", "pattern"]);
+function anthropicSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(anthropicSchema);
+  if (!schema || typeof schema !== "object") return schema;
+  return Object.fromEntries(
+    Object.entries(schema as Record<string, unknown>)
+      .filter(([key]) => !ANTHROPIC_UNSUPPORTED_SCHEMA_KEYS.has(key))
+      .map(([key, value]) => [key, anthropicSchema(value)]),
+  );
+}
+
+function anthropicText(data: AnthropicResponse): string {
+  return data.content?.filter((block) => block.type === "text").map((block) => block.text).join("\n") ?? "";
+}
+
+function openAIModelChain(): string[] {
+  return uniqueValues([process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL, process.env.OPENAI_FALLBACK_MODEL || "gpt-5.4-nano"]);
+}
+
+// Reads the whole body inside the caller's withTimeout window. withTimeout clears its timer as
+// soon as the factory resolves, and a bare fetch() resolves on response *headers* — so a provider
+// that sent headers and then stalled mid-body left the later response.json() waiting with no
+// timeout at all, holding the request open until the platform killed the function.
+async function bufferedFetch(url: string, init: RequestInit): Promise<Response> {
+  const response = await fetch(url, init);
+  const body = await response.arrayBuffer();
+  const bodyless = response.status === 204 || response.status === 205 || response.status === 304;
+  return new Response(bodyless ? null : body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
 type AnthropicTextBlock = {
   type: "text";
   text: string;
@@ -35,6 +97,8 @@ type AnthropicTextBlock = {
 
 type AnthropicResponse = {
   content?: AnthropicTextBlock[];
+  stop_reason?: string;
+  usage?: { output_tokens?: number };
 };
 
 type OpenAIResponse = {
@@ -154,7 +218,7 @@ export async function recommendWithGenericLLM(
 
   const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
   const response = await withTimeout(
-    (signal) => fetch(url, {
+    (signal) => bufferedFetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -186,7 +250,7 @@ export async function interpretIntentWithGenericLLM(prompt: string): Promise<Rec
 
   const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
   const response = await withTimeout(
-    (signal) => fetch(url, {
+    (signal) => bufferedFetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -220,7 +284,7 @@ export async function recommendWithAnthropic(
   if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY");
 
   const response = await withTimeout(
-    (signal) => fetch("https://api.anthropic.com/v1/messages", {
+    (signal) => bufferedFetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -228,9 +292,16 @@ export async function recommendWithAnthropic(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
-        max_tokens: outputTokenBudget(count, includeDiscovery),
-        temperature,
+        model: anthropicModel(),
+        // The budget was tuned on OpenAI output. Claude writes the same schema in more tokens and
+        // hit the 1-pick 1000-token cap mid-JSON in the 2026-11-22 bake-off, so it gets 2x room.
+        max_tokens: outputTokenBudget(count, includeDiscovery) * 2,
+        ...anthropicSamplingParams(anthropicModel(), temperature),
+        // Constrained decoding, same as the OpenAI path: malformed JSON was discarding every Claude
+        // answer and dropping the request to the local fallback list.
+        output_config: {
+          format: { type: "json_schema", schema: anthropicSchema(recommendationBatchSchema(count, includeDiscovery)) },
+        },
         messages: [{ role: "user", content: prompt }],
       }),
       signal,
@@ -241,7 +312,11 @@ export async function recommendWithAnthropic(
 
   if (!response.ok) throw new Error(`Anthropic failed with ${response.status}`);
   const data = (await response.json()) as AnthropicResponse;
-  const text = data.content?.map((block) => block.text).join("\n") ?? "";
+  // A cut-off answer is invalid JSON even under structured outputs; name the real cause.
+  if (data.stop_reason === "max_tokens" || data.stop_reason === "refusal") {
+    throw new Error(`Anthropic stopped early (${data.stop_reason}, ${data.usage?.output_tokens ?? "?"} output tokens)`);
+  }
+  const text = anthropicText(data);
   return parseRecommendationJson(text);
 }
 
@@ -250,7 +325,7 @@ export async function interpretIntentWithAnthropic(prompt: string): Promise<Reco
   if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY");
 
   const response = await withTimeout(
-    (signal) => fetch("https://api.anthropic.com/v1/messages", {
+    (signal) => bufferedFetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -258,9 +333,9 @@ export async function interpretIntentWithAnthropic(prompt: string): Promise<Reco
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6",
+        model: anthropicModel(),
         max_tokens: INTENT_MAX_OUTPUT_TOKENS,
-        temperature: 0.1,
+        ...anthropicSamplingParams(anthropicModel(), 0.1),
         messages: [{ role: "user", content: prompt }],
       }),
       signal,
@@ -271,7 +346,7 @@ export async function interpretIntentWithAnthropic(prompt: string): Promise<Reco
 
   if (!response.ok) throw new Error(`Anthropic intent failed with ${response.status}`);
   const data = (await response.json()) as AnthropicResponse;
-  const text = data.content?.map((block) => block.text).join("\n") ?? "";
+  const text = anthropicText(data);
   return parseJsonObject(text);
 }
 
@@ -412,13 +487,13 @@ export async function recommendWithOpenAI(
 
   let lastError: unknown;
   const started = Date.now();
-  const models = uniqueValues([process.env.OPENAI_MODEL, "gpt-4o-mini"]);
+  const models = openAIModelChain();
   for (const model of models) {
     const remainingMs = timeoutMs - (Date.now() - started);
     if (remainingMs < 1000) break;
     try {
       const response = await withTimeout(
-        (signal) => fetch("https://api.openai.com/v1/responses", {
+        (signal) => bufferedFetch("https://api.openai.com/v1/responses", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -430,7 +505,7 @@ export async function recommendWithOpenAI(
             prompt_cache_key: includeDiscovery
               ? "fun-recommend-full-v1"
               : "fun-recommend-core-v1",
-            temperature,
+            ...openAISamplingParams(model, temperature),
             max_output_tokens: outputTokenBudget(count, includeDiscovery),
             text: {
               format: {
@@ -474,12 +549,12 @@ export async function interpretIntentWithOpenAI(prompt: string): Promise<Record<
 
   let lastError: unknown;
   const started = Date.now();
-  for (const model of uniqueValues([process.env.OPENAI_MODEL, "gpt-4o-mini"])) {
+  for (const model of openAIModelChain()) {
     const remainingMs = INTENT_TIMEOUT_MS - (Date.now() - started);
     if (remainingMs < 500) break;
     try {
       const response = await withTimeout(
-        (signal) => fetch("https://api.openai.com/v1/responses", {
+        (signal) => bufferedFetch("https://api.openai.com/v1/responses", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -489,7 +564,7 @@ export async function interpretIntentWithOpenAI(prompt: string): Promise<Record<
             model,
             input: prompt,
             prompt_cache_key: "fun-intent-v1",
-            temperature: 0.1,
+            ...openAISamplingParams(model, 0.1),
             max_output_tokens: INTENT_MAX_OUTPUT_TOKENS,
           }),
           signal,

@@ -1,6 +1,7 @@
 import { extractIntent } from "@/lib/intent";
 import { hasNegatedConcept, intentRequestText } from "@/lib/recommendation-utils";
 import { IntentContract, RecommendRequest } from "@/lib/types";
+import { detectRequestedLanguageKeys, detectAvoidedLanguageKeys } from "@/lib/language-lane";
 
 const PRIMARY_VALUES = new Set([
   "scare",
@@ -169,7 +170,7 @@ export function localIntentContract(input: RecommendRequest): IntentContract {
     hardAvoids: intent.hardAvoids,
     softAvoids: intent.softAvoids,
     format: intent.requestedFormat ?? "any",
-    language: intent.requestedLanguage ?? input.languagePreferences?.[0] ?? "any",
+    language: detectRequestedLanguageKeys(input).join(" or ") || intent.requestedLanguage || "any",
     situation: extraSituation,
     intensity: input.craziness === 3 ? "unhinged" : input.craziness === 2 ? "bold" : input.craziness === 0 ? "safe" : "curious",
     emotionalGoal: wantsEmotionalRelief
@@ -195,15 +196,14 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
   // ("romantic + comforting", avoids=["gore"] → primary "gore"). Explicit
   // controls are authoritative: an avoided concept cannot become the desired
   // outcome unless local parsing independently found it as a positive request.
-  const primary = local.hardAvoids.includes(inferredPrimary) &&
-    ![local.primary, ...local.secondary].includes(inferredPrimary)
+  const primary = local.hardAvoids.includes(inferredPrimary === "scare" ? "horror" : inferredPrimary)
     ? local.primary
     : inferredPrimary;
   const formatRaw = typeof value.format === "string" ? value.format.toLowerCase().trim() : "";
   const intensityRaw = typeof value.intensity === "string" ? value.intensity.toLowerCase().trim() : "";
   const llmSecondary = stringArray(value.secondary).filter((item) => {
     const normalized = item.toLowerCase();
-    return !local.hardAvoids.includes(normalized) || [local.primary, ...local.secondary].includes(normalized);
+    return !local.hardAvoids.includes(normalized === "scare" ? "horror" : normalized);
   });
   const llmHardAvoids = signalArray(value.hardAvoids).map((item) => item.toLowerCase());
   const localPrimarySignals = new Set([local.primary, ...local.secondary]);
@@ -234,7 +234,7 @@ export function normalizeIntentContract(raw: unknown, input: RecommendRequest): 
     hardAvoids: resolvedHardAvoids,
     softAvoids: [...new Set([...local.softAvoids, ...signalArray(value.softAvoids).map((item) => item.toLowerCase())])],
     format: resolvedFormat,
-    language: typeof value.language === "string" && value.language.trim() ? value.language.trim() : local.language,
+    language: typeof value.language === "string" && value.language.trim() && !detectAvoidedLanguageKeys(input).some(key => (value.language as string).toLowerCase().includes(key)) ? value.language.trim() : local.language,
     // Situation is a factual viewing constraint, not a creative inference. The
     // classifier may explain typed context, but it must not invent bedtime,
     // transit, waiting, or social context that the user never supplied.

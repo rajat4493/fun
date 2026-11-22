@@ -1,6 +1,6 @@
-import { hasNegatedConcept, requestText } from "@/lib/recommendation-utils";
+import { hasNegatedConcept, requestText, intentRequestText } from "@/lib/recommendation-utils";
 import { extractIntent } from "@/lib/intent";
-import { detectAvoidedLanguageKey } from "@/lib/language-lane";
+import { detectAvoidedLanguageKey, detectRequestedLanguageKeys } from "@/lib/language-lane";
 import { IntentContract, RawRecommendation, RecommendRequest } from "@/lib/types";
 
 function normalizeForMatch(value: string): string {
@@ -109,7 +109,7 @@ export function filterFalsePositiveRecommendations(input: RecommendRequest, batc
 
 export function localFallback(input: RecommendRequest, intentContract?: IntentContract): RawRecommendation[] {
   const intent = extractIntent(input);
-  const text = requestText(input);
+  const text = intentRequestText(input);
   const contractIntents = new Set(
     [
       intentContract?.primary,
@@ -121,18 +121,18 @@ export function localFallback(input: RecommendRequest, intentContract?: IntentCo
   const contractHas = (...values: string[]) => values.some((value) => contractIntents.has(value));
   const wantsShameless = /shameless/i.test(text);
   const wantsFriends = /\bfriends\b/i.test(text);
-  const wantsHindi = /\bhindi\b/i.test(text) || (input.languagePreferences ?? []).some((language) => /hindi/i.test(language));
-  const wantsKorean = /\bkorean\b/i.test(text) || (input.languagePreferences ?? []).some((language) => /korean/i.test(language));
-  const wantsFrench = /\bfrench\b/i.test(text) || (input.languagePreferences ?? []).some((language) => /french/i.test(language));
-  const wantsGerman = /\bgerman\b/i.test(text) || (input.languagePreferences ?? []).some((language) => /german/i.test(language));
+  const wantedLanguages = detectRequestedLanguageKeys(input);
+  const wantsHindi = wantedLanguages.includes("hindi");
+  const wantsKorean = wantedLanguages.includes("korean");
+  const wantsFrench = wantedLanguages.includes("french");
+  const wantsGerman = wantedLanguages.includes("german");
   const wantsThriller = contractHas("thriller") || /\b(thriller|tense|suspense|mystery|crime)\b/i.test(text);
   const wantsComedy = contractHas("comedy") || /\b(comedy|funny|laugh|comfort|sitcom|light)\b/i.test(text);
   const wantsRomance = contractHas("romance") || /\b(romance|romantic|love|date)\b/i.test(text);
   const wantsEmotional = contractHas("cry", "drama", "comfort") || /\b(emotional|moving|heartfelt|feel|feeling|sad|bittersweet)\b/i.test(text);
-  const wantsGore = (contractHas("gore") || intent.primaryIntents.includes("gore") || /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(text)) &&
+  const wantsGore = !intent.hardAvoids.includes("gore") && (contractHas("gore") || intent.primaryIntents.includes("gore") || /\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(text)) &&
     !hasNegatedConcept(text, /\b(gore|gory|blood|bloody|violence|violent)\b/i);
-  const wantsScare = (contractHas("scare") || intent.primaryIntents.includes("scare") || /\b(shit scared|scare|scared|scary|terrify|terrified|terrifying|frighten|frightened|frightening|creep out|creepy|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i.test(text)) &&
-    !hasNegatedConcept(text, /\b(scary|scare|scared|terrify|terrified|frighten|frightened|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i);
+  const wantsScare = !intent.hardAvoids.includes("horror") && (contractHas("scare") || intent.primaryIntents.includes("scare"));
   const wantsCry = contractHas("cry") || intent.primaryIntents.includes("cry");
   const avoidsSpanish = detectAvoidedLanguageKey(input) === "spanish";
   const wantsHeist = /\b(heist|robbery|score|con artist|caper)\b/i.test(text) || /\bensemble\b/i.test(text);

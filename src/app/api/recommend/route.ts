@@ -7,9 +7,11 @@ import {
   recommendWithAnthropic,
   recommendWithGenericLLM,
   recommendWithOpenAI,
+  DEFAULT_OPENAI_MODEL,
 } from "@/lib/llm";
 import { extractIntent } from "@/lib/intent";
-import { enrichRecommendation } from "@/lib/metadata";
+import { enrichRecommendation, verifyFamilyRating } from "@/lib/metadata";
+import { explicitConstraintRejections, wantsAnimation } from "@/lib/explicit-constraints";
 import { buildCompactRetryPrompt, buildRecommendationPrompt } from "@/lib/prompt";
 import { activeHardAvoidanceKeys, applyTrustFilter, relatedTitleUnsafe, safeFallback, TrustRejection } from "@/lib/recommendation-trust";
 import { buildIntentContractPrompt, localIntentContract, normalizeIntentContract } from "@/lib/intent-contract";
@@ -18,8 +20,16 @@ import { countryCodeMap, isPlotIdentificationRequest, normalizeRecommendRequest,
 import { isPreviewCountry } from "@/lib/launch-scope";
 import { callerIp, checkRateLimit } from "@/lib/rate-limit";
 import { getProfileRecentTitles } from "@/lib/anonymous-profile-store";
-import { writeRecommendationDiagnostics } from "@/lib/recommendation-diagnostics-store";
+import { writeRecommendationDiagnostics, summarizeRejectionReasons } from "@/lib/recommendation-diagnostics-store";
+import { temperFamilySuitability } from "@/lib/family-suitability-copy";
+import { selectQualifiedCandidates } from "@/lib/qualified-candidates";
 import { IntentContract, RawRecommendation, RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
+
+// Explicit ceiling instead of the hosting plan's default. The pipeline's own worst case (intent +
+// provider chain + retries + metadata verification) runs well past the 10-15s some Vercel plans
+// default to, and a function killed mid-stream closes the NDJSON body with no "result" line —
+// which the client can only report as a failed pick. 60s is allowed on every Vercel plan.
+export const maxDuration = 60;
 
 // Disabled by default while production credentials and fallback behavior are reviewed.
 // Re-enable deliberately after validation with FUN_ENABLE_ANTHROPIC=1.
@@ -37,6 +47,9 @@ const MAX_RECOMMEND_REQUEST_BYTES = 131_072;
 const selfModeParallelIntentEnabled = process.env.FUN_ENABLE_SELF_PARALLEL_INTENT === "1";
 
 class RequestTooLargeError extends Error {}
+class NoMatchingRecommendationError extends Error {
+  constructor() { super("We couldn't verify a pick that meets all your requirements. Try adjusting your choices; we haven't relaxed your exclusions."); }
+}
 
 async function readJsonBodyWithLimit(req: Request): Promise<unknown> {
   const declaredLength = Number(req.headers.get("content-length") ?? 0);
@@ -107,6 +120,16 @@ function textSuggestsAvoidance(avoids: string[], rec: Recommendation): boolean {
     const keywords = AVOIDANCE_SUSPICION_KEYWORDS[avoid.toLowerCase().trim()] ?? [];
     return keywords.some((keyword) => text.includes(keyword));
   });
+}
+
+function candidateRejectionReasons(input: RecommendRequest, rec: Recommendation, contract?: IntentContract, checkSubscriptions = true): string[] {
+  const reasons = explicitConstraintRejections(input, rec, checkSubscriptions);
+  reasons.push(...applyTrustFilter(input, [rec], contract).rejected.flatMap(item => item.reasons));
+  const avoids = activeHardAvoidanceKeys(input);
+  const genreAvoids = contract?.primary === "scare" ? avoids.filter(avoid => avoid !== "gore") : avoids;
+  if (genreViolatesAvoidance(genreAvoids, rec.contentMetadata?.genreIds ?? []) || textSuggestsAvoidance(avoids, rec)) reasons.push("explicit content exclusion");
+  if (contract && requiresConfirmedHorror(input, contract) && !metadataConfirmsHorror(rec)) reasons.push("metadata: strong fear request requires confirmed horror");
+  return reasons;
 }
 
 function requiresConfirmedHorror(input: RecommendRequest, contract: IntentContract): boolean {
@@ -308,6 +331,9 @@ function buildDiagnosticsEvent(input: RecommendRequest, payload: Record<string, 
     createdAt: new Date().toISOString(),
     sessionId: input.sessionId,
     mode: input.mode,
+    recommendationCount: input.recommendationCount ?? 3,
+    platformFilter: input.platformFilter,
+    responseDetail: input.responseDetail ?? "full",
     country: input.country,
     title: payload.title as string,
     year: payload.year as string,
@@ -320,6 +346,7 @@ function buildDiagnosticsEvent(input: RecommendRequest, payload: Record<string, 
     timings: trust.diagnostics.timings,
     retryCount: trust.diagnostics.retryCount,
     rejectionCount: trust.rejections.length,
+    outcome: "success" as const,
   };
 }
 
@@ -361,7 +388,7 @@ async function resolveIntentContract(input: RecommendRequest, trace: ProviderTra
       ok: true,
       promptChars: 0,
     });
-    return input.precomputedIntentContract;
+    return normalizeIntentContract(input.precomputedIntentContract, input);
   }
 
   const local = localIntentContract(input);
@@ -395,7 +422,7 @@ async function resolveIntentContract(input: RecommendRequest, trace: ProviderTra
 
   // Try only one configured provider for intent classification to avoid adding another long sequential chain.
   if (process.env.OPENAI_API_KEY) {
-    return await tryIntent(`Intent OpenAI (${process.env.OPENAI_MODEL || "gpt-4o-mini"})`, () => interpretIntentWithOpenAI(prompt)) ?? local;
+    return await tryIntent(`Intent OpenAI (${process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL})`, () => interpretIntentWithOpenAI(prompt)) ?? local;
   }
   if (process.env.LLM_BASE_URL && process.env.LLM_API_KEY && process.env.LLM_MODEL) {
     return await tryIntent(`Intent Generic LLM (${process.env.LLM_MODEL})`, () => interpretIntentWithGenericLLM(prompt)) ?? local;
@@ -476,7 +503,7 @@ async function getRecommendations(
 
   if (process.env.OPENAI_API_KEY && canTryProvider()) {
     const timeoutMs = providerBudget(primaryBudgetMs);
-    const batch = await tryProvider(trace, `OpenAI (${process.env.OPENAI_MODEL || "gpt-4o-mini"})`, prompt, () => recommendWithOpenAI(prompt, temperature, count, includeDiscovery, timeoutMs));
+    const batch = await tryProvider(trace, `OpenAI (${process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL})`, prompt, () => recommendWithOpenAI(prompt, temperature, count, includeDiscovery, timeoutMs));
     if (batch) return batch;
   }
 
@@ -629,6 +656,20 @@ function isConstrainedLane(intentContract?: IntentContract, input?: RecommendReq
 // valid" pressure, matching the existing two-tier design.
 function candidateRequestCount(count: number, intentContract?: IntentContract): number {
   return isRepetitionSensitiveLane(intentContract) ? Math.min(count + 2, 5) : count;
+}
+
+// A one-pick response may still need several candidates to survive metadata-backed gates.
+// Keep this wider pool only for constrained asks; ordinary recommendations retain the fastest
+// one-candidate enrichment path. The final response is sliced back to the requested UI count.
+function verificationCandidateCount(input: RecommendRequest, intentContract: IntentContract, count: number, requestCount: number): number {
+  const needsMetadataQualification =
+    extractIntent(input).familySafe ||
+    wantsAnimation(input) ||
+    activeHardAvoidanceKeys(input).length > 0 ||
+    wantsSpecificLanguage(input) ||
+    wantsToAvoidLanguage(input) ||
+    requiresConfirmedHorror(input, intentContract);
+  return needsMetadataQualification ? requestCount : count;
 }
 
 // Scoring order: primary intent match (20) > secondary matches (4 each) > format match (3).
@@ -856,30 +897,67 @@ async function trustedRawBatch(
   return { batch: [safeFallback(input)], rejections: allRejections, fallbackUsed: true };
 }
 
+// Metadata verification (TMDB/OMDb) used to sit outside the request deadline entirely: the LLM
+// chain honored deadlineAt, but every verification pass after it could add another ~10s, and the
+// subscription chain plus the post-chain gates can run several passes. Each pass is now capped,
+// and all passes together must finish within a short grace window after the request deadline.
+// Past that, picks are served unverified instead of making the user keep waiting.
+const VERIFICATION_PASS_BUDGET_MS = 7000;
+const VERIFICATION_GRACE_MS = 6000;
+
+function verificationBudgetMs(deadlineAt?: number): number {
+  if (!deadlineAt) return VERIFICATION_PASS_BUDGET_MS;
+  return Math.max(0, Math.min(VERIFICATION_PASS_BUDGET_MS, deadlineAt + VERIFICATION_GRACE_MS - Date.now()));
+}
+
+function unverifiedPick(pick: RawRecommendation, country: string): Recommendation {
+  return {
+    ...pick,
+    whereToWatch: {
+      status: "unverified" as const,
+      primary: "Availability not verified yet",
+      note: "Check your apps — metadata lookup timed out.",
+      providers: [],
+      country,
+      notOnUserPlatforms: false,
+    },
+  };
+}
+
+async function enrichWithinBudget(
+  pick: RawRecommendation,
+  country: string,
+  platforms: string[],
+  budgetMs: number,
+): Promise<Recommendation> {
+  if (budgetMs <= 0) return unverifiedPick(pick, country);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      enrichRecommendation(pick, country, platforms),
+      new Promise<Recommendation>((resolve) => {
+        timer = setTimeout(() => resolve(unverifiedPick(pick, country)), budgetMs);
+      }),
+    ]);
+  } catch {
+    return unverifiedPick(pick, country);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function enrichBatch(
   batch: RawRecommendation[],
   country: string,
   platforms: string[],
   timings?: RecommendationTimings,
+  deadlineAt?: number,
 ): Promise<Recommendation[]> {
   const started = Date.now();
-  const recommendations = await Promise.all(batch.map(async (pick) => {
-    try {
-      return await enrichRecommendation(pick, country, platforms);
-    } catch {
-      return {
-        ...pick,
-        whereToWatch: {
-          status: "unverified" as const,
-          primary: "Availability not verified yet",
-          note: "Check your apps — metadata lookup timed out.",
-          providers: [],
-          country,
-          notOnUserPlatforms: false,
-        },
-      };
-    }
-  }));
+  const budgetMs = verificationBudgetMs(deadlineAt);
+  const recommendations = await Promise.all(
+    batch.map((pick) => enrichWithinBudget(pick, country, platforms, budgetMs)),
+  );
   if (timings) timings.verificationMs += Date.now() - started;
   return recommendations;
 }
@@ -904,8 +982,34 @@ async function subscriptionVerifiedChain(
   count = 3,
   deadlineAt?: number,
   timings?: RecommendationTimings,
+  verifyRating: typeof verifyFamilyRating = verifyFamilyRating,
 ): Promise<SubscriptionChainResult> {
   const platforms = input.platforms ?? [];
+  const rejections: TrustRejection[] = [];
+  const familySafe = extractIntent(input).familySafe;
+  const qualify = async (rec: Recommendation, checkSubscriptions = true): Promise<Recommendation | null> => {
+    // Animation/language/exclusions can reject locally before spending a rating lookup.
+    const preliminary = candidateRejectionReasons(input, rec, intentContract, checkSubscriptions)
+      .filter(reason => reason !== "family rating not verified");
+    if (preliminary.length) {
+      rejections.push({ title: rec.title, reasons: preliminary });
+      return null;
+    }
+    if (familySafe && deadlineAt && Date.now() >= deadlineAt) {
+      rejections.push({ title: rec.title, reasons: ["verification budget exhausted"] });
+      return null;
+    }
+    const checked = familySafe ? await verifyRating(rec) : rec;
+    const reasons = candidateRejectionReasons(input, checked, intentContract, checkSubscriptions);
+    if (reasons.length) { rejections.push({ title: rec.title, reasons }); return null; }
+    return checked;
+  };
+  const select = async (batch: Recommendation[]) => {
+    const started = Date.now();
+    const result = await selectQualifiedCandidates(batch.filter(hasSubscriptionProvider), count, qualify);
+    if (timings) timings.verificationMs += Date.now() - started;
+    return result;
+  };
   // The UI deliberately asks for one visible pick first. Subscription verification needs a
   // wider internal candidate set, otherwise one unavailable title makes the whole search fail.
   const candidateCount = Math.max(3, count);
@@ -925,10 +1029,11 @@ async function subscriptionVerifiedChain(
     candidateCount,
     deadlineAt,
   );
-  const enriched1 = await enrichBatch(trusted1.batch, country, platforms, timings);
-  const verified1 = enriched1.filter(hasSubscriptionProvider).slice(0, count);
+  const enriched1 = await enrichBatch(trusted1.batch, country, platforms, timings, deadlineAt);
+  rejections.push(...trusted1.rejections);
+  const verified1 = await select(enriched1);
   if (verified1.length > 0) {
-    return { picks: verified1, displayState: "verified", rejections: trusted1.rejections, fallbackUsed: trusted1.fallbackUsed };
+    return { picks: verified1, displayState: "verified", rejections, fallbackUsed: trusted1.fallbackUsed };
   }
 
   // Step 2 — strict retry; failure is non-fatal.
@@ -952,11 +1057,12 @@ async function subscriptionVerifiedChain(
       filterFalsePositiveRecommendations(candidateInput, raw2).slice(0, candidateCount),
       intentContract,
     );
+    rejections.push(...filtered2.rejected);
     if (filtered2.accepted.length > 0) {
-      enriched2 = await enrichBatch(filtered2.accepted, country, platforms, timings);
-      const verified2 = enriched2.filter(hasSubscriptionProvider).slice(0, count);
+      enriched2 = await enrichBatch(filtered2.accepted, country, platforms, timings, deadlineAt);
+      const verified2 = await select(enriched2);
       if (verified2.length > 0) {
-        return { picks: verified2, displayState: "verified", rejections: trusted1.rejections, fallbackUsed: strictFallbackUsed };
+        return { picks: verified2, displayState: "verified", rejections, fallbackUsed: strictFallbackUsed };
       }
     }
   } catch {
@@ -966,17 +1072,18 @@ async function subscriptionVerifiedChain(
   // Step 3 — curated fallback verified against subscription.
   // Check the full curated pool (not artificially capped at 3).
   const curatedTrusted = applyTrustFilter(input, filteredLocalFallback(input, intentContract), intentContract);
+  rejections.push(...curatedTrusted.rejected);
   const curated = curatedTrusted.accepted.length > 0 ? curatedTrusted.accepted : [safeFallback(input)];
-  const enrichedCurated = await enrichBatch(curated, country, platforms, timings);
-  const verifiedCurated = enrichedCurated.filter(hasSubscriptionProvider).slice(0, count);
+  const enrichedCurated = await enrichBatch(curated, country, platforms, timings, deadlineAt);
+  const verifiedCurated = await select(enrichedCurated);
   if (verifiedCurated.length > 0) {
-    return { picks: verifiedCurated, displayState: "verified", rejections: trusted1.rejections, fallbackUsed: true };
+    return { picks: verifiedCurated, displayState: "verified", rejections, fallbackUsed: true };
   }
 
   // Step 4 — no subscription match.
   // Return a single placeholder pick (not the full teaser batch) so the API response is well-formed.
   // The UI shows a clean no-match state; the pick title is used in the description only.
-  const firstAttempted = enriched1[0] ?? enriched2[0] ?? enrichedCurated[0] ?? await enrichRecommendation(safeFallback(input), country, platforms);
+  const firstAttempted = enriched1[0] ?? enriched2[0] ?? enrichedCurated[0] ?? await enrichWithinBudget(safeFallback(input), country, platforms, verificationBudgetMs(deadlineAt));
   return {
     picks: [{
       ...firstAttempted,
@@ -990,7 +1097,7 @@ async function subscriptionVerifiedChain(
       },
     }],
     displayState: "no-subscription-match",
-    rejections: trusted1.rejections,
+    rejections,
     fallbackUsed: trusted1.fallbackUsed || strictFallbackUsed,
   };
 }
@@ -1106,6 +1213,18 @@ export async function POST(req: Request) {
     // fetchServerProfileTitles's comment. Started after the geo-scope/plot-decline bail-outs so a
     // rejected request doesn't pay for it at all.
     const serverProfileTitlesPromise = fetchServerProfileTitles(input);
+    // Request-scoped evidence reuse: never reuse a previous user's pick or a stale rating.
+    const ratingChecks = new Map<string, Promise<Recommendation>>();
+    const verifyRating = async (rec: Recommendation): Promise<Recommendation> => {
+      const key = JSON.stringify([rec.title.trim().toLowerCase(), rec.year]);
+      let pending = ratingChecks.get(key);
+      if (!pending) { pending = verifyFamilyRating(rec); ratingChecks.set(key, pending); }
+      const checked = await pending;
+      return { ...rec, contentMetadata: { ...rec.contentMetadata,
+        familyRating: checked.contentMetadata?.familyRating,
+        familyRatingVerified: checked.contentMetadata?.familyRatingVerified,
+      } };
+    };
 
     // Opt-in staged progress (Tier 2 speed work — perceived, not actual, latency). Only the real
     // frontend sets `stream: true`; test:gate/test:recommendation and any other direct caller keep
@@ -1161,7 +1280,7 @@ export async function POST(req: Request) {
       // subscriptionVerifiedChain does its own TMDB verification internally across multiple
       // candidate rounds, so "verifying" covers its whole call rather than a point inside it.
       emitStage("verifying");
-      const chain = await subscriptionVerifiedChain(input, country, providerTrace, intentContract, count, deadlineAt, timings);
+      const chain = await subscriptionVerifiedChain(input, country, providerTrace, intentContract, count, deadlineAt, timings, verifyRating);
       timings.recommendationMs += Date.now() - recommendationStarted - timings.verificationMs;
       enrichedBatch = chain.picks;
       displayState = chain.displayState;
@@ -1184,12 +1303,12 @@ export async function POST(req: Request) {
       const requestCount = candidateRequestCount(count, intentContract);
       prompt = buildRecommendationPrompt(input, { intentContract, count: requestCount });
       const recommendationStarted = Date.now();
-      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, null, requestCount, deadlineAt, count);
+      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, null, requestCount, deadlineAt, verificationCandidateCount(input, intentContract, count, requestCount));
       timings.recommendationMs += Date.now() - recommendationStarted;
       trustRejections = trustedRaw.rejections;
       fallbackUsed = trustedRaw.fallbackUsed;
       emitStage("verifying");
-      enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings);
+      enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings, deadlineAt);
       displayState = "unverified";
     } else if (input.mode === "self" && !selfModeParallelIntentEnabled) {
       // Default path: original sequential behavior. See selfModeParallelIntentEnabled above for why.
@@ -1206,12 +1325,12 @@ export async function POST(req: Request) {
       const requestCount = candidateRequestCount(count, intentContract);
       prompt = buildRecommendationPrompt(input, { intentContract, count: requestCount });
       const recommendationStarted = Date.now();
-      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, null, requestCount, deadlineAt, count);
+      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, null, requestCount, deadlineAt, verificationCandidateCount(input, intentContract, count, requestCount));
       timings.recommendationMs += Date.now() - recommendationStarted;
       trustRejections = trustedRaw.rejections;
       fallbackUsed = trustedRaw.fallbackUsed;
       emitStage("verifying");
-      enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings);
+      enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings, deadlineAt);
       displayState = "unverified";
     } else if (input.mode === "self") {
       // Free-text Describe requests: 95% of first-pick production traffic, and previously fully
@@ -1268,12 +1387,12 @@ export async function POST(req: Request) {
       const requestCount = candidateRequestCount(count, intentContract);
       prompt = buildRecommendationPrompt(input, { intentContract, count: requestCount });
       const retryStarted = Date.now();
-      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, usableBatch, requestCount, deadlineAt, count);
+      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, usableBatch, requestCount, deadlineAt, verificationCandidateCount(input, intentContract, count, requestCount));
       timings.recommendationMs += Date.now() - retryStarted;
       trustRejections = trustedRaw.rejections;
       fallbackUsed = trustedRaw.fallbackUsed;
       emitStage("verifying");
-      enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings);
+      enrichedBatch = await enrichBatch(trustedRaw.batch, country, platforms, timings, deadlineAt);
       displayState = "unverified";
     } else {
       // Fresh structured Choose requests can safely run intent classification and recommendation
@@ -1324,13 +1443,13 @@ export async function POST(req: Request) {
       const requestCount = candidateRequestCount(count, intentContract);
       prompt = buildRecommendationPrompt(input, { intentContract, count: requestCount });
       const retryStarted = Date.now();
-      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, usableBatch, requestCount, deadlineAt, count);
+      const trustedRaw = await trustedRawBatch(input, prompt, providerTrace, intentContract, usableBatch, requestCount, deadlineAt, verificationCandidateCount(input, intentContract, count, requestCount));
       timings.recommendationMs += Date.now() - retryStarted;
       const normalizedBatch = trustedRaw.batch;
       trustRejections = trustedRaw.rejections;
       fallbackUsed = trustedRaw.fallbackUsed;
       emitStage("verifying");
-      enrichedBatch = await enrichBatch(normalizedBatch, country, platforms, timings);
+      enrichedBatch = await enrichBatch(normalizedBatch, country, platforms, timings, deadlineAt);
       displayState = "unverified";
     }
 
@@ -1385,7 +1504,7 @@ export async function POST(req: Request) {
         })));
         const trustedFallback = applyTrustFilter(input, filteredLocalFallback(input, intentContract), intentContract);
         trustRejections.push(...trustedFallback.rejected);
-        const fallback = await enrichBatch(trustedFallback.accepted.slice(0, Math.max(count, 3)), country, platforms, timings);
+        const fallback = await enrichBatch(trustedFallback.accepted.slice(0, Math.max(count, 3)), country, platforms, timings, deadlineAt);
         const confirmedFallback = fallback
           .filter(metadataConfirmsHorror)
           .filter((rec) => matchesLanguageRequest(input, rec))
@@ -1422,7 +1541,7 @@ export async function POST(req: Request) {
       } else {
         const fallbackRaw = safeFallback(input);
         const verificationStarted = Date.now();
-        const fallback = await enrichRecommendation(fallbackRaw, country, platforms);
+        const fallback = await enrichWithinBudget(fallbackRaw, country, platforms, verificationBudgetMs(deadlineAt));
         timings.verificationMs += Date.now() - verificationStarted;
         enrichedBatch = [hasSubscriptionProvider(fallback) ? fallback : unavailableSubscriptionFallback(fallback, country)];
         displayState = "avoidance-fallback";
@@ -1440,9 +1559,9 @@ export async function POST(req: Request) {
         // are already dropped, which is the primary language-lane guarantee.
         const trustedFallback = applyTrustFilter(input, filteredLocalFallback(input, intentContract), intentContract);
         trustRejections.push(...trustedFallback.rejected);
-        const fallback = (await enrichBatch(trustedFallback.accepted, country, platforms, timings)).slice(0, count);
+        const fallback = (await enrichBatch(trustedFallback.accepted, country, platforms, timings, deadlineAt)).slice(0, count);
         const filteredFallback = fallback.filter((recommendation) => matchesLanguageRequest(input, recommendation));
-        enrichedBatch = filteredFallback.length > 0 ? filteredFallback : fallback;
+        enrichedBatch = filteredFallback;
       }
     }
 
@@ -1458,16 +1577,16 @@ export async function POST(req: Request) {
         // picks, same "confirmed mismatch dropped is the guarantee" posture as the positive lane.
         const trustedFallback = applyTrustFilter(input, filteredLocalFallback(input, intentContract), intentContract);
         trustRejections.push(...trustedFallback.rejected);
-        const fallback = (await enrichBatch(trustedFallback.accepted, country, platforms, timings)).slice(0, count);
+        const fallback = (await enrichBatch(trustedFallback.accepted, country, platforms, timings, deadlineAt)).slice(0, count);
         const filteredFallback = fallback.filter((recommendation) => matchesAvoidedLanguageRequest(input, recommendation));
-        enrichedBatch = filteredFallback.length > 0 ? filteredFallback : fallback;
+        enrichedBatch = filteredFallback;
       }
     }
 
     if (enrichedBatch.length === 0) {
       const fallbackRaw = applyTrustFilter(input, [safeFallback(input)], intentContract).accepted[0] ?? safeFallback(input);
       const verificationStarted = Date.now();
-      const fallback = await enrichRecommendation(fallbackRaw, country, platforms);
+      const fallback = await enrichWithinBudget(fallbackRaw, country, platforms, verificationBudgetMs(deadlineAt));
       timings.verificationMs += Date.now() - verificationStarted;
       enrichedBatch = hasSubscriptionProvider(fallback)
         ? [fallback]
@@ -1489,8 +1608,49 @@ export async function POST(req: Request) {
       }));
     }
 
+    // All generation/retry/fallback branches converge here, including no-subscription-match.
+    // Never return a confirmed contradiction just because a fallback pool was exhausted.
+    if (extractIntent(input).familySafe) {
+      const started = Date.now();
+      enrichedBatch = await Promise.all(enrichedBatch.map(verifyRating));
+      timings.verificationMs += Date.now() - started;
+    }
+    enrichedBatch = enrichedBatch.filter(rec => {
+      const reasons = candidateRejectionReasons(input, rec, intentContract, displayState !== "no-subscription-match");
+      if (reasons.length) trustRejections.push({ title: rec.title, reasons });
+      return reasons.length === 0;
+    });
+    if (!enrichedBatch.length) {
+      const failureEvent = {
+        schemaVersion: 1 as const,
+        runId: input.runId || `srv-${requestStarted.toString(36)}`,
+        createdAt: new Date().toISOString(), sessionId: input.sessionId,
+        mode: input.mode, country, recommendationCount: count,
+        platformFilter: input.platformFilter, responseDetail: input.responseDetail ?? "full",
+        title: "", year: "", displayState: "no-matching-recommendation", fallbackUsed,
+        source: "rejected", degraded: false, outcome: "no-match" as const,
+        timings: { ...timings, totalMs: Date.now() - requestStarted },
+        retryCount: Math.max(0, providerTrace.filter(item => !item.provider.startsWith("Intent ") && !item.provider.startsWith("parallel-batch discarded")).length - 1),
+        rejectionCount: trustRejections.length,
+        rejectionReasons: summarizeRejectionReasons(trustRejections),
+      };
+      after(() => writeRecommendationDiagnostics(failureEvent));
+      throw new NoMatchingRecommendationError();
+    }
+
+    // Wider constrained pools exist only to find the first verified answer. Do not turn the
+    // foreground request back into a reroll batch; backup generation remains a separate client-
+    // initiated background request after this result is delivered.
+    enrichedBatch = enrichedBatch.slice(0, count);
+
     const postProcessingStarted = Date.now();
     enrichedBatch = enrichedBatch.map((item) => sanitizeRelatedForRequest(input, item, intentContract));
+    if (extractIntent(input).familySafe) enrichedBatch = enrichedBatch.map(temperFamilySuitability);
+    // Legacy related titles have no independently checked language/format/rating evidence.
+    // Verified background batches still provide alternatives through the same final gate.
+    if (avoids.length || wantsSpecificLanguage(input) || wantsToAvoidLanguage(input) || wantsAnimation(input) || extractIntent(input).familySafe) {
+      enrichedBatch = enrichedBatch.map(item => ({ ...item, alternatives: [], alternativePosterUrls: [], hiddenLayer: { ...item.hiddenLayer, titles: [] } }));
+    }
 
     const firstPick = enrichedBatch[0];
     if (displayState !== "no-subscription-match" && displayState !== "avoidance-fallback") {
@@ -1572,13 +1732,13 @@ export async function POST(req: Request) {
         streamController = controller;
         try {
           const payload = await buildResult();
-          void writeRecommendationDiagnostics(buildDiagnosticsEvent(input, payload));
+          after(() => writeRecommendationDiagnostics(buildDiagnosticsEvent(input, payload)));
           controller.enqueue(encoder.encode(`${JSON.stringify({ type: "result", payload })}\n`));
         } catch (error) {
           console.error("Recommendation route failed (streamed):", error);
           controller.enqueue(encoder.encode(`${JSON.stringify({
             type: "error",
-            error: "Recommendation failed. Check API keys or model output.",
+            error: error instanceof NoMatchingRecommendationError ? error.message : "We couldn't finish your pick. Please try again in a moment.",
           })}\n`));
         } finally {
           controller.close();
@@ -1592,9 +1752,10 @@ export async function POST(req: Request) {
       },
     });
   } catch (error) {
+    if (error instanceof NoMatchingRecommendationError) return NextResponse.json({ error: error.message, code: "no-matching-recommendation" }, { status: 422 });
     console.error("Recommendation route failed:", error);
     return NextResponse.json(
-      { error: "Recommendation failed. Check API keys or model output." },
+      { error: "We couldn't finish your pick. Please try again in a moment." },
       { status: 500 },
     );
   }

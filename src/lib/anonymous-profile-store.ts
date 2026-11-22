@@ -41,6 +41,10 @@ async function pipeline(commands: Array<Array<string | number>>): Promise<void> 
     signal: AbortSignal.timeout(2000),
   });
   if (!response.ok) throw new Error(`Profile memory write failed (${response.status})`);
+  const results = await response.json() as Array<{ error?: string }>;
+  if (!Array.isArray(results) || results.length !== commands.length || results.some((item) => !item || item.error)) {
+    throw new Error("Profile memory command failed");
+  }
 }
 
 // The client's own excludedTitles/seenTitles lists (recommendation-session.ts) are capped at

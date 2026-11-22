@@ -1,3 +1,4 @@
+import { writeLearningRecord } from "@/lib/learning-storage";
 import { after, NextResponse } from "next/server";
 import { appendProfileFeedback } from "@/lib/anonymous-profile-store";
 
@@ -24,21 +25,7 @@ type FeedbackEvent = {
 };
 
 async function writeToKv(event: FeedbackEvent): Promise<void> {
-  // Upstash Redis (marketplace) or legacy Vercel KV env var names
-  const url = process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
-  if (!url || !token) {
-    console.log("[FUN feedback]", JSON.stringify(event));
-    return;
-  }
-  // Pipeline endpoint with explicit command arrays — see recommendation-runs/route.ts for why the
-  // path-style `/lpush/key` endpoint with an array body double-encoded every record here.
-  await fetch(`${url}/pipeline`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify([["LPUSH", "fun:feedback", JSON.stringify(event)]]),
-    signal: AbortSignal.timeout(3000),
-  });
+  await writeLearningRecord("fun:feedback", event, 3000);
 }
 
 export async function POST(req: Request) {

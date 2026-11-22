@@ -138,6 +138,8 @@ export type Recommendation = {
     providers?: WatchProvider[];
     country?: string;
     verifiedAt?: string;
+    // Records whether availability came from the stored catalogue or a TMDB lookup.
+    availabilitySource?: "catalogue" | "tmdb";
     notOnUserPlatforms?: boolean;
   };
   hiddenLayer: {
@@ -155,6 +157,8 @@ export type Recommendation = {
     originCountry?: string[];
     genreIds?: number[];
     catalogConfirmed?: boolean;
+    familyRatingVerified?: boolean;
+    familyRating?: string;
   };
   parsedIntent?: ParsedRecommendationIntent;
   contentCategory?: string[];

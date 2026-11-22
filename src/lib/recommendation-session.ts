@@ -1,6 +1,7 @@
 import { IntentContract, RecommendRequest, Recommendation, RecommendationDisplayState, RecommendationFeedbackContext, WatchProvider } from "@/lib/types";
 
 export const recommendationStorageKey = "fun:last-recommendation";
+export const recommendationReadyEvent = "fun:recommendation-ready";
 export const seenTitlesKey = "fun:seen-titles";
 export const feedbackStorageKey = "fun:recommendation-feedback";
 export const recentRecommendationTitlesKey = "fun:recent-recommendation-titles";
@@ -8,11 +9,15 @@ export const recommendationHistoryKey = "fun:recommendation-history";
 export const dismissedPostWatchPromptKey = "fun:dismissed-post-watch-prompts";
 export const sessionIdKey = "fun:session-id";
 
+function saveLocalValue(key: string, value: string): void {
+  try { localStorage.setItem(key, value); } catch { /* Optional device memory must not discard a successful recommendation. */ }
+}
+
 export function getOrCreateSessionId(): string {
   if (typeof window === "undefined") return "ssr";
   try {
     const existing = localStorage.getItem(sessionIdKey);
-    if (existing) return existing;
+    if (existing && /^[a-zA-Z0-9_-]{1,96}$/.test(existing) && !["unknown", "ssr"].includes(existing)) return existing;
     const id = `anon-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
     localStorage.setItem(sessionIdKey, id);
     return id;
@@ -74,7 +79,8 @@ export function loadSeenTitles(): string[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(seenTitlesKey);
-    return raw ? (JSON.parse(raw) as string[]) : [];
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) : [];
   } catch {
     return [];
   }
@@ -83,7 +89,7 @@ export function loadSeenTitles(): string[] {
 export function addSeenTitle(title: string): string[] {
   const seen = loadSeenTitles();
   if (!seen.includes(title)) seen.push(title);
-  localStorage.setItem(seenTitlesKey, JSON.stringify(seen));
+  saveLocalValue(seenTitlesKey, JSON.stringify(seen));
   return seen;
 }
 
@@ -91,7 +97,8 @@ export function loadRecentRecommendationTitles(): string[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(recentRecommendationTitlesKey);
-    return raw ? (JSON.parse(raw) as string[]) : [];
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) : [];
   } catch {
     return [];
   }
@@ -101,7 +108,7 @@ export function rememberRecommendationTitles(titles: string[]): string[] {
   const cleanTitles = titles.map((title) => title.trim()).filter(Boolean);
   const existing = loadRecentRecommendationTitles();
   const next = [...cleanTitles, ...existing.filter((title) => !cleanTitles.includes(title))].slice(0, 24);
-  localStorage.setItem(recentRecommendationTitlesKey, JSON.stringify(next));
+  saveLocalValue(recentRecommendationTitlesKey, JSON.stringify(next));
   return next;
 }
 
@@ -148,7 +155,8 @@ export function loadRecommendationHistory(): RecommendationHistoryItem[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(recommendationHistoryKey);
-    return raw ? (JSON.parse(raw) as RecommendationHistoryItem[]) : [];
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((item): item is RecommendationHistoryItem => Boolean(item && typeof item === "object" && typeof item.title === "string" && typeof item.year === "string" && item.request && item.whereToWatch)) : [];
   } catch {
     return [];
   }
@@ -175,7 +183,7 @@ export function rememberRecommendationHistory(recommendations: Recommendation[],
     ...nextItems,
     ...existing.filter((item) => !nextKeys.has(recommendationKey(item.title, item.year))),
   ].slice(0, 80);
-  localStorage.setItem(recommendationHistoryKey, JSON.stringify(next));
+  saveLocalValue(recommendationHistoryKey, JSON.stringify(next));
   return next;
 }
 
@@ -183,7 +191,8 @@ export function loadRecommendationFeedback(): RecommendationFeedback[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(feedbackStorageKey);
-    return raw ? (JSON.parse(raw) as RecommendationFeedback[]) : [];
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((item): item is RecommendationFeedback => Boolean(item && typeof item === "object" && typeof item.title === "string" && typeof item.year === "string" && item.request && item.whereToWatch)) : [];
   } catch {
     return [];
   }
@@ -213,7 +222,7 @@ export function saveRecommendationFeedback(
     createdAt: new Date().toISOString(),
   };
   const next = [feedback, ...existing].slice(0, 200);
-  localStorage.setItem(feedbackStorageKey, JSON.stringify(next));
+  saveLocalValue(feedbackStorageKey, JSON.stringify(next));
   return next;
 }
 
@@ -250,7 +259,7 @@ export function savePostWatchFeedback(
     createdAt: new Date().toISOString(),
   };
   const next = [feedback, ...withoutDuplicatePostWatch].slice(0, 200);
-  localStorage.setItem(feedbackStorageKey, JSON.stringify(next));
+  saveLocalValue(feedbackStorageKey, JSON.stringify(next));
   return next;
 }
 
@@ -258,7 +267,8 @@ function loadDismissedPostWatchPrompts(): string[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(dismissedPostWatchPromptKey);
-    return raw ? (JSON.parse(raw) as string[]) : [];
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string" && Boolean(item.trim())) : [];
   } catch {
     return [];
   }
@@ -273,7 +283,7 @@ export function dismissPostWatchPrompt(title: string, year: string): string[] {
   const key = recommendationKey(title, year);
   const existing = loadDismissedPostWatchPrompts();
   const next = existing.includes(key) ? existing : [key, ...existing].slice(0, 80);
-  localStorage.setItem(dismissedPostWatchPromptKey, JSON.stringify(next));
+  saveLocalValue(dismissedPostWatchPromptKey, JSON.stringify(next));
   return next;
 }
 

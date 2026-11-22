@@ -37,11 +37,13 @@ import {
   loadRecommendationFeedbackContext,
   RecommendationSession,
   recommendationStorageKey,
+  recommendationReadyEvent,
   rememberRecommendationHistory,
   rememberRecommendationTitles,
   saveRecommendationFeedback,
   toTitleCase,
 } from "@/lib/recommendation-session";
+import { recommendationTabStorage, beginRecommendationRequest, ownsRecommendationRequest, loadActiveRecommendation, mergeBackgroundRecommendations, clearActiveRecommendation, listenForForegroundRecommendation } from "@/lib/recommendation-lifecycle";
 import { captureRecommendationRun } from "@/lib/recommendation-analytics";
 import { applyAffiliateTag } from "@/lib/affiliate-links";
 import RecommendationLoadingScreen, { LoadingStage } from "@/components/RecommendationLoadingScreen";
@@ -93,12 +95,7 @@ function captureEvent(type: string, payload: Record<string, unknown>) {
 }
 
 function loadSession(): RecommendationSession | null {
-  try {
-    const raw = localStorage.getItem(recommendationStorageKey);
-    return raw ? JSON.parse(raw) as RecommendationSession : null;
-  } catch {
-    return null;
-  }
+  return loadActiveRecommendation();
 }
 
 function logo() {
@@ -120,6 +117,13 @@ function previewBadge() {
 function justWatchUrl(title: string, country?: string) {
   const locale = justWatchLocale[country ?? ""] ?? "us";
   return `https://www.justwatch.com/${locale}/search?q=${encodeURIComponent(title)}`;
+}
+
+function availabilityCheckedLabel(value: string | undefined) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return `Checked ${date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}`;
 }
 
 function normalizeProviderName(value: string) {
@@ -291,74 +295,63 @@ export default function RecommendationPage() {
   // await it directly instead of polling. null once no fill is pending for the current session.
   const fillPromiseRef = useRef<Promise<void> | null>(null);
   const fillStartedForRunIdRef = useRef<string | undefined>(undefined);
+  const fillAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    const isLoading = localStorage.getItem(LOADING_KEY) === "true";
-    if (isLoading) {
-      setFetchLoading(true);
-      setLoadingStage(localStorage.getItem(LOADING_STAGE_KEY) || DEFAULT_LOADING_STAGE);
-      const interval = setInterval(() => {
-        // Real pipeline progress, written by page.tsx as it reads the NDJSON stream — not a timer.
-        const stage = localStorage.getItem(LOADING_STAGE_KEY);
-        if (stage) setLoadingStage(stage);
-        const startedAt = Number(localStorage.getItem(LOADING_STARTED_KEY) ?? Date.now());
-        if (Date.now() - startedAt > LOADING_TIMEOUT_MS) {
-          clearInterval(interval);
-          localStorage.removeItem(LOADING_KEY);
-          localStorage.removeItem(LOADING_STARTED_KEY);
-          setFetchError("The recommendation took too long. Please try again.");
-          setFetchLoading(false);
-          setReady(true);
-          return;
-        }
-        if (localStorage.getItem(LOADING_KEY) !== "true") {
-          clearInterval(interval);
-          const error = localStorage.getItem(ERROR_KEY);
-          if (error) {
-            localStorage.removeItem(ERROR_KEY);
-            setFetchError(error);
-            setFetchLoading(false);
-          } else {
-            const loaded = loadSession();
-            if (loaded) {
-              setSession(loaded);
-              setBatchIndex(loaded.batchIndex ?? 0);
-            } else {
-              setNoSession(true);
-            }
-            setFetchLoading(false);
-          }
-          setReady(true);
-        }
-      }, 400);
-      return () => clearInterval(interval);
-    }
-    const loaded = loadSession();
-    if (loaded) {
-      setSession(loaded);
-      setBatchIndex(loaded.batchIndex ?? 0);
-    } else {
-      // A refresh, re-navigation, or return visit after a failed request (rate limit, geo-scope,
-      // etc.) landed here with `fun:loading` already cleared — the polling branch above only ever
-      // catches this in the exact split-second window of the original failed request. Check for a
-      // stored error here too, so e.g. the rate-limit unlock form stays reachable on a reload
-      // instead of silently disappearing into a bare "no recommendation yet" screen.
-      const error = localStorage.getItem(ERROR_KEY);
-      if (error) {
-        localStorage.removeItem(ERROR_KEY);
-        setFetchError(error);
-      } else {
-        setNoSession(true);
+    let wasLoading = false;
+    const reconcile = () => {
+      let loading = recommendationTabStorage.getItem(LOADING_KEY) === "true";
+      const startedAt = Number(recommendationTabStorage.getItem(LOADING_STARTED_KEY));
+      if (loading && (!Number.isFinite(startedAt) || startedAt <= 0 || Date.now() - startedAt > LOADING_TIMEOUT_MS)) {
+        clearActiveRecommendation();
+        recommendationTabStorage.setItem(ERROR_KEY, "The recommendation took too long. Please try again.");
+        loading = false;
       }
-    }
-    setReady(true);
+      wasLoading = loading;
+      setFetchLoading(loading);
+      setReady(true);
+      if (loading) {
+        setFetchError(null);
+        setNoSession(false);
+        setLoadingStage(recommendationTabStorage.getItem(LOADING_STAGE_KEY) || DEFAULT_LOADING_STAGE);
+        return;
+      }
+      // Reading an error must not consume it: reload should preserve the same outcome.
+      const error = recommendationTabStorage.getItem(ERROR_KEY);
+      const current = error ? null : loadSession();
+      setFetchError(error);
+      setNoSession(!error && !current);
+      if (!current) {
+        setSession(null);
+      } else {
+        setSession(current);
+        setBatchIndex(current.batchIndex ?? 0);
+      }
+    };
+    reconcile();
+    // Recovery if a completion event is missed; do not repeatedly reload settled results.
+    const interval = setInterval(() => {
+      if (wasLoading || recommendationTabStorage.getItem(LOADING_KEY) === "true") reconcile();
+    }, 400);
+    window.addEventListener("storage", reconcile);
+    window.addEventListener("pageshow", reconcile);
+    window.addEventListener("focus", reconcile);
+    window.addEventListener(recommendationReadyEvent, reconcile);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("storage", reconcile);
+      window.removeEventListener("pageshow", reconcile);
+      window.removeEventListener("focus", reconcile);
+      window.removeEventListener(recommendationReadyEvent, reconcile);
+    };
   }, []);
 
   // Two-phase fetch: pick 1 already rendered — either from page.tsx's initial recommendationCount: 1
   // request, or from replaceWithBatch below (reroll / "Already seen" exhaustion / search beyond
   // subscriptions all request just 1 pick too). Fetch picks 2–3 in the background so they're ready
   // by the time the user rerolls again, without ever blocking on a full 3-pick generation.
-  async function runBackgroundFill(current: RecommendationSession) {
+  async function runBackgroundFill(current: RecommendationSession, signal: AbortSignal) {
+    if (!ownsRecommendationRequest(current.runId, current.request.sessionId)) return;
     // Distinct from current.runId — this is a genuinely separate LLM call producing "Similar
     // picks" tray entries, never the hero recommendation. Without its own tagged runId this
     // call's results were previously invisible in /api/recommendation-runs entirely, making it
@@ -369,6 +362,7 @@ export default function RecommendationPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
+        signal,
         body: JSON.stringify({
           ...current.request,
           recommendationCount: 2,
@@ -390,18 +384,15 @@ export default function RecommendationPage() {
         }),
       });
       if (!response.ok) throw new Error("fill failed");
-      const data = await response.json() as Recommendation & { _batch?: Recommendation[] };
+      const data = await response.json() as Recommendation & { _batch?: Recommendation[]; _trust?: { displayState?: string } };
+      if (data._trust?.displayState === "no-subscription-match") throw new Error("No verified subscription alternatives");
       const fillPicks = data._batch ?? [data];
-
-      const existingKeys = new Set((current.batch ?? [current.recommendation]).map((item) => relatedTitleKey(item.title)));
-      const newPicks = fillPicks.filter((pick) => !existingKeys.has(relatedTitleKey(pick.title)));
 
       // Re-read from localStorage in case the user has already advanced batchIndex/feedback state
       // while the fill was in flight — merge onto the freshest session, not a stale closure.
-      const latest = loadSession() ?? current;
-      const mergedBatch = [...(latest.batch ?? [latest.recommendation]), ...newPicks];
-      const next: RecommendationSession = { ...latest, batch: mergedBatch, batchComplete: true };
-      localStorage.setItem(recommendationStorageKey, JSON.stringify(next));
+      const next = mergeBackgroundRecommendations(current, loadSession(), fillPicks);
+      if (!next) return;
+      recommendationTabStorage.setItem(recommendationStorageKey, JSON.stringify(next));
       setSession(next);
       if (fillPicks[0]) {
         captureRecommendationRun({
@@ -412,13 +403,14 @@ export default function RecommendationPage() {
           batch: fillPicks,
         });
       }
-    } catch {
+    } catch (error) {
+      if (signal.aborted) return;
       // Fill failed — mark complete anyway so handleSeenIt doesn't wait forever. It will fall
       // through to the existing full replaceWithBatch regeneration once the batch is exhausted,
       // which is exactly today's pre-two-phase-fetch behavior.
-      const latest = loadSession() ?? current;
-      const next: RecommendationSession = { ...latest, batchComplete: true };
-      localStorage.setItem(recommendationStorageKey, JSON.stringify(next));
+      const next = mergeBackgroundRecommendations(current, loadSession(), []);
+      if (!next) return;
+      recommendationTabStorage.setItem(recommendationStorageKey, JSON.stringify(next));
       setSession(next);
     }
   }
@@ -427,13 +419,29 @@ export default function RecommendationPage() {
     if (!session || session.batchComplete !== false) return;
     if (fillStartedForRunIdRef.current === session.runId) return;
     fillStartedForRunIdRef.current = session.runId;
-    fillPromiseRef.current = runBackgroundFill(session).finally(() => {
-      fillPromiseRef.current = null;
+    const controller = new AbortController();
+    fillAbortRef.current?.abort();
+    fillAbortRef.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), 85000);
+    const stopListening = listenForForegroundRecommendation(runId => {
+      if (runId !== session.runId) controller.abort();
     });
+    const pending = runBackgroundFill(session, controller.signal).finally(() => {
+      window.clearTimeout(timeout);
+      stopListening();
+      if (fillAbortRef.current === controller) fillAbortRef.current = null;
+      if (fillPromiseRef.current === pending) fillPromiseRef.current = null;
+    });
+    fillPromiseRef.current = pending;
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+      stopListening();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.runId, session?.batchComplete]);
 
-  async function replaceWithBatch(request: RecommendationSession["request"]) {
+  async function replaceWithBatch(request: RecommendationSession["request"], sameRequestIntent?: IntentContract) {
     // Generated before the request (not after the response) so the server's own log line for
     // this call and the client's later /api/recommendation-runs report share one ID.
     const runId = createRecommendationRunId();
@@ -450,16 +458,31 @@ export default function RecommendationPage() {
       ...request,
       recommendationCount: 1,
       responseDetail: "core",
-      precomputedIntentContract: undefined,
+      // Only Already seen supplies this: its mood/text/controls are unchanged. New
+      // asks and search-all-cinema still classify afresh; retry local timeout fallbacks.
+      precomputedIntentContract: sameRequestIntent?.source === "llm" ? sameRequestIntent : undefined,
       stream: false,
       runId,
     };
+    beginRecommendationRequest(runId);
+    recommendationTabStorage.setItem(LOADING_KEY, "true");
+    recommendationTabStorage.setItem(LOADING_STARTED_KEY, String(Date.now()));
+    recommendationTabStorage.removeItem(LOADING_STAGE_KEY);
+    setFetchLoading(true);
+    setFetchError(null);
+    setNoSession(false);
+    try {
     const response = await fetch("/api/recommend", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
+      signal: AbortSignal.timeout(85000),
       body: JSON.stringify(firstPickRequest),
+    }).catch(error => {
+      if (!ownsRecommendationRequest(runId, firstPickRequest.sessionId)) return null;
+      throw error;
     });
+    if (!response || !ownsRecommendationRequest(runId, firstPickRequest.sessionId)) return;
     if (!response.ok) {
       // Surface the server's actual error message (rate limit, geo-scope preview block, etc.)
       // instead of a generic string — see page.tsx's initial-fetch handler for the same fix.
@@ -476,7 +499,9 @@ export default function RecommendationPage() {
       _batch?: Recommendation[];
       _trust?: { displayState?: RecommendationDisplayState; batchComplete?: boolean; intentContract?: IntentContract };
     };
+    if (!ownsRecommendationRequest(runId, firstPickRequest.sessionId)) return;
     const batch = data._batch ?? [data];
+    if (!batch.length || !batch[0]?.title) throw new Error("No matching recommendation was returned.");
     rememberRecommendationTitles(batch.map((item) => item.title));
     rememberRecommendationHistory(batch, firstPickRequest, runId);
     const next = createRecommendationSession(
@@ -488,7 +513,7 @@ export default function RecommendationPage() {
       data._trust?.batchComplete,
       data._trust?.intentContract,
     );
-    localStorage.setItem(recommendationStorageKey, JSON.stringify(next));
+    recommendationTabStorage.setItem(recommendationStorageKey, JSON.stringify(next));
     setSession(next);
     setBatchIndex(0);
     setFeedbackReason(null);
@@ -512,6 +537,17 @@ export default function RecommendationPage() {
       batch,
       displayState: data._trust?.displayState,
     });
+    } catch (error) {
+      if (!ownsRecommendationRequest(runId, firstPickRequest.sessionId)) return;
+      recommendationTabStorage.setItem(ERROR_KEY, error instanceof Error ? error.message : "Could not find another pick. Please try again.");
+    } finally {
+      if (ownsRecommendationRequest(runId, firstPickRequest.sessionId)) {
+        recommendationTabStorage.removeItem(LOADING_KEY);
+        recommendationTabStorage.removeItem(LOADING_STARTED_KEY);
+        recommendationTabStorage.removeItem(LOADING_STAGE_KEY);
+        window.dispatchEvent(new Event(recommendationReadyEvent));
+      }
+    }
   }
 
   async function handleSeenIt() {
@@ -528,13 +564,15 @@ export default function RecommendationPage() {
       // through. Falls straight through (no wait) once batchComplete is true.
       if (nextIndex >= batch.length && activeSession.batchComplete === false && fillPromiseRef.current) {
         await fillPromiseRef.current;
-        activeSession = loadSession() ?? activeSession;
+        const latest = loadSession();
+        if (!latest || latest.runId !== activeSession.runId) return;
+        activeSession = latest;
         batch = activeSession.batch ?? [activeSession.recommendation];
       }
 
       if (nextIndex < batch.length) {
         const next = { ...activeSession, recommendation: batch[nextIndex], batchIndex: nextIndex };
-        localStorage.setItem(recommendationStorageKey, JSON.stringify(next));
+        recommendationTabStorage.setItem(recommendationStorageKey, JSON.stringify(next));
         setSession(next);
         setBatchIndex(nextIndex);
         setFeedbackReason(null);
@@ -549,7 +587,7 @@ export default function RecommendationPage() {
           ].slice(0, 200),
           sessionId: getOrCreateSessionId(),
           feedbackContext: loadRecommendationFeedbackContext(),
-        });
+        }, activeSession.intentContract);
       }
     } catch (error) {
       // The fetch above always throws either the server's real error message or an already-tailored
@@ -680,6 +718,8 @@ export default function RecommendationPage() {
     }))
     .filter((item): item is { provider: WatchProvider; href: string } => Boolean(item.href));
   const verified = pick.whereToWatch.status === "verified";
+  const availabilitySource = pick.whereToWatch.availabilitySource;
+  const availabilityChecked = availabilityCheckedLabel(pick.whereToWatch.verifiedAt);
   const subscriptionOnly = session?.request.platformFilter === "mine";
   const displayState = displayStateFor(session, pick);
   const noSubscriptionMatch = displayState === "no-subscription-match";
@@ -724,7 +764,7 @@ export default function RecommendationPage() {
     : displayState === "verified"
     ? {
         eyebrow: "Your one pick",
-        line: "Verified availability",
+        line: availabilitySource === "catalogue" ? "Catalogue availability" : "Availability reported",
         detail: pick.whereToWatch.note,
         icon: BadgeCheck,
         tone: "text-emerald-300",
@@ -842,7 +882,7 @@ export default function RecommendationPage() {
       <main className="grid min-h-screen place-items-center bg-[#030303] px-6 text-center text-white">
         <div>
           <div className="mb-5">{logo()}</div>
-          <h1 className="font-serif text-4xl">{fetchError ? "Something went wrong" : "No recommendation yet"}</h1>
+          <h1 className="font-serif text-4xl">{fetchError?.startsWith("We couldn't verify a pick") ? "No verified match" : fetchError ? "Something went wrong" : "No recommendation yet"}</h1>
           <p className="mt-3 text-white/50">{fetchError ?? "Pick your mood first and F.U.N will find your one match."}</p>
           {fetchError?.startsWith("You've reached today's free limit") && (
             <div className="mx-auto mt-5 w-full max-w-sm">
@@ -1149,7 +1189,7 @@ export default function RecommendationPage() {
           <article className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">
             <h2 className="mb-4 flex items-center gap-3 text-xl text-white">
               <StateIcon size={20} className={stateCopy.tone} />
-              {verified ? "Available now" : "Check availability"}
+              {verified ? "Watch options" : "Check availability"}
             </h2>
             {providers.length > 0 ? (
               <div className="grid gap-3 sm:grid-cols-2">
@@ -1165,6 +1205,14 @@ export default function RecommendationPage() {
                   Check availability <ExternalLink size={14} />
                 </a>
               </div>
+            )}
+            {verified && (
+              <p className="mt-3 text-xs text-white/45">
+                {availabilitySource === "catalogue" ? "Catalogue record" : availabilitySource === "tmdb" ? "TMDB listing" : "Availability listing"}
+                {availabilityChecked ? ` · ${availabilityChecked.replace("Checked ", availabilitySource === "tmdb" ? "Looked up " : "Recorded ")}` : ""}
+                {" · Confirm in your app; availability can change."}
+                {pick.contentMetadata?.familyRatingVerified ? ` · Rated ${pick.contentMetadata.familyRating} (OMDb); check age suitability and parental guidance.` : ""}
+              </p>
             )}
             {exhaustedSubscriptionBatch && (
               <button type="button" onClick={handleSearchBeyondSubscriptions} disabled={rerolling} className="mt-4 inline-flex h-11 items-center gap-2 rounded-lg border border-amber-300/28 bg-amber-400/[0.075] px-4 text-sm text-amber-100">

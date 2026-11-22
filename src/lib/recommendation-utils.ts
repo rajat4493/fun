@@ -153,10 +153,10 @@ function cloneGlobalRegex(pattern: RegExp): RegExp {
 }
 
 export function hasNegatedConcept(text: string, pattern: RegExp): boolean {
-  const clauses = text.split(/\b(?:but|however|though|although|except)\b/i);
+  const clauses = text.replace(/[’‘]/g, "'").split(/[.!?;]|\b(?:but|however|though|although)\b/i);
 
   return clauses.some((clause) => {
-    const negation = /\b(no|not|avoid|without|don't want|do not want|less|skip|hate|hates|hated|can't stand|cannot stand|cant stand|dislike|dislikes|despise|despises)\b/gi;
+    const negation = /\b(no|nothing|not(?!\s+only\b)|never|avoid|avoiding|except|without|don't want|do not want|less|skip|hate|hates|hated|can't stand|cannot stand|cant stand|dislike|dislikes|despise|despises)\b/gi;
     const concept = cloneGlobalRegex(pattern);
     const negationMatches = [...clause.matchAll(negation)];
     if (negationMatches.length === 0) return false;
