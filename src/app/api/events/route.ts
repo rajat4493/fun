@@ -1,3 +1,4 @@
+import { writeLearningRecord } from "@/lib/learning-storage";
 import { after, NextResponse } from "next/server";
 
 type FunEvent = {
@@ -8,21 +9,7 @@ type FunEvent = {
 };
 
 async function writeToKv(event: FunEvent): Promise<void> {
-  const url = process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
-  if (!url || !token) {
-    console.log("[FUN event]", JSON.stringify(event));
-    return;
-  }
-
-  // Pipeline endpoint with explicit command arrays — path-style `/lpush/key` with an array body
-  // double-encodes the value (see recommendation-runs/route.ts for the full explanation).
-  await fetch(`${url}/pipeline`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify([["LPUSH", "fun:events", JSON.stringify(event)]]),
-    signal: AbortSignal.timeout(2000),
-  });
+  await writeLearningRecord("fun:events", event);
 }
 
 export async function POST(req: Request) {

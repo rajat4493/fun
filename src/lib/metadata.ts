@@ -10,6 +10,7 @@ type OmdbResponse = {
   Title?: string;
   Year?: string;
   Poster?: string;
+  Rated?: string;
 };
 
 type TmdbMovie = {
@@ -40,6 +41,16 @@ function toCountryCode(country: string): string {
   return countryCodeMap[country.trim().toLowerCase()] ?? country.trim().toUpperCase();
 }
 
+// Animation/tone are not age classifications. Check an independent title-matched rating
+// only for an explicit family-safe request; unavailable evidence means no verified match.
+export async function verifyFamilyRating(rec: Recommendation): Promise<Recommendation> {
+  const metadata = await omdbFetch(rec.title, rec.year);
+  const rating = metadata?.Rated?.trim().toUpperCase();
+  const verified = metadata?.Response === "True" && metadata.Year?.slice(0, 4) === rec.year && Boolean(metadata.Title && posterTitleMatches(rec.title, metadata.Title)) &&
+    Boolean(rating && ["G", "PG", "TV-Y", "TV-Y7", "TV-G"].includes(rating));
+  return { ...rec, contentMetadata: { ...rec.contentMetadata, familyRatingVerified: verified, familyRating: verified ? rating : undefined } };
+}
+
 async function omdbFetch(title: string, year: string): Promise<OmdbResponse | null> {
   const apiKey = process.env.OMDB_API_KEY;
   if (!apiKey) return null;
@@ -51,13 +62,32 @@ async function omdbFetch(title: string, year: string): Promise<OmdbResponse | nu
       signal: AbortSignal.timeout(OMDB_TIMEOUT_MS),
     });
     if (!res.ok) return null;
-    return res.json() as Promise<OmdbResponse>;
+    return await res.json() as OmdbResponse;
   } catch {
     return null;
   }
 }
 
+// Share only simultaneous identical lookups. Completed or failed calls are removed immediately;
+// Next's existing one-hour data cache remains the only cache of completed metadata.
+const pendingTmdb = new Map<string, Promise<unknown>>();
+
 async function tmdbFetch<T>(path: string): Promise<T | null> {
+  if (process.env.FUN_DISABLE_METADATA_REUSE === "1") return tmdbFetchOnce<T>(path);
+  const pending = pendingTmdb.get(path);
+  if (pending) return pending as Promise<T | null>;
+  // Keep memory bounded under requests for many different titles; no waiting queue.
+  if (pendingTmdb.size >= 128) return tmdbFetchOnce<T>(path);
+  const request = tmdbFetchOnce<T>(path);
+  pendingTmdb.set(path, request);
+  try {
+    return await request;
+  } finally {
+    pendingTmdb.delete(path);
+  }
+}
+
+async function tmdbFetchOnce<T>(path: string): Promise<T | null> {
   const token = process.env.TMDB_READ_ACCESS_TOKEN;
   const apiKey = process.env.TMDB_API_KEY;
   if (!token && !apiKey) return null;
@@ -73,7 +103,7 @@ async function tmdbFetch<T>(path: string): Promise<T | null> {
       signal: AbortSignal.timeout(TMDB_TIMEOUT_MS),
     });
     if (!res.ok) return null;
-    return res.json() as Promise<T>;
+    return await res.json() as T;
   } catch {
     return null;
   }
@@ -289,11 +319,11 @@ export async function enrichRecommendation(
 
   const mainMovie = await tmdbSearch(raw.title, raw.year, raw.format);
 
-  // CHANGED: Previously fetched providers for every hidden title too (~36 TMDB calls total per request).
-  // Now only the main pick gets provider lookup — hidden titles get posters only, no provider calls.
-  // Cuts enrichment from ~36 API calls to ~6 per request, saving 3-5s per recommendation.
+  // Catalogue availability already takes precedence below. Avoid fetching provider data that
+  // would be discarded; still fetch title/genre/language metadata for the existing trust checks.
+  const needsProviders = localAvailability.status !== "verified" || process.env.FUN_DISABLE_METADATA_REUSE === "1";
   const [providerSet, omdbMain] = await Promise.all([
-    mainMovie ? tmdbProviders(mainMovie.id, mainMovie.media_type, countryCode) : Promise.resolve(null),
+    mainMovie && needsProviders ? tmdbProviders(mainMovie.id, mainMovie.media_type, countryCode) : Promise.resolve(null),
     !mainMovie?.poster_path ? omdbFetch(raw.title, raw.year) : Promise.resolve(null),
   ]);
 
@@ -309,6 +339,7 @@ export async function enrichRecommendation(
         providers: localAvailability.providers,
         country,
         verifiedAt: localAvailability.verifiedAt,
+        availabilitySource: "catalogue",
         notOnUserPlatforms,
       }
     : providers.length > 0
@@ -316,11 +347,12 @@ export async function enrichRecommendation(
         status: "verified",
         primary: providers.filter((p) => p.access === "subscription")[0]?.name ?? providers[0]?.name ?? "Available",
         note: providers.some((p) => p.access === "subscription")
-          ? `Available on ${providers.filter((p) => p.access === "subscription").slice(0, 2).map((p) => p.name).join(" · ")}`
-          : "Available to rent or buy",
+          ? `Listed on ${providers.filter((p) => p.access === "subscription").slice(0, 2).map((p) => p.name).join(" · ")}`
+          : "Listed for rent or purchase",
         providers,
         country,
         verifiedAt: new Date().toISOString(),
+        availabilitySource: "tmdb",
         notOnUserPlatforms,
       }
     : {

@@ -17,6 +17,7 @@ import Search from "lucide-react/dist/esm/icons/search.js";
 import Shield from "lucide-react/dist/esm/icons/shield.js";
 import Sparkles from "lucide-react/dist/esm/icons/sparkles.js";
 import { loadOnboarding, OnboardingData, platformOptionsForCountry } from "@/components/OnboardingFlow";
+import { loadActiveRecommendation } from "@/lib/recommendation-lifecycle";
 import {
   loadRecommendationFeedback,
   loadRecommendationHistory,
@@ -247,12 +248,7 @@ export default function StreamingFitPage() {
     setOnboarding(loadOnboarding());
     setFeedback(loadRecommendationFeedback());
     setHistory(loadRecommendationHistory());
-    try {
-      const raw = localStorage.getItem(recommendationStorageKey);
-      setSession(raw ? JSON.parse(raw) as RecommendationSession : null);
-    } catch {
-      setSession(null);
-    }
+    setSession(loadActiveRecommendation());
   }, []);
 
   const fits = useMemo(() => platformFits(onboarding, session, history, feedback, compareAll), [onboarding, session, history, feedback, compareAll]);

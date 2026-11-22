@@ -1,6 +1,7 @@
 import { hasNegatedConcept } from "@/lib/recommendation-utils";
 import { extractIntent, RecommendationIntent } from "@/lib/intent";
 import { IntentContract, RecommendRequest } from "./types";
+import { detectAvoidedLanguageKeys } from "@/lib/language-lane";
 
 function buildTasteFingerprint(userContext: string) {
   const hasReferenceIntent = /\b(similar|like|vibe|reminds me|same as|after watching|watching|reference)\b/i.test(userContext);
@@ -33,7 +34,7 @@ const LANGUAGE_NAMES: Array<[RegExp, string]> = [
 
 function detectRequestedLanguage(text: string): string | null {
   for (const [pattern, name] of LANGUAGE_NAMES) {
-    if (pattern.test(text)) return name;
+    if (pattern.test(text) && !hasNegatedConcept(text, pattern)) return name;
   }
   return null;
 }
@@ -315,6 +316,7 @@ Use this contract as the source of truth for what the user means. Do not re-infe
 const COUNT_WORDS: Record<number, string> = { 1: "ONE", 2: "TWO", 3: "THREE" };
 
 export function buildRecommendationPrompt(input: RecommendRequest, options?: { strictSubscription?: boolean; intentContract?: IntentContract; count?: number; failedTitles?: string[] }) {
+  const effectiveLanguagePreferences = input.languagePreferences?.filter(pref => !detectAvoidedLanguageKeys(input).some(key => pref.toLowerCase().includes(key)));
   const count = options?.count ?? 3;
   const includeDiscovery = input.responseDetail !== "core";
   const momentLabel = timeLabel(input.contextHint);
@@ -334,7 +336,7 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
   const contract = options?.intentContract;
   const contractClause = intentContractClause(contract);
   const country = input.country || "not provided";
-  const languagePreferences = input.languagePreferences?.length ? input.languagePreferences.join(", ") : "no preference";
+  const languagePreferences = effectiveLanguagePreferences?.length ? effectiveLanguagePreferences.join(", ") : "no preference";
   const platforms = input.platforms?.length ? input.platforms.join(", ") : "not specified";
   const mineMode = input.platformFilter === "mine";
   const indieMode = input.discoveryMode === "indie";
@@ -365,7 +367,7 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
   const selectedCrazinessLevel = typeof input.craziness === "number" ? input.craziness : null;
   const crazinessLevel = selectedCrazinessLevel ?? 1;
   const fearSignalPresent = /\b(shit scared|scare|scared|scary|terrify|terrified|terrifying|frighten|frightened|frightening|creep out|creepy|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i.test(userContext);
-  const fearNegatedOrAvoided = hasNegatedConcept(userContext, /\b(scary|scare|scared|terrify|terrified|frighten|frightened|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i) ||
+  const fearNegatedOrAvoided = intent.hardAvoids.includes("horror") || hasNegatedConcept(userContext, /\b(scary|scare|scared|terrify|terrified|terrifying|frighten|frightened|frightening|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i) ||
     (input.avoids ?? []).some((a) => /\b(horror|scary|scare|ghost|haunted|supernatural)\b/i.test(a));
   const explicitFearWant = intent.primaryIntents.includes("scare") || (fearSignalPresent && !fearNegatedOrAvoided);
   const intensityKeywordInText = /\b(horror|extreme|violent|brutal|disturbing|transgressive)\b/i.test(userContext);
@@ -377,10 +379,10 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
 
   // --- Language enforcement ---
   // At Bold/Unhinged with intensity signals: language is "prefer but escalate" — try it first, expand globally if no match
-  const languagePreferenceClause = input.languagePreferences?.length && !explicitLanguageRequest
+  const languagePreferenceClause = effectiveLanguagePreferences?.length && !explicitLanguageRequest
     ? highIntensityMode
-      ? `\n- Language preference (escalate if needed): User prefers ${input.languagePreferences.join(", ")} content. Try to find genuinely extreme/challenging picks in that language first. If ${input.languagePreferences.join("/")} cinema cannot satisfy this intensity level, expand to global cinema — and note in the oneLine or whyItFits that you went beyond the language preference because the intensity demanded it.`
-      : `\n- Language contract: The selected language preference is ${input.languagePreferences.join(", ")}. Because the user's request is broad and does not explicitly ask for another language, every requested pick MUST stay in that language/culture lane. Do not answer with English, Spanish, Korean, or generic global picks unless that language is selected.`
+      ? `\n- Language preference (escalate if needed): User prefers ${effectiveLanguagePreferences.join(", ")} content. Try to find genuinely extreme/challenging picks in that language first. If ${effectiveLanguagePreferences.join("/")} cinema cannot satisfy this intensity level, expand to global cinema — and note in the oneLine or whyItFits that you went beyond the language preference because the intensity demanded it.`
+      : `\n- Language contract: The selected language preference is ${effectiveLanguagePreferences.join(", ")}. Because the user's request is broad and does not explicitly ask for another language, every requested pick MUST stay in that language/culture lane. Do not answer with English, Spanish, Korean, or generic global picks unless that language is selected.`
     : "";
   const hardLanguageLock = detectedLanguage
     ? highIntensityMode
@@ -389,7 +391,7 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
     : "";
 
   const avoidObviousHindiHiddenGems = input.country?.toLowerCase() === "india" &&
-    input.languagePreferences?.some((language) => /hindi/i.test(language)) &&
+    effectiveLanguagePreferences?.some((language) => /hindi/i.test(language)) &&
     /hidden\s+gem|underrated|overlooked|buried|less\s+obvious/i.test(userContext)
     ? "\n- Hindi hidden-gem guardrail: do not default to the usual internet-safe Hindi recommendations such as Tumbbad, Masaan, Andhadhun, Drishyam, or Kahaani unless the user's exact mood makes one of them uniquely right. Prefer a fresher, less over-recommended Hindi-market match."
     : "";
@@ -467,6 +469,9 @@ export function buildRecommendationPrompt(input: RecommendRequest, options?: { s
   }
   if (avoidanceTiers.hard.length) {
     hardConstraintLines.push(`❌ Hard content gates — NEVER recommend content with or containing: ${avoidanceTiers.hard.join(", ")}. Taste Risk, craziness level, mood signals, novelty, and cinematic quality do NOT override these.`);
+  }
+  if (detectAvoidedLanguageKeys(input).length) {
+    hardConstraintLines.push(`Excluded original languages: ${detectAvoidedLanguageKeys(input).join(", ")}. These are NOT desired languages, even if also present in saved preferences. Every pick must avoid them.`);
   }
   // Draw from the full real exclusion history (excludedTitles, up to 200 client-side) rather than
   // just the short seenTitles/recentTitles recency slices — those alone only ever told the model
@@ -577,6 +582,7 @@ User contract:
 - Primary intent(s): ${intent.primaryIntents.length ? intent.primaryIntents.join(", ") : "infer from request"}
 - Interpreted intent contract: ${intentContract ? `${intentContract.primary} — ${intentContract.emotionalGoal}` : "not available"}
 - Hard avoids: ${intent.hardAvoids.length ? intent.hardAvoids.join(", ") : "none"}
+- Excluded original languages: ${detectAvoidedLanguageKeys(input).join(", ") || "none"}; do not reintroduce these in a retry.
 - Soft avoids: ${intent.softAvoids.length ? intent.softAvoids.join(", ") : "none"}
 - Requested format: ${intent.requestedFormat ?? "any"}
 - Runtime limit: ${intent.runtimeLimitMinutes ? `${intent.runtimeLimitMinutes} minutes` : "none"}

@@ -16,6 +16,7 @@ export type RecommendationIntent = {
 };
 
 const LANGUAGE_NAMES: Array<[RegExp, string]> = [
+  [/\benglish\b/i, "English"],
   [/\bhindi\b/i, "Hindi"],
   [/\bmalayalam\b/i, "Malayalam"],
   [/\btamil\b/i, "Tamil"],
@@ -38,7 +39,7 @@ function unique(values: string[]): string[] {
 
 function requestedLanguage(text: string): string | undefined {
   for (const [pattern, name] of LANGUAGE_NAMES) {
-    if (pattern.test(text)) return name;
+    if (pattern.test(text) && !hasNegatedConcept(text, pattern)) return name;
   }
   return undefined;
 }
@@ -70,7 +71,7 @@ export function extractIntent(input: RecommendRequest): RecommendationIntent {
   for (const avoid of input.avoids ?? []) {
     const value = avoid.toLowerCase().trim();
     if (/\bgore|gory|blood\b/.test(value)) hardAvoids.add("gore");
-    else if (/\bhorror|scary\b/.test(value)) hardAvoids.add("horror");
+    else if (/\b(horror|scary|scare|frightening|terrifying)\b/.test(value)) hardAvoids.add("horror");
     else if (/\bviolence|violent\b/.test(value)) hardAvoids.add("violence");
     else if (/\bsex|sexual|nudity|erotic|explicit\b/.test(value)) hardAvoids.add("sex");
     else if (/\bslow|slow burn|slow-burn\b/.test(value)) softAvoids.add("slow pacing");
@@ -88,7 +89,7 @@ export function extractIntent(input: RecommendRequest): RecommendationIntent {
     /\b(?:no|not|without|avoid|avoiding)\s+(?:any\s+)?body\s+horror\b/i.test(text) ||
     hasNegatedConcept(text, /\bbody\s+horror\b/i);
   if (specificallyAvoidsBodyHorror) hardAvoids.add("body horror");
-  if (!specificallyAvoidsSupernaturalHorror && !specificallyAvoidsBodyHorror && hasNegatedConcept(text, /\bhorror|scary|ghost|haunted|supernatural\b/i)) hardAvoids.add("horror");
+  if (!specificallyAvoidsSupernaturalHorror && !specificallyAvoidsBodyHorror && hasNegatedConcept(text, /\b(horror|scary|scare|scared|frighten|frightened|frightening|terrifying|creepy|ghost|haunted|supernatural)\b/i)) hardAvoids.add("horror");
   if (hasNegatedConcept(text, /\bsex|sexual|nudity|erotic|explicit|raunchy|awkward sexual content\b/i)) hardAvoids.add("sex");
 
   if (hasNegatedConcept(text, /\bheavy drama|heavy|trauma|depressing|bleak\b/i)) softAvoids.add("heavy drama");
@@ -96,7 +97,7 @@ export function extractIntent(input: RecommendRequest): RecommendationIntent {
   if (hasNegatedConcept(text, /\bslow|slow burn|slow-burn\b/i)) softAvoids.add("slow pacing");
   if (hasNegatedConcept(text, /\bromance|romantic|love story\b/i)) softAvoids.add("romance");
 
-  const familySafe = /\b(family safe|family-safe|with family|with parents|parents|kids|children)\b/i.test(text);
+  const familySafe = /\b(family[ -](?:safe|friendly)|with family|with parents|parents|kids|children)\b/i.test([text, input.viewingContext].filter(Boolean).join(" "));
   const workSafe = /\b(work safe|work-safe|at work|office|lunch break|between meetings)\b/i.test(text);
   if (familySafe) {
     hardAvoids.add("sex");
@@ -110,7 +111,7 @@ export function extractIntent(input: RecommendRequest): RecommendationIntent {
   }
 
   if (/\b(shit scared|scare|scared|scary|terrify|terrified|terrifying|frighten|frightened|frightening|creep out|creepy|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i.test(text) &&
-    !hasNegatedConcept(text, /\b(scary|scare|scared|terrify|terrified|frighten|frightened|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i)) {
+    !hardAvoids.has("horror") && !hasNegatedConcept(text, /\b(scary|scare|scared|terrify|terrified|terrifying|frighten|frightened|frightening|creepy|horror|dread|nightmare|haunted|ghost|possession|demonic|jump scare|jumpscare)\b/i)) {
     primaryIntents.add("scare");
   }
   if (/\b(make (me|my partner|us|them) cry|tearjerker|tear jerker|cry|crying|sob|weep|devastating|emotionally wreck|break my heart)\b/i.test(text) &&
@@ -126,7 +127,7 @@ export function extractIntent(input: RecommendRequest): RecommendationIntent {
   if (/\b(weird|strange|offbeat|surreal|absurd|bizarre|unusual)\b/i.test(text)) primaryIntents.add("weird");
   if (/\b(calm|calming|soothe|soothing|relax|relaxing|comfort|comforting|cozy|cosy|warm and easy|easy and warm|feel easy|feel at ease|asks nothing|nothing heavy|not more (sadness|loss|grief)|low.effort|no effort|gentle|holds? me gently|feel.good|feel good|feel better|take my mind off|hug in a movie|wrap(ped)? up|unwind)\b/i.test(text)) primaryIntents.add("comfort");
   if (/\b(gore|gory|bloody|splatter|body horror|extreme horror|violent horror)\b/i.test(text) &&
-    !hasNegatedConcept(text, /\b(gore|gory|blood|bloody|violence|violent)\b/i)) {
+    !hardAvoids.has("gore") && !hasNegatedConcept(text, /\b(gore|gory|blood|bloody|violence|violent)\b/i)) {
     primaryIntents.add("gore");
   }
 

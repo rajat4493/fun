@@ -1,3 +1,4 @@
+import { writeLearningRecord } from "@/lib/learning-storage";
 // Server-side, purely additive recommendation diagnostics — replaces needing an ad-hoc audit
 // script every time "is it getting better or worse" comes up. A near-identical feature existed
 // before (commit b40014b) but got swept into a 1210-line wholesale revert (e0a7ee0) alongside
@@ -14,6 +15,9 @@ export type RecommendationDiagnosticsEvent = {
   createdAt: string;
   sessionId?: string;
   mode: string;
+  recommendationCount?: number;
+  platformFilter?: string;
+  responseDetail?: string;
   country?: string;
   title: string;
   year: string;
@@ -26,30 +30,42 @@ export type RecommendationDiagnosticsEvent = {
   timings: Record<string, number>;
   retryCount: number;
   rejectionCount: number;
+  outcome?: "success" | "no-match";
+  rejectionReasons?: Record<string, number>;
 };
+
+// Fixed categories only: never copy provider output, raw prompts or candidate titles.
+export function summarizeRejectionReasons(rejections: Array<{ reasons: string[] }>): Record<string, number> {
+  const counts: Record<string, number> = {};
+  const exact = new Set(["excluded title", "horror excluded", "language not verified", "requested language mismatch", "excluded language", "animation not verified", "family rating not verified", "film requested", "series requested", "subscription match not verified", "explicit content exclusion"]);
+  for (const rejection of rejections) for (const reason of new Set(rejection.reasons)) {
+    const category = exact.has(reason) ? reason : reason.startsWith("avoidance:") ? "content avoidance"
+      : /^(parsedIntent:|intent:)/.test(reason) ? "intent mismatch"
+      : reason === "batch: duplicate title" ? "duplicate title" : "other trust rejection";
+    counts[category] = (counts[category] ?? 0) + 1;
+  }
+  return counts;
+}
 
 const MAX_STORED_DIAGNOSTICS = 3000;
 
-function credentials() {
-  return {
-    url: process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN,
-  };
-}
-
 export async function writeRecommendationDiagnostics(event: RecommendationDiagnosticsEvent): Promise<void> {
-  const { url, token } = credentials();
-  if (!url || !token) return;
   try {
-    await fetch(`${url}/pipeline`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify([
-        ["LPUSH", "fun:recommendation-diagnostics", JSON.stringify(event)],
-        ["LTRIM", "fun:recommendation-diagnostics", 0, MAX_STORED_DIAGNOSTICS - 1],
-      ]),
-      signal: AbortSignal.timeout(2000),
-    });
+    if (process.env.VERCEL_ENV === "preview" && event.outcome === "no-match") {
+      // Preview storage is disconnected. Never log the event object: it has identity fields.
+      const reasons: Record<string, number> = {};
+      for (const [reason, count] of Object.entries(event.rejectionReasons ?? {})) {
+        const safeReason = ["content avoidance", "intent mismatch", "duplicate title", "other trust rejection"].includes(reason)
+          ? reason : Object.keys(summarizeRejectionReasons([{ reasons: [reason] }]))[0];
+        if (Number.isFinite(count) && count > 0) reasons[safeReason] = (reasons[safeReason] ?? 0) + Math.min(1000, Math.floor(count));
+      }
+      console.warn("[FUN preview no-match]", {
+        outcome: "no-match",
+        totalMs: Number.isFinite(event.timings.totalMs) ? event.timings.totalMs : null,
+        rejectionReasons: reasons,
+      });
+    }
+    await writeLearningRecord("fun:recommendation-diagnostics", event, 2000, MAX_STORED_DIAGNOSTICS);
   } catch {
     // Fail open — diagnostics must never affect the user-facing response.
   }

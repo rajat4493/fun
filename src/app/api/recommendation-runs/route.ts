@@ -1,3 +1,4 @@
+import { writeLearningRecord } from "@/lib/learning-storage";
 import { after, NextResponse } from "next/server";
 import type { RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
 import { appendProfileRecommendation } from "@/lib/anonymous-profile-store";
@@ -113,6 +114,7 @@ function compactRecommendation(recommendation: Recommendation | undefined) {
       })),
       country: recommendation.whereToWatch.country,
       verifiedAt: recommendation.whereToWatch.verifiedAt,
+      availabilitySource: recommendation.whereToWatch.availabilitySource,
     },
     hiddenLayer: {
       headline: recommendation.hiddenLayer.headline,
@@ -124,23 +126,7 @@ function compactRecommendation(recommendation: Recommendation | undefined) {
 }
 
 async function writeToKv(event: RecommendationRunEvent): Promise<void> {
-  const url = process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
-  if (!url || !token) {
-    console.log("[FUN recommendation run]", JSON.stringify(event));
-    return;
-  }
-
-  // Pipeline endpoint with explicit command arrays — the path-style `/lpush/key` endpoint with an
-  // array body double-encodes the value (Upstash stores the whole array literal as one element),
-  // which silently corrupted every record here until this fix. Matches the working pattern already
-  // used by anonymous-profile-store.ts and rate-limit.ts.
-  await fetch(`${url}/pipeline`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify([["LPUSH", "fun:recommendation-runs", JSON.stringify(event)]]),
-    signal: AbortSignal.timeout(2000),
-  });
+  await writeLearningRecord("fun:recommendation-runs", event);
 }
 
 export async function POST(req: Request) {

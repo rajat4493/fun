@@ -13,3 +13,5 @@ out/
 # OS / editor
 .DS_Store
 *.tsbuildinfo
+.vercel
+.env*

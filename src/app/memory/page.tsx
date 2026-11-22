@@ -13,6 +13,8 @@ import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.js";
 import Shield from "lucide-react/dist/esm/icons/shield.js";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.js";
 import { ONBOARDING_KEY } from "@/components/OnboardingFlow";
+import { clearActiveRecommendation, loadActiveRecommendation } from "@/lib/recommendation-lifecycle";
+import { clearRecommendationDraft } from "@/lib/recommendation-draft";
 import {
   dismissedPostWatchPromptKey,
   feedbackStorageKey,
@@ -86,7 +88,7 @@ function readMemory(): MemoryState {
 
   return {
     onboarding: Boolean(localStorage.getItem(ONBOARDING_KEY)),
-    lastRecommendation: Boolean(localStorage.getItem(recommendationStorageKey)),
+    lastRecommendation: Boolean(loadActiveRecommendation()),
     recentTitles: readArray(recentRecommendationTitlesKey),
     seenTitles: readArray(seenTitlesKey),
     feedbackCount,
@@ -115,6 +117,8 @@ export default function MemoryPage() {
   const [premiumSubmitting, setPremiumSubmitting] = useState(false);
   const [premiumDone, setPremiumDone] = useState(false);
   const [showAllHistory, setShowAllHistory] = useState(false);
+  const [clearingMemory, setClearingMemory] = useState(false);
+  const [clearMemoryError, setClearMemoryError] = useState<string | null>(null);
 
   useEffect(() => {
     setMemory(readMemory());
@@ -137,18 +141,33 @@ export default function MemoryPage() {
 
   function clearKey(key: string) {
     localStorage.removeItem(key);
+    if (key === ONBOARDING_KEY || key === recommendationStorageKey) clearActiveRecommendation();
     setMemory(readMemory());
   }
 
-  function clearAll() {
+  async function clearAll() {
+    if (clearingMemory) return;
+    setClearingMemory(true);
+    setClearMemoryError(null);
     const sessionId = getOrCreateSessionId();
-    fetch("/api/profile-memory", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId }),
-    }).catch(() => {});
-    keys.forEach((key) => localStorage.removeItem(key));
-    setMemory(readMemory());
+    try {
+      const response = await fetch("/api/profile-memory", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok || (await response.json()).ok !== true) throw new Error("Deletion failed");
+      // Retain the device ID until the server acknowledges deletion, so a failed attempt is retryable.
+      keys.forEach((key) => localStorage.removeItem(key));
+      clearRecommendationDraft();
+      clearActiveRecommendation();
+      setMemory(readMemory());
+    } catch {
+      setClearMemoryError("Could not clear memory. Please check your connection and try again.");
+    } finally {
+      setClearingMemory(false);
+    }
   }
 
   function rateHistoryPick(reason: "perfect" | "good-not-perfect" | "not-for-me" | "quit-halfway" | "could-not-find", item: RecommendationHistoryItem) {
@@ -323,10 +342,13 @@ export default function MemoryPage() {
               <button
                 type="button"
                 onClick={clearAll}
+                disabled={clearingMemory}
                 className="inline-flex h-10 items-center gap-2 rounded-full border border-red-300/25 bg-red-500/[0.08] px-4 text-sm text-red-100 transition hover:bg-red-500/[0.14]"
               >
-                <Trash2 size={15} /> Clear all local memory
+                <Trash2 size={15} /> {clearingMemory ? "Clearing…" : "Clear all local memory"}
               </button>
+              {clearMemoryError && <p role="alert" className="mt-2 text-sm text-red-200">{clearMemoryError}</p>}
+              <p className="mt-2 text-xs text-white/45">Separate learning records are retained. <Link href="/privacy" className="underline">Privacy</Link></p>
             </div>
           </article>
 

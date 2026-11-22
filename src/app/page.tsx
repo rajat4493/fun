@@ -51,11 +51,14 @@ import {
   RecommendationSession,
   loadSeenTitles,
   recommendationStorageKey,
+  recommendationReadyEvent,
   rememberRecommendationHistory,
   rememberRecommendationTitles,
   savePostWatchFeedback,
 } from "@/lib/recommendation-session";
+import { recommendationTabStorage, beginRecommendationRequest, ownsRecommendationRequest, loadActiveRecommendation } from "@/lib/recommendation-lifecycle";
 import { captureRecommendationRun } from "@/lib/recommendation-analytics";
+import { clearRecommendationDraft, loadRecommendationDraft, saveRecommendationDraft } from "@/lib/recommendation-draft";
 import { CrazinessLevel, IntentContract, RecommendRequest, Recommendation, RecommendationDisplayState } from "@/lib/types";
 
 type Option = {
@@ -314,7 +317,7 @@ async function captureEvent(type: string, payload: Record<string, unknown>) {
 // same cross-page channel recommendation/page.tsx already polls) as it happens, and resolves with
 // the final payload once the terminal "result" line arrives — or throws on "error"/an empty stream,
 // same failure shape the existing catch block below already handles.
-async function readNdjsonResult(response: Response): Promise<unknown> {
+async function readNdjsonResult(response: Response, runId: string, sessionId?: string): Promise<unknown> {
   const reader = response.body?.getReader();
   if (!reader) throw new Error("Could not generate a pick.");
   const decoder = new TextDecoder();
@@ -329,12 +332,12 @@ async function readNdjsonResult(response: Response): Promise<unknown> {
       buffer = buffer.slice(newlineIndex + 1);
       if (!line) continue;
       const parsed = JSON.parse(line) as { type: string; stage?: string; payload?: unknown; error?: string };
-      if (parsed.type === "stage" && parsed.stage) {
-        localStorage.setItem("fun:loading-stage", parsed.stage);
+      if (parsed.type === "stage" && parsed.stage && ownsRecommendationRequest(runId, sessionId)) {
+        recommendationTabStorage.setItem("fun:loading-stage", parsed.stage);
       } else if (parsed.type === "result") {
         return parsed.payload;
       } else if (parsed.type === "error") {
-        throw new Error(parsed.error || "Recommendation failed. Check API keys or model output.");
+        throw new Error(parsed.error || "We couldn't finish your pick. Please try again.");
       }
     }
   }
@@ -388,10 +391,23 @@ export default function Home() {
   useEffect(() => {
     const saved = loadOnboarding();
     setOnboarding(saved);
+    const draft = loadRecommendationDraft();
+    if (draft) {
+      setInputMode(draft.inputMode);
+      setSelectedMoods(draft.selectedMoods);
+      setSelectedAvoids(draft.selectedAvoids);
+      setSelectedWants(draft.selectedWants);
+      setTime(draft.time);
+      setEnergy(draft.energy);
+      setRisk(draft.risk);
+      setPlatformFilter(draft.platformFilter);
+      setIndieMode(draft.indieMode);
+      setSelfText(draft.selfText);
+      setReference(draft.reference);
+    }
     try {
-      const raw = localStorage.getItem(recommendationStorageKey);
-      if (raw) {
-        const session = JSON.parse(raw) as Partial<RecommendationSession>;
+      const session = loadActiveRecommendation();
+      if (session) {
         if (session.recommendation && !isPlaceholderPick(session.recommendation)) {
           setPick(session.recommendation);
           if (
@@ -483,10 +499,12 @@ export default function Home() {
     if (!onboarding || loading) return;
     if (inputMode === "describe" && !selfText.trim() && !reference.trim()) return;
     setLoading(true);
+    const firstPickStarted = performance.now();
+    saveRecommendationDraft({ inputMode, selectedMoods, selectedAvoids, selectedWants, time, energy, risk, platformFilter, indieMode, selfText, reference });
 
     const recentTitles = (() => {
       try {
-        const raw = localStorage.getItem(recommendationStorageKey);
+        const raw = recommendationTabStorage.getItem(recommendationStorageKey);
         if (!raw) return loadCompactRecommendationMemoryTitles();
         const session = JSON.parse(raw) as { recommendation?: Recommendation; batch?: Recommendation[] };
         return [
@@ -535,13 +553,15 @@ export default function Home() {
       stream: true,
     };
 
-    localStorage.setItem("fun:loading", "true");
-    localStorage.setItem("fun:loading-started-at", String(Date.now()));
-    localStorage.removeItem("fun:recommendation-error");
+    beginRecommendationRequest(runId);
+    recommendationTabStorage.setItem("fun:loading", "true");
+    recommendationTabStorage.setItem("fun:loading-started-at", String(Date.now()));
+    recommendationTabStorage.removeItem("fun:recommendation-error");
     // Cleared here so a fresh ask never briefly shows the previous request's last stage before its
     // own first "understanding" line arrives.
-    localStorage.removeItem("fun:loading-stage");
+    recommendationTabStorage.removeItem("fun:loading-stage");
     captureEvent("ask", {
+      runId,
       country: requestInput.country,
       languagePreferences: requestInput.languagePreferences,
       platforms: requestInput.platforms,
@@ -581,14 +601,16 @@ export default function Home() {
         }
         throw new Error(message);
       }
-      const data = await readNdjsonResult(response) as Recommendation & {
+      const data = await readNdjsonResult(response, runId, requestInput.sessionId) as Recommendation & {
         _batch?: Recommendation[];
         _trust?: { displayState?: RecommendationDisplayState; batchComplete?: boolean; intentContract?: IntentContract };
       };
+      if (!ownsRecommendationRequest(runId, requestInput.sessionId)) return;
       const batch = data._batch ?? [data];
+      if (!batch.length || !batch[0]?.title) throw new Error("No matching recommendation was returned.");
       rememberRecommendationTitles(batch.map((item) => item.title));
       rememberRecommendationHistory(batch, requestInput, runId);
-      localStorage.setItem(
+      recommendationTabStorage.setItem(
         recommendationStorageKey,
         JSON.stringify(createRecommendationSession(
           batch[0],
@@ -602,6 +624,7 @@ export default function Home() {
       );
       captureEvent("recommendation", {
         runId,
+        firstResultMs: Math.round(performance.now() - firstPickStarted),
         title: batch[0].title,
         year: batch[0].year,
         confidence: batch[0].confidence,
@@ -612,6 +635,7 @@ export default function Home() {
         displayState: data._trust?.displayState,
         source: "initial",
       });
+      clearRecommendationDraft();
       captureRecommendationRun({
         runId,
         source: "initial",
@@ -621,7 +645,8 @@ export default function Home() {
         displayState: data._trust?.displayState,
       });
     } catch (error) {
-      localStorage.setItem(
+      if (!ownsRecommendationRequest(runId, requestInput.sessionId)) return;
+      recommendationTabStorage.setItem(
         "fun:recommendation-error",
         error instanceof Error && error.name === "AbortError"
           ? "The recommendation took too long. Please try again."
@@ -629,9 +654,12 @@ export default function Home() {
       );
     } finally {
       window.clearTimeout(timeout);
-      localStorage.removeItem("fun:loading");
-      localStorage.removeItem("fun:loading-started-at");
-      localStorage.removeItem("fun:loading-stage");
+      if (ownsRecommendationRequest(runId, requestInput.sessionId)) {
+        recommendationTabStorage.removeItem("fun:loading");
+        recommendationTabStorage.removeItem("fun:loading-started-at");
+        recommendationTabStorage.removeItem("fun:loading-stage");
+        window.dispatchEvent(new Event(recommendationReadyEvent));
+      }
       setLoading(false);
     }
   }
