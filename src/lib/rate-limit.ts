@@ -1,3 +1,5 @@
+import { redisRestConfig } from "@/lib/redis-env";
+
 // Cost/abuse safety net for the public /api/recommend endpoint — every request triggers a real
 // paid LLM call, so an unthrottled endpoint is a direct billing and availability risk. Framed as
 // "the free tier" ceiling: keyed by IP (server-trusted, unlike a client-generated sessionId that
@@ -19,10 +21,8 @@ const DAILY_WINDOW_SECONDS = 86400;
 export type RateLimitResult = { limited: false } | { limited: true; retryAfterSeconds: number };
 
 function credentials() {
-  return {
-    url: process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN,
-  };
+  const config = redisRestConfig();
+  return { url: config?.url, token: config?.token };
 }
 
 export function callerIp(req: Request): string {

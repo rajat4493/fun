@@ -1,3 +1,5 @@
+import { redisRestConfig } from "@/lib/redis-env";
+
 // Server-owned provenance: never trust a browser-supplied environment label.
 export function learningProvenance() {
   const environment = process.env.VERCEL_ENV === "production" ? "production"
@@ -7,8 +9,9 @@ export function learningProvenance() {
 
 // Call inside after(). Do not blindly retry LPUSH: a timed-out write may have succeeded.
 export async function writeLearningRecord(key: string, event: object, timeoutMs = 2000, limit?: number): Promise<void> {
-  const url = process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
+  const config = redisRestConfig();
+  const url = config?.url;
+  const token = config?.token;
   if (!url || !token) {
     console.warn("[FUN learning write skipped]", { key, ...learningProvenance(), reason: "storage-not-configured" });
     return;

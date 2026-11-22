@@ -1,3 +1,5 @@
+import { redisRestConfig } from "@/lib/redis-env";
+
 type ProfileRecommendation = {
   runId: string;
   source: string;
@@ -19,10 +21,8 @@ type ProfileFeedback = {
 };
 
 function credentials() {
-  return {
-    url: process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN,
-  };
+  const config = redisRestConfig();
+  return { url: config?.url, token: config?.token };
 }
 
 function profileKey(sessionId: string, suffix: string): string | null {

@@ -1,14 +1,12 @@
 import { NextResponse } from "next/server";
+import { redisRestConfig } from "@/lib/redis-env";
 
 export const dynamic = "force-dynamic";
 
 // A deliberately non-sensitive readiness probe. It verifies the minimum configuration needed to
 // protect the paid endpoint without revealing which value is absent to a public caller.
 export async function GET() {
-  const redisConfigured = Boolean(
-    (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) ||
-    (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN),
-  );
+  const redisConfigured = redisRestConfig() !== null;
   const ready = Boolean(
     process.env.OPENAI_API_KEY &&
     redisConfigured &&
